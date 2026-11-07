@@ -471,29 +471,39 @@ under `/tmp`.
 Drawing on the screen while you talk, or without talking — the design and
 its reasons are [the plan](plans/screen-annotate.md); this is how it works.
 
-- **Starting.** ⌃⌥⌘D, the tray's *Draw on the Screen and Talk*, or the pen
-  on the pill while it listens: a session with the voice, owned by the voice
-  client, which opens the microphone in the tap grammar or keeps the one it
-  has. The pencil beside the Kuru drawer's mic: a session with no voice,
-  owned by the window. One session at a time.
+- **Starting.** Every recording to Kuru, while Settings → Voice → Screen pen
+  → *Draw with every recording* is on (the default; `inkWithVoice` in
+  `desktop.json`): the clip's page asks for a pen as the microphone opens,
+  in the grammar the key began, so a hold still sends on the release. A pen
+  refused that way (no Screen Recording, no helper) is not asked for again
+  by a recording until one is started by hand. By hand: ⌃⌥⌘D, the tray's
+  *Draw on the Screen and Talk*, or the pen on the pill while it listens — a
+  session with the voice, owned by the voice client, which opens the
+  microphone in the tap grammar or keeps the one it has. The pencil beside
+  the Kuru drawer's mic: a session with no voice, owned by the window. One
+  session at a time.
 - **During.** An overlay over every display (`desktop/ink.js`,
-  `desktop/ink.html`), a red edge while the pen is down, and a toolbar on the
-  display it started on: the pen, Send or Done, ✕. ⌃⌥⌘D, Escape or the
-  toolbar lift the pen, and then clicks go to the apps again. Strokes less
+  `desktop/ink.html`) and a red edge while the pen is down. **The tools are
+  in the pill** when the floating pill owns the session — pen on and off,
+  red, blue, the highlighter, Undo, Snap, Send, ✕ — and otherwise (the
+  pencil, or a recording in the window with the talk key not hooked) in a
+  toolbar window of its own (`desktop/inkbar.html`), dragged by its
+  background and put back where it was left (`inkBar` in `desktop.json`).
+  ⌃⌥⌘D, Escape or the pen button lift the pen, and then clicks go to the
+  apps again. Strokes less
   than 1.2 s apart on one display are one mark; at its first pen-down the
   helper (`desktop/glance/`) takes that display without kururu's windows, and
   when it is over draws the ink on it and writes a crop and the whole display
   shrunk. Ink fades three seconds after its pen lifted.
-- **Ending.** With the voice: the talk key's tap, the pill's Send or the
-  toolbar's — the clip's page asks main for the ink, posts it to
+- **Ending.** With the voice: the talk key's release or tap, the pill's Send
+  or the toolbar's — the clip's page asks main for the ink, posts it to
   `/api/marks` (`kind: "screen"`), then posts the clip naming the set, and the
   outbox hears it with word times and sends Kuru one line with each mark in
   the words (`shared/ink.ts`'s `alignMarks`). Without: Done or the pencil
   puts the header and a line per mark into the box as chips. ✕, Escape with
   the pen up, the owner's page going, or the helper dying end it with
   nothing kept.
-- **Phase 2's pen.** Two pens (red, blue) and a highlighter on the
-  toolbar, each stroke keeping what it was drawn with; **Undo** and ⌘Z with
+- **Phase 2's pen.** Two pens (red, blue) and a highlighter, each stroke keeping what it was drawn with; **Undo** and ⌘Z with
   the pen down take the last mark back, its pictures with it; **Snap** and
   ⌃⌥⌘S (only while a session is on) take the display under the pointer as a
   mark with no ink, at that moment in the words; the right ⌘ held alone puts
@@ -502,7 +512,9 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   an arrow and its tip, underlined, highlighted — and the label leads with
   it. A mark on kururu's own window says what it was on, asked of the page
   under it (`web/src/whatat.ts`): `kururu: agent "…"`, a card's code and
-  title, a document and its heading; on a kururu browser tab, the element
+  title, a document and its heading, `kururu: Kuru's drawer, button
+  "Search the conversation"` or a line of the conversation by whose, when
+  and its first words, the pill and its control; on a kururu browser tab, the element
   under it as a browser mark would (`TabMarks.elementAt`). A recording that
   rolls at five minutes takes the marks so far with its clip and keeps the
   pen for the next.

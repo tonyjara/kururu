@@ -19,7 +19,7 @@ import { useSyncExternalStore } from "react";
 import { desktop, type InkEvent, type InkState } from "./desktop";
 import { insertInKuru } from "./kuru";
 import * as api from "./session";
-import { cancelTalk, finishTalk, penTalk, voiceError } from "./voice";
+import { cancelTalk, finishTalk, penRefused, penTalk, setPenWithVoice, voiceError } from "./voice";
 
 const OFF: InkState = { on: false, id: null, voice: false, pen: false, marks: 0, ending: false };
 
@@ -117,7 +117,9 @@ function onEvent(event: InkEvent): void {
       } else if (event.why) set({ note: `The pen stopped: ${event.why}.` });
       return;
     case "refused":
-      if (event.voice) voiceError("No pen on the screen.", event.why);
+      if (event.voice) {
+        if (!penRefused()) voiceError("No pen on the screen.", event.why);
+      }
       else set({ note: event.why });
       return;
   }
@@ -127,6 +129,8 @@ function onEvent(event: InkEvent): void {
 export function installInk(): () => void {
   const ink = desktop()?.ink;
   if (!ink) return () => {};
+  // Only a window that says it has the setting: one from before it keeps the pen to the keys and buttons.
+  setPenWithVoice(() => ui.state.withVoice === true);
   void ink.state().then((state) => set({ state }));
   return ink.onEvent(onEvent);
 }

@@ -101,6 +101,14 @@ export interface InkState {
   color?: "red" | "blue";
   /** The hook's hold-to-draw key has the pen down. */
   held?: boolean;
+  /**
+   * Where the session's tools are: the floating pill, which owns it, or the
+   * toolbar's own window. Missing from a window from before the tools moved,
+   * whose toolbar is inside an overlay.
+   */
+  tools?: "pill" | "bar";
+  /** Every recording starts with the pen down (Settings → Voice → Screen pen). Missing from a window from before the setting. */
+  withVoice?: boolean;
 }
 
 /**
@@ -143,6 +151,8 @@ export interface DesktopInk {
    * with null; `custom` says whether it is the user's.
    */
   deny?(list?: string[] | null): Promise<{ list: string[]; custom: boolean }>;
+  /** Whether every recording starts with the pen down: read with no argument, saved with one. */
+  withVoice?(on?: boolean): Promise<boolean>;
   /** The owner's: let the session go with nothing kept. */
   cancel(id: string): void;
   onEvent(listener: (event: InkEvent) => void): () => void;

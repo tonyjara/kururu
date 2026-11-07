@@ -15,32 +15,51 @@
  * whatever they hold — the sidebar, the drawers, Settings — are named by
  * their class here, which costs nothing in the components that draw them.
  * Nothing here holds or returns an id; a title is what an agent reads.
+ *
+ * **Kuru's drawer and the pill say which part of them** (2026-11-06): a mark
+ * on the drawer's header came out as "the screen" once, and "Kuru's drawer"
+ * alone would not have been much better when the ink was round one button
+ * of five. So the drawer names its header, its search, a line in the
+ * conversation — whose, when, and its first words — the box and the live
+ * line, and the pill what it is saying; the control under the ink is named
+ * as everywhere, by its label and never a field's value.
  */
 import type { KururuAt } from "../../shared/ink";
 
-/** The parts of the window named by what they are, innermost first in the DOM's order of nesting. */
-const PLACES: readonly [string, string][] = [
+/**
+ * The parts of the window named by what they are, innermost first in the
+ * DOM's order of nesting, and for some the part of them under the point.
+ */
+const PLACES: readonly [string, string, ((el: Element) => string)?][] = [
+  [".voice-pill", "Kuru's voice pill", pillPart],
   [".st-dialog", "Settings"],
   [".needs-drawer", "the Needs you drawer"],
-  [".kuru-drawer", "Kuru's drawer"],
+  [".kuru-drawer", "Kuru's drawer", drawerPart],
   [".files", "the file tree"],
   [".sidebar", "the sidebar"],
   [".statusbar", "the bottom bar"],
 ];
 
-const CONTROLS = "button, a[href], input, textarea, select, [role=button], [role=tab], [role=menuitem], [role=link], [role=checkbox], [role=switch]";
+const CONTROLS =
+  "button, a[href], input, textarea, select, [contenteditable=''], [contenteditable=true], [role=button], [role=tab], [role=menuitem], [role=link], [role=checkbox], [role=switch], [role=textbox], [role=combobox]";
 
 const flat = (text: string | null | undefined, max: number): string => {
   const one = (text ?? "").replace(/\s+/g, " ").trim();
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 };
 
-/** The control under the point, by its words: `button "Send"`. Never a field's value. */
+/** The control under the point, by its words: `button "Send"`. Never a field's value — an editable box's text is its value too. */
 function controlOf(el: Element): string {
   const control = el.closest(CONTROLS);
   if (!control) return "";
   const tag = control.getAttribute("role") || control.tagName.toLowerCase();
-  const field = control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement;
+  const field =
+    control instanceof HTMLInputElement ||
+    control instanceof HTMLTextAreaElement ||
+    control instanceof HTMLSelectElement ||
+    (control instanceof HTMLElement && control.isContentEditable) ||
+    tag === "textbox" ||
+    tag === "combobox";
   const words = flat(control.getAttribute("aria-label") || control.getAttribute("title") || (field ? control.getAttribute("placeholder") : control.textContent), 80);
   return words ? `${tag} "${words.replace(/"/g, "'")}"` : tag;
 }
@@ -54,6 +73,43 @@ function headingAbove(root: Element, y: number): string {
     else break;
   }
   return best;
+}
+
+/** Which part of Kuru's drawer a point is on. */
+function drawerPart(el: Element): string {
+  if (el.closest(".kuru-head")) return "its header";
+  if (el.closest(".kuru-search")) return "its search";
+  const line = el.closest(".kuru-item, .kuru-notice");
+  if (line) return lineOf(line);
+  if (el.closest(".kuru-composer")) return "the box you write to Kuru in";
+  if (el.closest(".kuru-live, .kuru-live-off-box")) return "the line saying what Kuru is doing";
+  if (el.closest(".kuru-list")) return "the conversation";
+  return "";
+}
+
+/**
+ * A line of the conversation: whose, when, and its first words — a folded
+ * line's one row, or the words under its meta row — so "this one" in what
+ * was said can be found again in a long history.
+ */
+function lineOf(line: Element): string {
+  const who = line.classList.contains("kuru-you") ? "your message" : line.classList.contains("kuru-reply") ? "Kuru's reply" : "a notice";
+  const when = flat(line.querySelector("time")?.textContent, 24);
+  let words = line.querySelector(".kuru-fold-line")?.textContent ?? "";
+  if (!words.trim()) {
+    for (const child of line.children) {
+      if (child.classList.contains("kuru-meta") || child.tagName === "BUTTON") continue;
+      words += ` ${child.textContent ?? ""}`;
+    }
+  }
+  const first = flat(words, 80);
+  return `${who}${when ? ` at ${when}` : ""}${first ? ` "${first.replace(/"/g, "'")}"` : ""}`;
+}
+
+/** What the pill is saying, when it is saying something: a reply's words, or what went wrong. */
+function pillPart(el: Element): string {
+  const said = flat(el.closest(".voice-pill")?.querySelector(".voice-text")?.textContent, 80);
+  return said ? `saying "${said.replace(/"/g, "'")}"` : "";
 }
 
 /** What is at a point of the window, in CSS pixels; null over nothing. */
@@ -73,8 +129,8 @@ export function whatAt(x: number, y: number): KururuAt | null {
     }
     return { what, name: flat(marked.getAttribute("data-ink-name"), 200), detail, workspace: flat(workspace, 120), element };
   }
-  for (const [selector, what] of PLACES) {
-    if (el.closest(selector)) return { what, name: "", detail: "", workspace: "", element };
+  for (const [selector, what, part] of PLACES) {
+    if (el.closest(selector)) return { what, name: "", detail: part ? flat(part(el), 160) : "", workspace: "", element };
   }
   return { what: "the window", name: "", detail: "", workspace: "", element };
 }

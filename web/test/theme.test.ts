@@ -91,6 +91,10 @@ const NOT_THEME = new Set([
   "--quote-level",
   // The same reading on Kuru's own mic while it dictates into the box, written by `KuruDrawer.tsx`.
   "--mic-level",
+  // A screen pen's colour on its swatch in the pill, written by `VoicePill.tsx`
+  // from the ink's own colours: what the ink is drawn with, which no theme may
+  // change, or the swatch would not match the line it draws.
+  "--swatch",
   // How wide the sidebar has been dragged. A view state this browser holds and
   // `App.tsx` writes onto the root element — a length, not a colour and not a
   // shape, and nothing a theme or a skin has any business having an opinion on.

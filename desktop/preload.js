@@ -287,6 +287,8 @@ if (isPicker) {
       undo: () => ipcRenderer.send("kururu:ink-undo"),
       snap: () => ipcRenderer.send("kururu:ink-snap"),
       style: (style) => ipcRenderer.send("kururu:ink-style", style && typeof style === "object" ? { tool: String(style.tool), color: String(style.color) } : null),
+      /** Whether every recording starts with the pen down: read with no argument, saved with one. */
+      withVoice: (on) => ipcRenderer.invoke("kururu:ink-with-voice", typeof on === "boolean" ? on : null),
       /** The never-capture list: read with no argument, saved with a list, back to the pen's own with null. */
       deny: (list) => ipcRenderer.invoke("kururu:ink-deny", Array.isArray(list) ? list.map(String) : list === null ? null : undefined),
       cancel: (id) => ipcRenderer.send("kururu:ink-cancel", String(id)),

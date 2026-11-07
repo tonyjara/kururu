@@ -44,6 +44,25 @@
  * every still and their titles unread; a mark on kururu's own window asks
  * the page under it what is there (`whatAt`); and a recording that rolls at
  * five minutes takes the marks so far with its clip and keeps the pen.
+ *
+ * **The tools are where the pill is** (2026-11-06, asked for by the user):
+ * the toolbar that sat at the top of the session's first display could not
+ * be moved, and the pill — which can — had a pen and Send and nothing else.
+ * So a session the floating pill owns has every tool in the pill, and any
+ * other — the drawer's pencil, or a recording in the window while the talk
+ * key is not hooked — gets the toolbar as a small window of its own
+ * (`inkbar.html`), dragged where it is wanted and put back there next time.
+ * Not the pill shown for it: the pill's page is the one voice client on
+ * this Mac while it exists, and a pill made for a pen would be a second
+ * microphone and a second mouth. A window of its own over the overlays
+ * also needs none of the overlay's forwarding to take a click with the pen
+ * up, which the toolbar inside an overlay did.
+ *
+ * **What a mark was drawn on is asked at the ink, not where it began.** A
+ * line drawn down onto a button starts on whatever is above the button —
+ * the desktop, once, which is a mark on nothing — so the window under the
+ * ink's centre is asked for when the burst closes, then under where the pen
+ * last lifted, and only then the one under the first pen-down.
  */
 const { BrowserWindow, globalShortcut, screen, shell } = require("electron");
 const { spawn } = require("node:child_process");
@@ -73,6 +92,8 @@ const COLORS = ["red", "blue", "yellow"];
 const DENY_DEFAULT = ["com.1password.1password", "com.agilebits.onepassword7", "com.apple.keychainaccess", "com.apple.Passwords", "com.bitwarden.desktop", "com.apple.MobileSMS"];
 /** How long an owner told to send has to ask for the bundle before the overlays are taken down anyway. */
 const SEND_ANSWER_MS = 15_000;
+/** Where the toolbar goes when it has never been dragged: this far below the top of the display's work area. */
+const BAR_TOP = 12;
 /** How long the helper has to answer one request. A still is tens of milliseconds; a 5K one inked, a few hundred. */
 const HELPER_ANSWER_MS = 8_000;
 /** Where macOS keeps the switch the helper needs. */
@@ -93,18 +114,26 @@ class Ink extends EventEmitter {
    * @param {string} options.helperPath  the compiled helper, missing from a build without Xcode
    * @param {string} options.pagePath  `ink.html`
    * @param {string} options.preloadPath  `inkpreload.js`
+   * @param {string} [options.barPath]  `inkbar.html`, the toolbar for a session the floating pill does not own
    * @param {() => import("electron").WebContents | null} options.voiceClient  the page that holds the microphone now
    * @param {() => import("electron").WebContents | null} options.mainWindow  the main window's page, whose box a session with no voice fills
    * @param {() => import("electron").BrowserWindow | null} options.pill  the floating pill's panel, kept over the ink and out of the pictures
    * @param {() => string[]} [options.denyList]  bundle ids whose windows are left out of every still
    * @param {((global: {x: number, y: number}, under: any) => Promise<any>) | null} [options.whatAt]  what kururu's own window says is at a point, or null
+   * @param {() => boolean} [options.withVoice]  whether every recording starts with the pen down (Settings → Voice → Screen pen)
+   * @param {() => any} [options.barAt]  where the toolbar was last dragged to, `{x, y}`, or nothing
+   * @param {(at: {x: number, y: number}) => void} [options.saveBarAt]
    * @param {boolean} options.debug
    */
-  constructor({ helperPath, pagePath, preloadPath, voiceClient, mainWindow, pill, denyList = () => DENY_DEFAULT, whatAt = null, debug = false }) {
+  constructor({ helperPath, pagePath, preloadPath, barPath = "", voiceClient, mainWindow, pill, denyList = () => DENY_DEFAULT, whatAt = null, withVoice = () => true, barAt = () => null, saveBarAt = () => {}, debug = false }) {
     super();
     this.helperPath = helperPath;
     this.pagePath = pagePath;
     this.preloadPath = preloadPath;
+    this.barPath = barPath;
+    this.withVoice = withVoice;
+    this.barAt = barAt;
+    this.saveBarAt = saveBarAt;
     this.voiceClient = voiceClient;
     this.mainWindow = mainWindow;
     this.pill = pill;
@@ -122,23 +151,50 @@ class Ink extends EventEmitter {
     this.registered = false;
     /** A start waiting on the helper's word about Screen Recording; a second press then is the same start. */
     this.starting = false;
+    /** When this file last moved the toolbar itself, so its own move is not taken for a drag. */
+    this.barPlacedAt = 0;
+    this.barMoveTimer = null;
   }
 
   // --- what the pages are told ----------------------------------------------------
 
+  /**
+   * The session as every page draws it. `tools` says where its buttons are
+   * — the floating pill's, or the toolbar's window — and `withVoice` is the
+   * setting, there whether a session is on or not.
+   */
   state() {
     const s = this.session;
+    const withVoice = this.withVoiceNow();
     return s
-      ? { on: true, id: s.id, voice: s.voice, pen: s.pen, marks: s.bursts.length, ending: s.ending, tool: s.tool, color: s.color, held: s.held !== null }
-      : { on: false, id: null, voice: false, pen: false, marks: 0, ending: false, tool: "pen", color: "red", held: false };
+      ? { on: true, id: s.id, voice: s.voice, pen: s.pen, marks: s.bursts.length, ending: s.ending, tool: s.tool, color: s.color, held: s.held !== null, tools: s.inPill ? "pill" : "bar", withVoice }
+      : { on: false, id: null, voice: false, pen: false, marks: 0, ending: false, tool: "pen", color: "red", held: false, tools: "bar", withVoice };
   }
 
-  /** The owner, every overlay and every other window hear what the session is now: the drawer's pencil and the pill's pen draw from it. */
+  withVoiceNow() {
+    try {
+      return this.withVoice() !== false;
+    } catch {
+      return true;
+    }
+  }
+
+  /** The windows of the pen itself — every overlay and the toolbar — which hear the state on their own channel. */
+  penWindows() {
+    const s = this.session;
+    if (!s) return [];
+    const out = [...s.overlays.values()];
+    if (s.bar) out.push(s.bar);
+    return out.filter((w) => !w.isDestroyed());
+  }
+
+  /** The owner, every overlay, the toolbar and every other window hear what the session is now: the drawer's pencil and the pill's tools draw from it. */
   changed() {
     const state = this.state();
+    const pen = this.penWindows();
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed()) continue;
-      if (this.session?.overlays && [...this.session.overlays.values()].includes(win)) win.webContents.send("ink:state", state);
+      if (pen.includes(win)) win.webContents.send("ink:state", state);
       else win.webContents.send("kururu:ink", { ev: "state", ...state });
     }
     this.emit("change", state);
@@ -301,7 +357,6 @@ class Ink extends EventEmitter {
         open: null,
         sendTimer: null,
         ending: false,
-        hoveringBar: new Set(),
         watch: null,
         tool: "pen",
         color: "red",
@@ -309,10 +364,15 @@ class Ink extends EventEmitter {
         made: 0,
         /** The pen as it was before hold-to-draw put it down, while the key is held; null otherwise. */
         held: null,
+        /** The tools are in the floating pill, which owns the session; otherwise in `bar`. */
+        inPill: this.pillOwns(voice, owner),
+        /** @type {import("electron").BrowserWindow | null} */
+        bar: null,
       };
       this.watchOwner(owner);
       this.watchDisplays();
       this.makeOverlays();
+      if (!this.session.inPill) this.makeBar();
       this.raisePill(true);
       this.registerEscape(true);
       this.registerSnap(true);
@@ -322,6 +382,12 @@ class Ink extends EventEmitter {
     } finally {
       this.starting = false;
     }
+  }
+
+  /** Whether the floating pill's page owns a session, and so draws its tools: a recording while the pill is the voice client. */
+  pillOwns(voice, owner) {
+    const pill = this.pill();
+    return voice && Boolean(pill && !pill.isDestroyed() && pill.webContents.id === owner.id);
   }
 
   /** The owner's page going is the session going: a reload, a crash, a navigation or the window closed. */
@@ -396,7 +462,7 @@ class Ink extends EventEmitter {
       // Made at the bounds, and set there again: macOS keeps a new window
       // under the menu bar unless it is told otherwise after it exists.
       win.setBounds(display.bounds);
-      win.setIgnoreMouseEvents(!session.pen, { forward: true });
+      win.setIgnoreMouseEvents(!session.pen);
       win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       win.webContents.on("will-navigate", (event) => event.preventDefault());
       if (this.debug) win.webContents.on("console-message", (event, ...legacy) => console.log(`kururu ink: ${event?.message ?? legacy[1]}`));
@@ -409,11 +475,144 @@ class Ink extends EventEmitter {
         if (this.session !== session || win.isDestroyed()) return;
         win.webContents.send("ink:state", this.state());
         win.showInactive();
+        this.raiseBar();
         this.raisePill(true);
       });
-      void win.loadFile(this.pagePath, { query: { display: String(display.id), home: display.id === session.home ? "1" : "0", voice: session.voice ? "1" : "0" } });
+      void win.loadFile(this.pagePath, { query: { display: String(display.id) } });
       session.overlays.set(display.id, win);
     }
+  }
+
+  /**
+   * The toolbar, for a session whose tools are not in the pill: a small
+   * panel of its own over the overlays, never focused, dragged by its own
+   * background, shown once its page has said how big it is — and put where
+   * it was last dragged to, or at the top of the display the session began
+   * on. Its renderer going is not the session's end, as an overlay's is:
+   * the keys, the pill and the drawer still end it, and nothing of the bar
+   * can hold the mouse.
+   */
+  makeBar() {
+    const session = this.session;
+    if (!session || !this.barPath) return;
+    const bar = new BrowserWindow({
+      width: 520,
+      height: 48,
+      show: false,
+      frame: false,
+      transparent: true,
+      hasShadow: false,
+      resizable: false,
+      movable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      focusable: false,
+      acceptFirstMouse: true,
+      alwaysOnTop: true,
+      type: "panel",
+      webPreferences: {
+        preload: this.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: false,
+      },
+    });
+    bar.setAlwaysOnTop(true, "screen-saver");
+    bar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    bar.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    bar.webContents.on("will-navigate", (event) => event.preventDefault());
+    if (this.debug) bar.webContents.on("console-message", (event, ...legacy) => console.log(`kururu ink bar: ${event?.message ?? legacy[1]}`));
+    bar.webContents.once("did-finish-load", () => {
+      if (this.session === session && !bar.isDestroyed()) bar.webContents.send("ink:state", this.state());
+    });
+    bar.on("moved", () => {
+      // Only a drag is remembered: this file's own placing moves it too, and
+      // macOS may say so a moment after the call that did it.
+      if (Date.now() - this.barPlacedAt < 500 || bar.isDestroyed()) return;
+      clearTimeout(this.barMoveTimer);
+      this.barMoveTimer = setTimeout(() => {
+        if (bar.isDestroyed()) return;
+        const [x, y] = /** @type {[number, number]} */ (bar.getPosition());
+        this.saveBarAt({ x, y });
+      }, 300);
+    });
+    session.bar = bar;
+    session.barShown = false;
+    void bar.loadFile(this.barPath, { query: { voice: session.voice ? "1" : "0" } });
+  }
+
+  /** The toolbar's page measured itself: the window is that size, and shown where it belongs the first time. */
+  barSize(sender, raw) {
+    const session = this.session;
+    const bar = session?.bar;
+    if (!bar || bar.isDestroyed() || sender.id !== bar.webContents.id) return;
+    const width = Math.ceil(Number(raw?.width));
+    const height = Math.ceil(Number(raw?.height));
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 40 || height < 20 || width > 1600 || height > 400) return;
+    this.barPlacedAt = Date.now();
+    bar.setSize(width, height);
+    if (!session.barShown) {
+      this.placeBar(session);
+      session.barShown = true;
+      bar.showInactive();
+      this.raiseBar();
+    }
+  }
+
+  /**
+   * Where the toolbar was last dragged to, while that is still wholly on a
+   * display — a display unplugged since is not a place — or the top middle
+   * of the display the session began on.
+   */
+  placeBar(session) {
+    const bar = session.bar;
+    if (!bar || bar.isDestroyed()) return;
+    this.barPlacedAt = Date.now();
+    const [width, height] = /** @type {[number, number]} */ (bar.getSize());
+    let saved = null;
+    try {
+      saved = this.barAt();
+    } catch {
+      saved = null;
+    }
+    const x = Number(saved?.x);
+    const y = Number(saved?.y);
+    const fits =
+      Number.isFinite(x) &&
+      Number.isFinite(y) &&
+      screen.getAllDisplays().some((d) => x >= d.workArea.x && y >= d.workArea.y && x + width <= d.workArea.x + d.workArea.width && y + height <= d.workArea.y + d.workArea.height);
+    if (fits) {
+      bar.setPosition(Math.round(x), Math.round(y));
+      return;
+    }
+    const display = screen.getAllDisplays().find((d) => d.id === session.home) ?? screen.getPrimaryDisplay();
+    const area = display.workArea;
+    bar.setPosition(Math.round(area.x + (area.width - width) / 2), Math.round(area.y + BAR_TOP));
+  }
+
+  /** The toolbar over the overlays, at their level: made after them, and raised again whenever one is shown. */
+  raiseBar() {
+    const bar = this.session?.bar;
+    if (bar && !bar.isDestroyed() && this.session.barShown) bar.moveTop();
+  }
+
+  /** Whether a page message came from the toolbar of the session that is on. */
+  isBar(sender) {
+    const bar = this.session?.bar;
+    return Boolean(bar && !bar.isDestroyed() && bar.webContents.id === sender.id);
+  }
+
+  /** A press on the pen's own buttons, from the toolbar or an overlay: `pen`, `done`, `drop`, `undo` or `snap`. */
+  press(sender, what) {
+    if (!this.session || (!this.isBar(sender) && !this.overlayOf(sender))) return;
+    if (what === "pen") this.setPen(!this.session.pen);
+    else if (what === "done") this.send(sender);
+    else if (what === "drop") this.drop(sender);
+    else if (what === "undo") this.undo();
+    else if (what === "snap") this.snap();
   }
 
   /** The overlay a page message came from, and its display, or null for any other sender. */
@@ -429,11 +628,11 @@ class Ink extends EventEmitter {
     return null;
   }
 
-  /** The windows a still leaves out: every overlay, and the pill. */
+  /** The windows a still leaves out: every overlay, the toolbar, and the pill. */
   ours() {
     const out = [];
-    for (const win of this.session?.overlays.values() ?? []) {
-      const n = !win.isDestroyed() ? windowNumber(win) : null;
+    for (const win of this.penWindows()) {
+      const n = windowNumber(win);
       if (n !== null) out.push(n);
     }
     const pill = this.pill();
@@ -462,7 +661,7 @@ class Ink extends EventEmitter {
     if (!session || session.ending) return;
     session.pen = on;
     for (const win of session.overlays.values()) {
-      if (!win.isDestroyed()) win.setIgnoreMouseEvents(!session.pen && !session.hoveringBar.has(win.webContents.id), { forward: true });
+      if (!win.isDestroyed()) win.setIgnoreMouseEvents(!session.pen);
     }
     this.registerEscape(session.pen);
     if (!session.pen) this.closeBurst();
@@ -594,6 +793,10 @@ class Ink extends EventEmitter {
       done: null,
       facts: null,
       undone: false,
+      /** Where the burst began, on the whole desktop, and what the helper is told to leave out — for asking again at the ink. */
+      start: global,
+      exclude,
+      deny,
     };
     burst.secure = this.ask({ op: "secure" }).then((a) => a.secure === true);
     burst.shot = burst.secure.then((secure) => (secure ? { ok: false, error: "secure" } : this.ask({ op: "shot", id, display: display.id, bounds: display.bounds, exclude, deny })));
@@ -675,14 +878,38 @@ class Ink extends EventEmitter {
       });
       return { crop: answer.crop ? crop : null, frame: answer.frame ? frame : null };
     });
-    const centre = burst.snap ? burst.at : { x: burst.bounds.x + box.x + box.width / 2, y: burst.bounds.y + box.y + box.height / 2 };
-    burst.facts = this.whatAt ? burst.under.then((under) => this.factsAt(centre, under)) : Promise.resolve(null);
+    burst.where = burst.snap ? burst.under.then((under) => ({ under, at: burst.at })) : this.underInk(burst, box);
+    burst.facts = this.whatAt ? burst.where.then(({ under, at }) => this.factsAt(at, under)) : Promise.resolve(null);
   }
 
-  /** What kururu's page under a point says is there, or nothing — never later than `WHAT_AT_MS`. */
+  /**
+   * The window the ink was drawn on, and the point it was found at: under
+   * the ink's centre, else where the pen last lifted, else where it first
+   * went down — the first that has a window. A circle's middle is what it
+   * circles; a line drawn down onto a button ends on the button and may
+   * begin on the desktop, which is no window at all.
+   */
+  async underInk(burst, box) {
+    const { x, y } = burst.bounds;
+    const last = burst.strokes[burst.strokes.length - 1];
+    const end = last?.[last.length - 1];
+    const points = [{ x: x + box.x + box.width / 2, y: y + box.y + box.height / 2 }];
+    if (end) points.push({ x: x + end[0], y: y + end[1] });
+    for (const at of points) {
+      const answer = await this.ask({ op: "under", x: at.x, y: at.y, exclude: burst.exclude, deny: burst.deny });
+      if (answer && typeof answer.app === "string" && answer.app) return { under: answer, at };
+    }
+    return { under: await burst.under, at: burst.start };
+  }
+
+  /**
+   * What kururu's page under a point says is there, or nothing — never later
+   * than `WHAT_AT_MS`. Asked even when the helper found no window, since the
+   * pill is left out of what the helper sees and may be what was circled.
+   */
   factsAt(global, under) {
     const ask = this.whatAt;
-    if (!ask || !under) return Promise.resolve(null);
+    if (!ask) return Promise.resolve(null);
     let timer;
     return Promise.race([
       Promise.resolve()
@@ -754,7 +981,7 @@ class Ink extends EventEmitter {
   send(from) {
     const session = this.session;
     if (!session || session.ending) return;
-    if (from && from.id !== session.owner.id && !this.overlayOf(from) && !this.isOurs(from)) return;
+    if (from && from.id !== session.owner.id && !this.overlayOf(from) && !this.isBar(from) && !this.isOurs(from)) return;
     this.closeBurst();
     this.tellOwner(session.owner, { ev: "send", id: session.id, voice: session.voice });
     clearTimeout(session.sendTimer);
@@ -767,7 +994,7 @@ class Ink extends EventEmitter {
   drop(from) {
     const session = this.session;
     if (!session) return;
-    if (from && from.id !== session.owner.id && !this.overlayOf(from) && !this.isOurs(from)) return;
+    if (from && from.id !== session.owner.id && !this.overlayOf(from) && !this.isBar(from) && !this.isOurs(from)) return;
     this.tellOwner(session.owner, { ev: "cancel", id: session.id, voice: session.voice });
     this.cancel(session.id, null);
   }
@@ -817,7 +1044,13 @@ class Ink extends EventEmitter {
     const displays = new Map();
     const marks = [];
     for (const burst of bursts) {
-      const [files, under, secure, facts] = await Promise.all([burst.done ?? Promise.resolve({ crop: null, frame: null }), burst.under, burst.secure, burst.facts ?? Promise.resolve(null)]);
+      const [files, where, secure, facts] = await Promise.all([
+        burst.done ?? Promise.resolve({ crop: null, frame: null }),
+        burst.where ?? burst.under.then((under) => ({ under })),
+        burst.secure,
+        burst.facts ?? Promise.resolve(null),
+      ]);
+      const under = where.under;
       displays.set(burst.display, { id: burst.display, ...burst.size });
       const read = (file) => {
         try {
@@ -863,6 +1096,9 @@ class Ink extends EventEmitter {
     for (const burst of session.bursts) clearTimeout(burst.closer);
     for (const win of session.overlays.values()) if (!win.isDestroyed()) win.destroy();
     session.overlays.clear();
+    clearTimeout(this.barMoveTimer);
+    if (session.bar && !session.bar.isDestroyed()) session.bar.destroy();
+    session.bar = null;
     this.registerEscape(false);
     this.registerSnap(false);
     this.raisePill(false);
@@ -880,16 +1116,6 @@ class Ink extends EventEmitter {
     this.changed();
   }
 
-  /** The pointer is over the toolbar while the pen is up: that overlay takes the mouse until it leaves. */
-  hoverBar(sender, on) {
-    const session = this.session;
-    const at = this.overlayOf(sender);
-    if (!session || !at) return;
-    if (on) session.hoveringBar.add(sender.id);
-    else session.hoveringBar.delete(sender.id);
-    at.win.setIgnoreMouseEvents(!session.pen && !on, { forward: true });
-  }
-
   /** A display came, went or changed shape: the overlays are made again for what there is now. The ink on them was fading anyway. */
   watchDisplays() {
     if (this.watchingDisplays) return;
@@ -898,6 +1124,8 @@ class Ink extends EventEmitter {
       if (!this.session || this.session.ending) return;
       this.closeBurst();
       this.makeOverlays();
+      // The toolbar is a window of its own, which macOS moves off a display that left; where it lands is put right.
+      if (this.session.bar && this.session.barShown) this.placeBar(this.session);
     };
     screen.on("display-added", again);
     screen.on("display-removed", again);

@@ -99,8 +99,7 @@
  *
  * **Any line folds to one row.** Beside the arrow, a fold leaves a message
  * of yours or a reply of Kuru's as who said it, when, and its first line,
- * and a click anywhere on that row opens it again; the header folds or
- * opens every line at once. What is folded is this device's, kept by
+ * and a click anywhere on that row opens it again. What is folded is this device's, kept by
  * `kurufold.ts`, and so is the switch that starts long ones folded. A
  * quote's line and the reply the pill was showing open on the way to being
  * shown, and a folded reply is not seen by being in view, since its first
@@ -160,7 +159,7 @@ import { chipsIn, filesStillIn, piecesOf, type Chip } from "../../../shared/chip
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { clearInkNote, hasPen, pencil, useInk } from "../ink";
 import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
-import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, withFolds, writeFolds, type Folds } from "../kurufold";
+import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, writeFolds, type Folds } from "../kurufold";
 import { foldInline, replyTree } from "../kurumd";
 import { useKuruSearch } from "../kurusearch";
 import { fingerPointer } from "../terminals";
@@ -463,26 +462,19 @@ export function KuruDrawer({
     setFolds(next);
     writeFolds(next);
   };
-  const foldable = searching ? [] : items.filter((item) => foldText(item) !== null);
-  const anyOpen = foldable.some((item) => !foldedOf(item));
 
   /**
    * Where a fold leaves the eye. Folding or opening one line keeps its top
    * where it was, and the rest of it comes and goes below; one folded while
    * its top was above the list's comes to the top, or it would fold out of
-   * sight. Folding or opening all of them keeps the first line in view where
-   * it was — or the foot, when the list was at the foot.
+   * sight.
    */
-  const keep = useRef<{ id: string; top: number } | "foot" | null>(null);
+  const keep = useRef<{ id: string; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = list.current;
     const kept = keep.current;
     keep.current = null;
     if (!el || !kept) return;
-    if (kept === "foot") {
-      el.scrollTop = el.scrollHeight;
-      return;
-    }
     const row = el.querySelector(`[data-item="${CSS.escape(kept.id)}"]`);
     if (row) el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - kept.top;
   }, [folds]);
@@ -491,11 +483,6 @@ export function KuruDrawer({
     const row = el?.querySelector(`[data-item="${CSS.escape(item.id)}"]`);
     if (el && row) keep.current = { id: item.id, top: Math.max(0, row.getBoundingClientRect().top - el.getBoundingClientRect().top) };
     keepFolds(withFold(folds, foldKeys(item), !foldedOf(item), foldDefault(item)));
-  };
-  const foldAll = () => {
-    const el = list.current;
-    if (el) keep.current = stuck.current ? "foot" : firstInView(el);
-    keepFolds(withFolds(folds, foldable.map((item) => ({ keys: foldKeys(item), byDefault: foldDefault(item) })), anyOpen));
   };
 
   /**
@@ -1002,7 +989,6 @@ export function KuruDrawer({
           <SearchIcon />
         </button>
         {pins.length > 0 && <PinsButton count={pins.length} open={pinsOpen} onToggle={() => setPinsOpen((was) => !was)} />}
-        {foldable.length > 0 && <FoldAll open={anyOpen} onFold={foldAll} />}
         {voice && <SpeakSwitch settings={voice.settings} />}
         {telegram && <TelegramSwitch status={telegram} />}
         <button className="sidebar-close kuru-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
@@ -1809,20 +1795,6 @@ function FoldButton({ folded, onFold }: { folded: boolean; onFold: () => void })
       aria-pressed={folded}
     >
       <FoldIcon folded={folded} />
-    </button>
-  );
-}
-
-/**
- * Every line folded at once, or every line opened — the lines the list is
- * drawing, narrowed to one node or not, and none it has still to load. It
- * folds while any of them is open, and opens them once none is, and its
- * glyph says which.
- */
-function FoldAll({ open, onFold }: { open: boolean; onFold: () => void }) {
-  return (
-    <button type="button" className="kuru-head-btn kuru-head-icon" onClick={onFold} title={open ? "Fold every message to one row" : "Unfold every message"} aria-label={open ? "Fold every message" : "Unfold every message"}>
-      <FoldIcon folded={!open} />
     </button>
   );
 }

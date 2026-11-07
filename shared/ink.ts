@@ -717,7 +717,19 @@ export function screenMarkLabel(mark: LabelledMark): string {
   } else if (mark.kururu) {
     const what = labelWords(mark.kururu.what, 24);
     const name = mark.kururu.name ? labelWords(mark.kururu.name, Math.max(28, room - 8 - what.length - 3)) : "";
-    where = `kururu: ${what}${name ? ` "${name}"` : ""}`;
+    // A place with no name of its own — Kuru's drawer, the pill, the sidebar —
+    // says the part of it the ink was on: the control, as a page's element is
+    // said, or else the part ("its header", a line of the conversation).
+    // Given more room than the line's budget leaves, as a name is: "button
+    // 'Search…'" names nothing, and the part is what the mark was about.
+    const left = Math.max(44, room - 8 - what.length - 2);
+    const control = !name ? /^(\S+) "(.*)"$/.exec(mark.kururu.element) : null;
+    const part = name
+      ? ""
+      : control
+        ? `${control[1]} "${labelWords(control[2]!, Math.max(28, left - control[1]!.length - 3))}"`
+        : labelWords(mark.kururu.element || mark.kururu.detail, left);
+    where = `kururu: ${what}${name ? ` "${name}"` : ""}${part ? `, ${part}` : ""}`;
   } else {
     const u = mark.under;
     const app = u?.app ? labelWords(u.app, 24) : "";

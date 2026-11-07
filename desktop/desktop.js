@@ -42,6 +42,10 @@ const DEFAULTS = {
    * nobody edited follows the app's as it grows.
    */
   inkDeny: null,
+  /** Every recording starts with the screen pen down (Settings → Voice → Screen pen). On unless turned off. */
+  inkWithVoice: true,
+  /** Where the pen's toolbar was last dragged to, in screen points, or null for the top of the display. */
+  inkBar: null,
   /**
    * The cards popped out as windows of their own (`notes.js`), each with its
    * box on the screen and whether it is up, put away or closed. This Mac's
@@ -86,6 +90,11 @@ function adopt(raw) {
     pill,
     talkKey: typeof r.talkKey === "string" && /^[A-Za-z0-9]{1,32}$/.test(r.talkKey) ? r.talkKey : DEFAULTS.talkKey,
     notes: adoptNotes(r.notes),
+    inkWithVoice: r.inkWithVoice !== false,
+    inkBar:
+      r.inkBar && typeof r.inkBar === "object" && Number.isFinite(r.inkBar.x) && Number.isFinite(r.inkBar.y)
+        ? { x: Math.round(r.inkBar.x), y: Math.round(r.inkBar.y) }
+        : null,
     inkDeny: Array.isArray(r.inkDeny) ? [...new Set(r.inkDeny.filter((b) => typeof b === "string" && /^[A-Za-z0-9.-]{1,200}$/.test(b)))].slice(0, 200) : null,
   };
 }

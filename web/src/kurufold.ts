@@ -36,7 +36,7 @@ import type { KuruItem, NodeKuruItem } from "../../shared/kuru";
 /** Folds and openings, newest last: `true` folded, `false` opened against the default. */
 export type Folds = ReadonlyMap<string, boolean>;
 
-/** How many choices are remembered. A busy month of Kuru, folded line by line, and a few pages of "fold all" besides. */
+/** How many choices are remembered. A busy month of Kuru, folded line by line. */
 export const FOLDS_MAX = 2000;
 
 /** How long a line has to be for "Fold long messages" to start it folded: about a phone's half screen. */
@@ -84,16 +84,9 @@ export function isFolded(folds: Folds, keys: readonly string[], byDefault: boole
  * its other names taken off either way, so an old outbox id cannot outvote it.
  */
 export function withFold(folds: Folds, keys: readonly string[], folded: boolean, byDefault: boolean): Map<string, boolean> {
-  return withFolds(folds, [{ keys, byDefault }], folded);
-}
-
-/** Many lines given the same choice at once — "fold all" — on `withFold`'s terms, in one copy of the list rather than one each. */
-export function withFolds(folds: Folds, lines: readonly { keys: readonly string[]; byDefault: boolean }[], folded: boolean): Map<string, boolean> {
   const next = new Map(folds);
-  for (const { keys, byDefault } of lines) {
-    for (const key of keys) next.delete(key);
-    if (folded !== byDefault && keys[0] !== undefined) next.set(keys[0], folded);
-  }
+  for (const key of keys) next.delete(key);
+  if (folded !== byDefault && keys[0] !== undefined) next.set(keys[0], folded);
   return trim(next);
 }
 

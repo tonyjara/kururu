@@ -187,12 +187,16 @@ const ink = new Ink({
     process.env.KURURU_GLANCE || (PACKAGED ? path.join(process.resourcesPath, "server", "glance") : path.join(__dirname, "dist", "glance")),
   pagePath: path.join(__dirname, "ink.html"),
   preloadPath: path.join(__dirname, "inkpreload.js"),
+  barPath: path.join(__dirname, "inkbar.html"),
   // The pill's page while it is the voice client — the hook live, or ⌥Space — as `wiring.ts` decides it for the window.
   voiceClient: () => ((talk.status === "live" || talk.altSpace) && talk.panelContents()) || (win && !win.isDestroyed() ? win.webContents : null),
   mainWindow: () => (win && !win.isDestroyed() ? win.webContents : null),
   pill: () => (talk.panel && !talk.panel.isDestroyed() ? talk.panel : null),
   denyList: () => readDesktop().inkDeny ?? DENY_DEFAULT,
   whatAt: (global, under) => inkWhatAt(global, under),
+  withVoice: () => readDesktop().inkWithVoice,
+  barAt: () => readDesktop().inkBar,
+  saveBarAt: (at) => writeDesktop({ inkBar: at }),
   debug: !PACKAGED,
 });
 
@@ -204,8 +208,21 @@ const ink = new Ink({
  * helper found under the pen — by its number, or by its owner being this
  * process and its bounds holding the point, for a helper from before the
  * number. Null for anything that is not ours, or a page that cannot say.
+ *
+ * The floating pill first: it is left out of every still and of the
+ * helper's look under the pen, so the helper never names it, and ink round
+ * one of its buttons is about the pill and not the window behind it.
  */
 async function inkWhatAt(global, under) {
+  const pill = talk.panel && !talk.panel.isDestroyed() && talk.panel.isVisible() ? talk.panel : null;
+  if (pill) {
+    const b = pill.getContentBounds();
+    if (global.x >= b.x && global.y >= b.y && global.x < b.x + b.width && global.y < b.y + b.height) {
+      const kururu = await pill.webContents.executeJavaScript(`typeof window.__kururuWhatAt === "function" ? window.__kururuWhatAt(${global.x - b.x}, ${global.y - b.y}) : null`);
+      if (kururu && typeof kururu === "object" && kururu.what !== "the window") return { kururu };
+    }
+  }
+  if (!under) return null;
   const ours = new Set(ink.ours());
   const candidates = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isVisible() && !ours.has(windowNumberOf(w.getMediaSourceId())));
   const inside = (w) => {
@@ -1039,9 +1056,10 @@ talk.on("change", (state) => {
  * The screen pen, across the bridge. A session with the voice may be asked
  * for by the window or the pill (its pen button gives a recording a pen);
  * one without only by the window, whose box it fills. Only the session's
- * owner takes the bundle or drops it; the window, the pill and the overlays
- * may press the pen, Done and ✕. The overlays' own channel (`ink:*`) is
- * checked in `ink.js` against the overlays of the session that is on.
+ * owner takes the bundle or drops it; the window, the pill, the overlays and
+ * the toolbar may press the pen, Done and ✕. The pen's own windows' channel
+ * (`ink:*`) is checked in `ink.js` against the overlays and the toolbar of
+ * the session that is on.
  */
 ipcMain.handle("kururu:ink-start", (event, voice) => {
   if (voice === true) return ink.isOurs(event.sender) ? ink.start({ voice: true }) : ink.state();
@@ -1064,6 +1082,14 @@ ipcMain.on("kururu:ink-snap", (event) => {
 ipcMain.on("kururu:ink-style", (event, style) => {
   if (ink.isOurs(event.sender)) ink.setStyle(style);
 });
+/** Whether every recording starts with the pen down, for Settings → Voice: the window's to change, and every page told. */
+ipcMain.handle("kururu:ink-with-voice", (event, on) => {
+  if (typeof on === "boolean" && win && !win.isDestroyed() && event.sender.id === win.webContents.id) {
+    writeDesktop({ inkWithVoice: on });
+    ink.changed();
+  }
+  return readDesktop().inkWithVoice;
+});
 /** The never-capture list, for Settings → Voice: the window's alone, and what it says is saved as it is. */
 ipcMain.handle("kururu:ink-deny", (event, list) => {
   if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id) return { list: [], custom: false };
@@ -1078,17 +1104,10 @@ ipcMain.on("kururu:ink-cancel", (event, id) => {
 ipcMain.on("ink:begin", (event, raw) => ink.begin(event.sender, raw));
 ipcMain.on("ink:points", (event, raw) => ink.points(event.sender, raw));
 ipcMain.on("ink:end", (event, raw) => ink.lift(event.sender, raw));
-ipcMain.on("ink:hover-bar", (event, on) => ink.hoverBar(event.sender, on === true));
-ipcMain.on("ink:bar", (event, what) => {
-  if (!ink.overlayOf(event.sender) || !ink.session) return;
-  if (what === "pen") ink.setPen(!ink.session.pen);
-  else if (what === "done") ink.send(event.sender);
-  else if (what === "drop") ink.drop(event.sender);
-  else if (what === "undo") ink.undo();
-  else if (what === "snap") ink.snap();
-});
+ipcMain.on("ink:bar", (event, what) => ink.press(event.sender, String(what)));
+ipcMain.on("ink:bar-size", (event, size) => ink.barSize(event.sender, size));
 ipcMain.on("ink:style", (event, style) => {
-  if (ink.overlayOf(event.sender)) ink.setStyle(style);
+  if (ink.overlayOf(event.sender) || ink.isBar(event.sender)) ink.setStyle(style);
 });
 
 /**

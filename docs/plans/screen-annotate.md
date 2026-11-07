@@ -674,6 +674,35 @@ Screen Recording as phase 1, and the talk-key hook rebuilt for hold-to-draw):
   it lets go.
 - *Several clips:* at the roll, as above.
 
+**After the first press (2026-11-06).** The user tried phases 1 and 2 in the
+real app; it worked, and four things changed:
+
+- *The tools moved to the pill.* The toolbar at the top of the first display
+  could not be moved. A session the floating pill owns has every tool in the
+  pill now; any other gets `desktop/inkbar.html`, a small non-focusable panel
+  of its own over the overlays, dragged by its background and put back where
+  it was left (`inkBar` in `desktop.json`, used while it is wholly on a
+  display). Showing the pill for those instead was rejected: the pill's page
+  is the one voice client while it exists, and a pill made for a pen would
+  be a second microphone and a second mouth. The overlays lost the bar and
+  the mouse forwarding it needed.
+- *Draw with every recording,* on by default (`inkWithVoice`, Settings →
+  Voice → Screen pen): a clip to Kuru that opens asks main for a pen
+  (`penWithRecording` in `web/src/voice.ts`); one that comes after the clip
+  ended is let go, and a refusal stops the asking until a pen is started by
+  hand. Dictation never asks.
+- *The window is asked at the ink.* A line drawn down onto the drawer's
+  header began on the desktop, and `under` was asked only at the first
+  pen-down, so the mark was "the screen". The helper is now asked under the
+  ink's centre, then where the pen last lifted, then where it began, and the
+  page is asked at the point that found a window — or at the centre with
+  none, since the floating pill is no window to the helper and `inkWhatAt`
+  asks the pill's page first.
+- *Kuru's drawer and the pill say which part* (`whatat.ts`): the header,
+  the search, a line by whose, when and its first words, the box, the live
+  line; the pill what it is saying. A place with no name of its own puts its
+  control, or else its part, in the label.
+
 ### Phase 3: addresses in other browsers (dropped)
 
 **Not built** — question 5's answer. What it would have been, for the record:

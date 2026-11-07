@@ -385,9 +385,8 @@ cut where the bubble ends, with an ellipsis of its own when more lines
 follow one that fits. The ground and the side stay, so a column of folded
 lines still reads as two people; the speaker, the state word, the arrows
 and any card or file in that first line keep working, and a click anywhere
-else on the row opens it again. The header's own fold folds every line the
-list is drawing — narrowed to one node or not — while any is open, and opens
-them all once none is. kururu's notices are left alone: they are one line
+else on the row opens it again. There is no fold for every line at once: the
+header's went on 2026-11-06, asked for by the user. kururu's notices are left alone: they are one line
 already, with the message behind a tap.
 
 Nothing a line is for is lost behind a fold. A reply of yours folds to its

@@ -137,8 +137,8 @@ export function Pill() {
     const pill = root.current?.querySelector(".voice-pill");
     const box = pill?.getBoundingClientRect();
     bridge.report({ phase: ui.phase, width: box?.width ?? 0, height: box?.height ?? 0, key, locating: here });
-    // The pen's buttons come and go with its session, and the panel is sized to them.
-  }, [ui.phase, ui.text, ui.detail, ui.toggled, key, here, ink.state.on, ink.state.pen]);
+    // The pen's tools come and go with its session, its label counts the marks, and the panel is sized to them.
+  }, [ui.phase, ui.text, ui.detail, ui.toggled, key, here, ink.state.on, ink.state.pen, ink.state.marks]);
 
   return (
     <div className="pill-page-root" ref={root}>

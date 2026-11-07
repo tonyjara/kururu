@@ -67,7 +67,24 @@ class FakeWindow {
   showInactive() {
     this.shown = true;
   }
-  moveTop() {}
+  moveTop() {
+    this.raised = (this.raised ?? 0) + 1;
+  }
+  setSize(width, height) {
+    this.size = [width, height];
+  }
+  getSize() {
+    return this.size ?? [this.options.width, this.options.height];
+  }
+  setPosition(x, y) {
+    this.position = [x, y];
+  }
+  getPosition() {
+    return this.position ?? [0, 0];
+  }
+  on(event, fn) {
+    (this.handlers ??= {})[event] = fn;
+  }
   getMediaSourceId() {
     return `window:${this.webContents.id}:0`;
   }
@@ -81,8 +98,8 @@ class FakeWindow {
 }
 
 const DISPLAYS = [
-  { id: 1, bounds: { x: 0, y: 0, width: 1440, height: 900 }, scaleFactor: 2 },
-  { id: 2, bounds: { x: 1440, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 },
+  { id: 1, bounds: { x: 0, y: 0, width: 1440, height: 900 }, workArea: { x: 0, y: 25, width: 1440, height: 875 }, scaleFactor: 2 },
+  { id: 2, bounds: { x: 1440, y: 0, width: 1920, height: 1080 }, workArea: { x: 1440, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 },
 ];
 const screenEvents = new EventEmitter();
 // One `Ink` per test, each listening for display changes as the app's one does.
@@ -125,7 +142,11 @@ lines.on("line", (line) => {
   let out = { ok: true };
   if (req.op === "access" || req.op === "ask") out = { screen: process.env.ACCESS || "granted" };
   else if (req.op === "secure") out = { secure: process.env.SECURE === "1" };
-  else if (req.op === "under") out = { app: "Safari", bundle: "com.apple.Safari", window: "Stripe", bounds: null, front: null };
+  else if (req.op === "under") {
+    // Nothing above NOTHING_ABOVE: the desktop, which is no window.
+    const above = Number(process.env.NOTHING_ABOVE || "-1");
+    out = req.y < above ? { front: null } : { app: "Safari", bundle: "com.apple.Safari", window: "Stripe", bounds: null, front: null };
+  }
   else if (req.op === "ink") {
     if (req.crop) fs.writeFileSync(req.crop.path, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     if (req.frame) fs.writeFileSync(req.frame.path, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
@@ -145,26 +166,33 @@ beforeAll(() => {
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-function setup() {
+function setup(extra = {}) {
   windows.length = 0;
   shortcuts.clear();
   opened.length = 0;
   delete process.env.ACCESS;
   delete process.env.SECURE;
+  delete process.env.NOTHING_ABOVE;
   const owner = new FakeContents();
   const main = new FakeContents();
   const ink = new Ink({
     helperPath,
     pagePath: "/app/ink.html",
     preloadPath: "/app/inkpreload.js",
+    barPath: "/app/inkbar.html",
     voiceClient: () => owner,
     mainWindow: () => main,
     pill: () => null,
+    ...extra,
   });
   return { ink, owner, main };
 }
 
-const live = () => windows.filter((w) => !w.destroyed);
+const overlays = () => windows.filter((w) => !w.destroyed && w.file === "/app/ink.html");
+const barOf = () => windows.find((w) => !w.destroyed && w.file === "/app/inkbar.html") ?? null;
+
+const live = () => overlays();
+const anyWindow = () => windows.filter((w) => !w.destroyed);
 const told = (contents, ev) => contents.sent.filter(([channel, event]) => channel === "kururu:ink" && event.ev === ev);
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -187,7 +215,6 @@ describe("a session", () => {
     expect(live()).toHaveLength(2);
     expect(live().map((w) => w.bounds)).toEqual(DISPLAYS.map((d) => d.bounds));
     expect(live().every((w) => w.level === "screen-saver" && w.ignore === false && w.options.focusable === false)).toBe(true);
-    expect(live().map((w) => w.query.home)).toEqual(["1", "0"]);
     await settle();
     expect(live().every((w) => w.shown)).toBe(true);
     expect(told(owner, "start")).toHaveLength(1);
@@ -195,15 +222,13 @@ describe("a session", () => {
     ink.dispose();
   });
 
-  it("lets the mouse through with the pen up, but not over the toolbar", async () => {
+  it("lets the mouse through with the pen up", async () => {
     await ink.start({ voice: true });
     ink.setPen(false);
     expect(live().every((w) => w.ignore === true)).toBe(true);
     expect(shortcuts.has("Escape")).toBe(false);
-    ink.hoverBar(live()[0].webContents, true);
-    expect(live()[0].ignore).toBe(false);
-    ink.hoverBar(live()[0].webContents, false);
-    expect(live()[0].ignore).toBe(true);
+    ink.setPen(true);
+    expect(live().every((w) => w.ignore === false)).toBe(true);
     ink.dispose();
   });
 
@@ -215,7 +240,7 @@ describe("a session", () => {
     draw(ink, two, [[50, 50], [60, 60]], at + 1500);
     expect(ink.session.bursts).toHaveLength(2);
     const bundle = await ink.finish(owner, ink.session.id);
-    expect(live()).toHaveLength(0);
+    expect(anyWindow()).toHaveLength(0);
     expect(bundle.kind).toBe("screen");
     expect(bundle.marks).toHaveLength(2);
     const [first, second] = bundle.marks;
@@ -253,7 +278,7 @@ describe("a session", () => {
     expect(await ink.finish(new FakeContents(), ink.session.id)).toBeNull();
     expect(live()).toHaveLength(2);
     expect(await ink.finish(owner, ink.session.id)).toBeNull();
-    expect(live()).toHaveLength(0);
+    expect(anyWindow()).toHaveLength(0);
     ink.dispose();
   });
 
@@ -263,7 +288,7 @@ describe("a session", () => {
     expect(told(owner, "send")).toHaveLength(1);
     expect(live()).toHaveLength(2);
     ink.dispose();
-    expect(live()).toHaveLength(0);
+    expect(anyWindow()).toHaveLength(0);
   });
 });
 
@@ -277,7 +302,7 @@ describe("every way out leaves no overlay", () => {
   it("✕", async () => {
     await ink.start({ voice: true });
     ink.drop(live()[0].webContents);
-    expect(live()).toHaveLength(0);
+    expect(anyWindow()).toHaveLength(0);
     expect(told(owner, "cancel")).toHaveLength(1);
     expect(shortcuts.has("Escape")).toBe(false);
     ink.dispose();
@@ -294,7 +319,7 @@ describe("every way out leaves no overlay", () => {
         owner.emit(event, { isMainFrame: true, isSameDocument: false });
       }
       else owner.emit(event, {}, {});
-      expect(live()).toHaveLength(0);
+      expect(anyWindow()).toHaveLength(0);
       expect(ink.session).toBeNull();
       ink.dispose();
     }
@@ -303,7 +328,7 @@ describe("every way out leaves no overlay", () => {
   it("an overlay's page dying", async () => {
     await ink.start({ voice: true });
     live()[1].webContents.emit("render-process-gone", {}, {});
-    expect(live()).toHaveLength(0);
+    expect(anyWindow()).toHaveLength(0);
     ink.dispose();
   });
 
@@ -311,7 +336,7 @@ describe("every way out leaves no overlay", () => {
     await ink.start({ voice: true });
     ink.helper.kill("SIGKILL");
     await settle(100);
-    expect(live()).toHaveLength(0);
+    expect(anyWindow()).toHaveLength(0);
     expect(told(owner, "cancel").at(-1)[1].why).toContain("helper");
     ink.dispose();
   });
@@ -321,7 +346,7 @@ describe("every way out leaves no overlay", () => {
     screenEvents.emit("display-added");
     expect(live()).toHaveLength(2);
     ink.dispose();
-    expect(live()).toHaveLength(0);
+    expect(anyWindow()).toHaveLength(0);
   });
 });
 
@@ -538,7 +563,128 @@ describe("phase 2: the pen made pleasant", () => {
     const second = await ink.finish(owner, id);
     expect(second.marks).toHaveLength(1);
     expect(second.marks[0].t0).toBe(5000);
-    expect(live()).toHaveLength(0);
+    expect(anyWindow()).toHaveLength(0);
+    ink.dispose();
+  });
+});
+
+describe("the tools", () => {
+  it("are in a toolbar of its own when the pill does not own the session: sized by its page, put at the top of the display, over the overlays", async () => {
+    const { ink } = setup();
+    await ink.start({ voice: true });
+    const bar = barOf();
+    expect(bar).not.toBeNull();
+    expect(bar.query).toEqual({ voice: "1" });
+    expect(bar.options.focusable).toBe(false);
+    expect(bar.level).toBe("screen-saver");
+    expect(ink.state().tools).toBe("bar");
+    expect(bar.shown).toBe(false);
+    ink.barSize(bar.webContents, { width: 400, height: 50 });
+    expect(bar.size).toEqual([400, 50]);
+    // Display 1's work area, in the middle, below the menu bar.
+    expect(bar.position).toEqual([520, 37]);
+    expect(bar.shown).toBe(true);
+    // A page that is not the bar's is not listened to.
+    ink.barSize(live()[0].webContents, { width: 10_000, height: 10 });
+    expect(bar.size).toEqual([400, 50]);
+    // Its presses are the overlay's were; another page's are not.
+    ink.press(new FakeContents(), "pen");
+    expect(ink.session.pen).toBe(true);
+    ink.press(bar.webContents, "pen");
+    expect(ink.session.pen).toBe(false);
+    // It hears the session on the pen's own channel.
+    expect(bar.webContents.sent.some(([channel, state]) => channel === "ink:state" && state.pen === false)).toBe(true);
+    // It is left out of every still.
+    expect(ink.ours()).toContain(bar.webContents.id);
+    ink.press(bar.webContents, "drop");
+    expect(anyWindow()).toHaveLength(0);
+    ink.dispose();
+  });
+
+  it("goes back where it was dragged, while that is still on a display, and remembers a drag", async () => {
+    let saved = { x: 1600, y: 100 };
+    const { ink } = setup({ barAt: () => saved, saveBarAt: (at) => (saved = at) });
+    await ink.start({ voice: false, asker: new FakeContents() });
+    const bar = barOf();
+    ink.barSize(bar.webContents, { width: 400, height: 50 });
+    expect(bar.position).toEqual([1600, 100]);
+    ink.dispose();
+    // Its own placing is not a drag; one later is, once it has settled.
+    ink.barPlacedAt = 0;
+    saved = { x: 5000, y: 100 };
+    await ink.start({ voice: false, asker: new FakeContents() });
+    const again = barOf();
+    ink.barSize(again.webContents, { width: 400, height: 50 });
+    // Off every display: the top of the one the session began on.
+    expect(again.position).toEqual([520, 37]);
+    ink.barPlacedAt = 0;
+    again.position = [300, 600];
+    again.handlers.moved();
+    await settle(350);
+    expect(saved).toEqual({ x: 300, y: 600 });
+    ink.dispose();
+  });
+
+  it("are in the pill when the pill owns the session, and then there is no toolbar", async () => {
+    const pillContents = new FakeContents();
+    const pill = { webContents: pillContents, isDestroyed: () => false, setAlwaysOnTop() {}, moveTop() {}, getMediaSourceId: () => `window:${pillContents.id}:0` };
+    const { ink } = setup({ voiceClient: () => pillContents, pill: () => pill });
+    await ink.start({ voice: true });
+    expect(barOf()).toBeNull();
+    expect(ink.state().tools).toBe("pill");
+    // The pill may press them.
+    ink.setStyle({ tool: "pen", color: "blue" });
+    expect(ink.state().color).toBe("blue");
+    ink.dispose();
+  });
+
+  it("says whether every recording starts with the pen, session or not", async () => {
+    let on = true;
+    const { ink } = setup({ withVoice: () => on });
+    expect(ink.state().withVoice).toBe(true);
+    on = false;
+    expect(ink.state().withVoice).toBe(false);
+    await ink.start({ voice: true });
+    expect(ink.state().withVoice).toBe(false);
+    ink.dispose();
+  });
+});
+
+describe("what a mark was drawn on", () => {
+  it("is asked under the ink, not where the pen first went down: a line drawn down onto a button from the desktop above it", async () => {
+    const asked = [];
+    const { ink, owner } = setup({
+      whatAt: (global, under) => {
+        asked.push({ global, under });
+        return Promise.resolve({ kururu: { what: "Kuru's drawer", name: "", detail: "its header", workspace: "", element: 'button "Search the conversation"' } });
+      },
+    });
+    process.env.NOTHING_ABOVE = "140";
+    await ink.start({ voice: true });
+    // Begins at y 100 on the desktop, its middle at 125 still there, and ends at 150 on the window.
+    draw(ink, live()[0], [[500, 100], [500, 125], [500, 150]], ink.session.at + 100);
+    const bundle = await ink.finish(owner, ink.session.id);
+    expect(bundle.marks[0].under.app).toBe("Safari");
+    expect(asked[0].global).toEqual({ x: 500, y: 150 });
+    expect(bundle.marks[0].kururu.element).toBe('button "Search the conversation"');
+    ink.dispose();
+  });
+
+  it("falls back to where it began when nothing under the ink is a window, and still asks kururu — the pill is no window to the helper", async () => {
+    const asked = [];
+    const { ink, owner } = setup({
+      whatAt: (global, under) => {
+        asked.push({ global, under });
+        return Promise.resolve(null);
+      },
+    });
+    process.env.NOTHING_ABOVE = "10000";
+    await ink.start({ voice: true });
+    draw(ink, live()[0], [[500, 100], [520, 125]], ink.session.at + 100);
+    const bundle = await ink.finish(owner, ink.session.id);
+    expect(bundle.marks[0].under).toBeNull();
+    expect(asked).toHaveLength(1);
+    expect(asked[0].global).toEqual({ x: 500, y: 100 });
     ink.dispose();
   });
 });

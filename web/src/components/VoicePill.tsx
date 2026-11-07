@@ -31,6 +31,13 @@
  * the system-wide panel, which raises the main window with the drawer open
  * rather than itself.
  *
+ * **While a recording has the screen pen, the pen's tools are here** — on
+ * and off, the two pens and the highlighter, Undo, Snap, Send, and the ✕
+ * that drops the clip and its ink — in the floating pill, which can be
+ * dragged anywhere and owns the session (`desktop/ink.js`). A pen the pill
+ * does not own has a toolbar of its own, and the pill in the window then
+ * leaves the pen to it rather than drawing a second set under the ink.
+ *
  * **The pill is the live indicator and not the record.** Listening, hearing,
  * heard and speaking are its; what became of every message and every reply
  * is the drawer's — the pill no longer tracks your last message under
@@ -46,9 +53,20 @@ import { adoptPlace, placeAt, type Place } from "../place";
 import { useKururu } from "../session";
 import { dismissVoice, finishTalk, useMine, useOutgoing, useVoiceUi, voiceIsRemote, whereItWent, type Outgoing } from "../voice";
 import { Icon } from "./Icon";
-import { PenIcon } from "./VoiceIcons";
+import { PenIcon, SnapIcon, UndoIcon } from "./VoiceIcons";
 
 const BARS = [0.35, 0.6, 0.85, 1, 0.85, 0.6, 0.35];
+
+/**
+ * The pens as the ink is drawn with them (`LOOKS` in `desktop/ink.html`):
+ * the ink's own colours and not the theme's, since a swatch that does not
+ * match its ink is a lie about it.
+ */
+const SWATCHES = [
+  { id: "red", tool: "pen", color: "red", ink: "rgb(255, 46, 84)", name: "The red pen" },
+  { id: "blue", tool: "pen", color: "blue", ink: "rgb(10, 132, 255)", name: "The blue pen" },
+  { id: "highlighter", tool: "highlighter", color: null, ink: "rgb(255, 214, 0)", name: "The highlighter, for a line of text" },
+] as const;
 
 /**
  * Where this device last left the pill. Per browser rather than in the
@@ -115,11 +133,16 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
    */
   const penHere = ui.phase === "listening" && hasPen() && (floating || !voiceIsRemote());
   const inked = penHere && ink.state.on && ink.state.voice;
+  // The whole set here when this is the pill the session's tools are in; none
+  // in the window's pill when a toolbar of its own has them.
+  const tools = inked && floating;
+  const elsewhere = inked && !floating && ink.state.tools === "bar";
+  const marks = ink.state.marks;
   const label =
     ui.phase === "listening"
       ? inked
         ? ink.state.pen
-          ? "Listening — draw on anything; Send or tap again"
+          ? `Listening, drawing${marks ? ` — ${marks} mark${marks === 1 ? "" : "s"}` : ""}`
           : "Listening, pen up — clicks go to the apps"
         : ui.toggled
           ? "Listening — tap again to send, Esc to drop"
@@ -244,7 +267,7 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
           <span className="voice-text">{ui.phase === "error" ? ui.detail : ui.text}</span>
         )}
       </span>
-      {penHere && (
+      {penHere && !elsewhere && (
         <button
           className={`voice-act ${inked && ink.state.pen ? "voice-act-on" : ""}`}
           onClick={pillPen}
@@ -255,7 +278,8 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
           <PenIcon />
         </button>
       )}
-      {inked && (
+      {tools && <PenTools />}
+      {inked && !elsewhere && (
         <button className="voice-act voice-act-send" onClick={finishTalk} title="Send what you said and drew to Kuru">
           Send
         </button>
@@ -266,6 +290,47 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * The pen's tools beside its on-and-off, as the toolbar has them: the two
+ * pens and the highlighter, Undo and Snap. What is picked is main's (`tool`,
+ * `color`), so the pill and a stroke never disagree about the next one.
+ */
+function PenTools() {
+  const { state } = useInk();
+  const ink = desktop()?.ink;
+  if (!ink?.style) return null;
+  const tool = state.tool ?? "pen";
+  const color = state.color ?? "red";
+  return (
+    <span className="voice-pen-tools">
+      {SWATCHES.map((s) => {
+        const picked = s.tool === "highlighter" ? tool === "highlighter" : tool === "pen" && color === s.color;
+        return (
+          <button
+            key={s.id}
+            className={`voice-act voice-swatch voice-swatch-${s.id} ${picked ? "voice-swatch-picked" : ""}`}
+            style={{ "--swatch": s.ink } as React.CSSProperties}
+            onClick={() => ink.style?.({ tool: s.tool, color: s.color ?? color })}
+            title={s.name}
+            aria-label={s.name}
+            aria-pressed={picked}
+          />
+        );
+      })}
+      {ink.undo && (
+        <button className="voice-act" onClick={() => ink.undo?.()} disabled={state.marks === 0} title="Take the last mark back (⌘Z with the pen down)" aria-label="Undo the last mark">
+          <UndoIcon />
+        </button>
+      )}
+      {ink.snap && (
+        <button className="voice-act" onClick={() => ink.snap?.()} title="A picture of the display under the pointer, now, as a mark with no ink (⌃⌥⌘S)" aria-label="Snap the display">
+          <SnapIcon />
+        </button>
+      )}
+    </span>
   );
 }
 

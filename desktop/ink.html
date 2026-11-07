@@ -10,10 +10,9 @@
       draws the ink as it is drawn, for no lag, and tells the main process
       each stroke (`ink.js` keeps them and takes the pictures); it fades a
       burst three seconds after its pen last lifted, since its picture is
-      taken and old ink over a screen that moved on misleads. The display the
-      session began on also carries the toolbar — the pen, its two colours
-      and the highlighter, Undo, Snap, Done, ✕ — which is the way out that
-      does not depend on the pill being up.
+      taken and old ink over a screen that moved on misleads. The tools are
+      not here: they are in the pill, or in the toolbar's own window
+      (`inkbar.html`), which can be dragged where this could not.
 
       A file the app ships and not a page of the web build: nothing here may
       depend on a server that `bun run dev` restarts on a save, because a
@@ -47,56 +46,9 @@
         border: 3px solid rgba(255, 46, 84, 0.75);
         pointer-events: none;
       }
-      .bar {
-        position: fixed;
-        /* Below the menu bar and a notch, where a display has one. */
-        top: 48px;
-        left: 50%;
-        transform: translateX(-50%);
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 6px 6px 12px;
-        border-radius: 999px;
-        background: rgba(28, 28, 30, 0.92);
-        color: #f2f2f7;
-        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-        cursor: default;
-        white-space: nowrap;
-      }
-      .bar[hidden] {
-        display: none;
-      }
-      .hint {
-        opacity: 0.8;
-        margin-right: 4px;
-      }
-      .count {
-        font-variant-numeric: tabular-nums;
-        opacity: 0.8;
-      }
-      button {
-        font: inherit;
-        color: inherit;
-        border: 0;
-        border-radius: 999px;
-        padding: 5px 11px;
-        background: rgba(255, 255, 255, 0.12);
-        cursor: pointer;
-      }
-      button:hover {
-        background: rgba(255, 255, 255, 0.22);
-      }
-      button.on {
-        background: rgba(255, 46, 84, 0.9);
-      }
-      button.done {
-        background: #f2f2f7;
-        color: #1c1c1e;
-      }
       .toast {
         position: fixed;
-        top: 98px;
+        top: 110px;
         left: 50%;
         transform: translateX(-50%);
         padding: 6px 12px;
@@ -106,40 +58,6 @@
       }
       .toast[hidden] {
         display: none;
-      }
-      .sep {
-        width: 1px;
-        align-self: stretch;
-        margin: 4px 2px;
-        background: rgba(255, 255, 255, 0.18);
-      }
-      button.swatch {
-        width: 26px;
-        height: 26px;
-        padding: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-      button.swatch::before {
-        content: "";
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background: var(--swatch);
-      }
-      button.swatch.highlighter::before {
-        width: 14px;
-        height: 8px;
-        border-radius: 2px;
-      }
-      button.swatch.picked {
-        box-shadow: inset 0 0 0 2px #f2f2f7;
-        background: rgba(255, 255, 255, 0.12);
-      }
-      button:disabled {
-        opacity: 0.4;
-        cursor: default;
       }
       .flash {
         position: fixed;
@@ -157,19 +75,6 @@
   </head>
   <body>
     <canvas id="ink"></canvas>
-    <div class="bar" id="bar" hidden>
-      <span class="hint" id="hint"></span>
-      <span class="count" id="count"></span>
-      <button id="red" class="swatch" style="--swatch: rgb(255, 46, 84)" title="The red pen" aria-label="Red pen"></button>
-      <button id="blue" class="swatch" style="--swatch: rgb(10, 132, 255)" title="The blue pen" aria-label="Blue pen"></button>
-      <button id="highlighter" class="swatch highlighter" style="--swatch: rgb(255, 214, 0)" title="The highlighter, for a line of text" aria-label="Highlighter"></button>
-      <span class="sep"></span>
-      <button id="undo" title="Take the last mark back (⌘Z with the pen down)">Undo</button>
-      <button id="snap" title="A picture of the display under the pointer, now, as a mark with no ink (⌃⌥⌘S)">Snap</button>
-      <button id="pen" title="The pen on or off: off, clicks go to the app under the ink (⌃⌥⌘D, or Esc to lift it)">Pen</button>
-      <button id="done" class="done"></button>
-      <button id="drop" title="Drop the marks and close the pen" aria-label="Drop">✕</button>
-    </div>
     <div class="toast" id="toast" hidden></div>
     <div class="flash" id="flash"></div>
     <script>
@@ -185,13 +90,9 @@
         highlighter: { color: "rgba(255, 214, 0, 0.4)", width: 16 },
       };
 
-      const query = new URLSearchParams(location.search);
-      const home = query.get("home") === "1";
-      const voice = query.get("voice") === "1";
       const bridge = window.ink;
       const canvas = document.getElementById("ink");
       const ctx = canvas.getContext("2d");
-      const bar = document.getElementById("bar");
       const toast = document.getElementById("toast");
       const now = () => performance.timeOrigin + performance.now();
 
@@ -255,12 +156,8 @@
         pending = [];
       }
 
-      function onBar(target) {
-        return target instanceof Element && target.closest(".bar") !== null;
-      }
-
       window.addEventListener("pointerdown", (event) => {
-        if (!pen || event.button !== 0 || onBar(event.target)) return;
+        if (!pen || event.button !== 0) return;
         event.preventDefault();
         canvas.setPointerCapture(event.pointerId);
         const point = [event.clientX, event.clientY];
@@ -307,26 +204,6 @@
       window.addEventListener("pointercancel", lift);
       setInterval(() => drawing && flush(), 32);
 
-      // With the pen up the window lets the mouse through, and the main
-      // process forwards moves only: this says when one is over the toolbar,
-      // so a click there is taken instead of reaching the app under it.
-      let hovering = false;
-      window.addEventListener("mousemove", (event) => {
-        const over = home && onBar(event.target);
-        if (over === hovering) return;
-        hovering = over;
-        bridge.hoverBar(over);
-      });
-
-      document.getElementById("pen").addEventListener("click", () => bridge.bar("pen"));
-      document.getElementById("done").addEventListener("click", () => bridge.bar("done"));
-      document.getElementById("drop").addEventListener("click", () => bridge.bar("drop"));
-      document.getElementById("undo").addEventListener("click", () => bridge.bar("undo"));
-      document.getElementById("snap").addEventListener("click", () => bridge.bar("snap"));
-      document.getElementById("red").addEventListener("click", () => bridge.style("pen", "red"));
-      document.getElementById("blue").addEventListener("click", () => bridge.style("pen", "blue"));
-      document.getElementById("highlighter").addEventListener("click", () => bridge.style("highlighter", color));
-
       // Main took the last mark on this display back: its ink comes off now rather than fading.
       bridge.onUndo(() => {
         if (drawing) return;
@@ -347,21 +224,6 @@
         tool = state.tool === "highlighter" ? "highlighter" : "pen";
         color = state.color === "blue" ? "blue" : "red";
         document.body.classList.toggle("pen", pen);
-        if (!home) return;
-        bar.hidden = state.on !== true;
-        document.getElementById("hint").textContent = voice ? "Talk and draw on anything" : "Draw on anything — the marks go in Kuru's box";
-        const marks = Number(state.marks) || 0;
-        document.getElementById("count").textContent = marks ? `${marks} mark${marks === 1 ? "" : "s"}` : "";
-        document.getElementById("red").classList.toggle("picked", tool === "pen" && color === "red");
-        document.getElementById("blue").classList.toggle("picked", tool === "pen" && color === "blue");
-        document.getElementById("highlighter").classList.toggle("picked", tool === "highlighter");
-        document.getElementById("undo").disabled = !marks;
-        const penButton = document.getElementById("pen");
-        penButton.textContent = pen ? "Pen on" : "Pen off";
-        penButton.classList.toggle("on", pen);
-        const done = document.getElementById("done");
-        done.textContent = voice ? "Send" : "Done";
-        done.title = voice ? "Send what you said and drew to Kuru" : "Put the marks in Kuru's box";
       });
 
       let toastTimer = 0;

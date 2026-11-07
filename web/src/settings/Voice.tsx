@@ -21,10 +21,11 @@
  * its own for one switch would be a door nobody looks behind. It is this
  * device's, as the folds it starts are (`kurufold.ts`), so it says so.
  *
- * **The screen pen's never-capture list** is here too, in the desktop app
- * only: the applications whose windows are left out of every picture the pen
- * takes (`desktop/ink.js`). The pen is the voice's — it draws while you talk
- * — and this is the one thing about it there is to set.
+ * **The screen pen** is here too, in the desktop app only, since it is the
+ * voice's — it draws while you talk: whether every recording starts with the
+ * pen down (on unless turned off), and the never-capture list, the
+ * applications whose windows are left out of every picture the pen takes
+ * (`desktop/ink.js`). Both are this Mac's, kept in `desktop.json`.
  */
 import { useEffect, useState } from "react";
 import { KOKORO_SIZE_MB, LANG_NAMES, LOCALES, VOICE_LANGS, keyCodeLabel, type VoiceChoice, type VoiceLang, type VoiceSettings } from "../../../shared/voice";
@@ -50,18 +51,25 @@ const KNOWN_APPS: Record<string, string> = {
 };
 
 /**
- * The applications the screen pen never takes a picture of. Their windows
- * are left out of every still by the helper's filter and their titles are
- * not read, so their pixels never reach the disk. Saved on this Mac.
+ * The screen pen: whether a recording puts it down, and the applications it
+ * never takes a picture of. Their windows are left out of every still by the
+ * helper's filter and their titles are not read, so their pixels never reach
+ * the disk. Saved on this Mac.
  */
-function NeverCapture() {
+function ScreenPen() {
   const ink = desktop()?.ink;
   const [state, setState] = useState<{ list: string[]; custom: boolean } | null>(null);
+  const [withVoice, setWithVoice] = useState<boolean | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => {
     void ink?.deny?.().then(setState, () => setState(null));
+    void ink?.withVoice?.().then(setWithVoice, () => setWithVoice(null));
   }, [ink]);
   if (!ink?.deny || !state) return null;
+  const turn = (on: boolean) => {
+    setWithVoice(on);
+    void ink.withVoice?.(on).then(setWithVoice, (err: unknown) => setProblem(err instanceof Error ? err.message : String(err)));
+  };
   const save = (list: string[] | null) => {
     setProblem(null);
     void ink.deny!(list).then(setState, (err: unknown) => setProblem(err instanceof Error ? err.message : String(err)));
@@ -84,6 +92,14 @@ function NeverCapture() {
       }
     >
       {problem && <Banner tone="bad">{problem}</Banner>}
+      {withVoice !== null && (
+        <Toggle
+          label="Draw with every recording"
+          hint="The talk key puts the pen down as it opens the microphone, and the recording ending lifts it. Off, the pen is only ⌃⌥⌘D, the pill's pen and the drawer's pencil."
+          on={withVoice}
+          onChange={turn}
+        />
+      )}
       {state.list.length === 0 && <Empty>Every application can be in a picture.</Empty>}
       {state.list.map((id) => (
         <Item key={id} name={KNOWN_APPS[id] ?? id} sub={KNOWN_APPS[id] ? <Mono>{id}</Mono> : undefined}>
@@ -290,7 +306,7 @@ export function VoicePage() {
         );
       })}
 
-      <NeverCapture />
+      <ScreenPen />
 
       <Group title="Reading" foot="On this device only, as the folds themselves are: the phone and the Mac each keep their own.">
         <Toggle label="Fold long messages" hint="A message longer than about fifteen lines starts as one row in Kuru's drawer. Unfolding one keeps it open." on={foldLong} onChange={setFoldLong} />

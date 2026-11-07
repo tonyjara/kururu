@@ -85,6 +85,14 @@
  * a folder that exists. Dropping the clip drops the ink. A clip that rolls
  * over at five minutes takes the marks so far and leaves the pen on the
  * recording, which carries on.
+ *
+ * **And by default every recording has one** (Settings → Voice → Screen pen,
+ * on unless turned off): a clip to Kuru that opens asks main for a pen, in
+ * whatever grammar the key began — a hold still ends on the release. A pen
+ * that comes after the clip already ended is let go, and one refused (no
+ * Screen Recording, no helper) is not asked for again on its own until the
+ * pen is started by hand, so a key pressed twenty times is not twenty trips
+ * to System Settings. Dictation never asks: those words are for a box.
  */
 import { useSyncExternalStore } from "react";
 import { CLIP_MIN_MS, CLIP_RATE, CLIP_ROLL_MS, TAP_MS, downsample, encodeWav, type OutboxEntry, type SpeechChunk } from "../../shared/voice";
@@ -365,6 +373,7 @@ async function open(purpose: Purpose = "kuru"): Promise<void> {
       node.connect(mute);
       mute.connect(ctx.destination);
       recording = { purpose, ctx, stream, chunks, rate: ctx.sampleRate, startedAt: performance.now(), clip };
+      if (purpose === "kuru") penWithRecording();
     } catch (err) {
       const refused = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError");
       failed(
@@ -454,6 +463,44 @@ async function post(pcm: Float32Array, audioAt: number, rolled = false): Promise
 
 /** The pen session the recording under way has, by main's id. */
 let inkId: string | null = null;
+/** Whether every recording starts with a pen, as main says (`ink.ts` tells this module). */
+let penWithVoice: () => boolean = () => false;
+/** A pen asked for by a recording opening, until main answers with one or with why not. */
+let penAsked = false;
+/** A pen asked for that way was refused; it is not asked for that way again until one is started by hand. */
+let penBlocked = false;
+
+export function setPenWithVoice(get: () => boolean): void {
+  penWithVoice = get;
+}
+
+/** A clip to Kuru opened: a pen with it, when the setting says so and there is none. */
+function penWithRecording(): void {
+  const ink = desktop()?.ink;
+  if (!ink || inkId || penAsked || penBlocked || !penWithVoice()) return;
+  penAsked = true;
+  // Main says `start` or `refused` before it answers, and those take the
+  // ask; one still standing here met a session already on, or none at all.
+  void ink
+    .start(true)
+    .catch(() => null)
+    .finally(() => {
+      penAsked = false;
+    });
+}
+
+/**
+ * Main refused a pen with the voice. True when it was one a recording asked
+ * for by itself, which says nothing over the pill — the recording is the
+ * thing being done, and main has already put Screen Recording's switch in
+ * front of the user — and is not asked for that way again.
+ */
+export function penRefused(): boolean {
+  if (!penAsked) return false;
+  penAsked = false;
+  penBlocked = true;
+  return true;
+}
 /** How many times a set is posted before the clip goes without it. */
 const MARKS_TRIES = [0, 1000, 3000];
 
@@ -464,7 +511,11 @@ const MARKS_TRIES = [0, 1000, 3000];
  * A microphone that will not open ends the pen with it.
  */
 export function penTalk(id: string): void {
-  if (dictating) {
+  const asked = penAsked;
+  penAsked = false;
+  if (!asked) penBlocked = false;
+  // A pen the recording asked for, arriving after the clip already went: let go, never a new recording.
+  if (dictating || (asked && !recording && !opening)) {
     desktop()?.ink?.cancel(id);
     return;
   }

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import type { KuruReply, NodeKuruItem, NoticeItem, YouItem } from "../../shared/kuru";
-import { FOLDS_MAX, LONG_ROWS, firstLine, foldKeys, foldText, isFolded, isLong, parseFolds, serializeFolds, withFold, withFolds } from "../src/kurufold";
+import { FOLDS_MAX, LONG_ROWS, firstLine, foldKeys, foldText, isFolded, isLong, parseFolds, serializeFolds, withFold } from "../src/kurufold";
 
 function you(over: Partial<YouItem> = {}, node: string | null = null): NodeKuruItem {
   return { kind: "you", id: "t12", at: 1, text: "yes", via: "typed", ms: 0, state: "delivered", typedAt: 1, note: null, outboxId: null, ...over, node };
@@ -97,30 +97,6 @@ describe("isFolded and withFold", () => {
     expect(folds.size).toBe(FOLDS_MAX);
     expect(folds.has("t0")).toBe(false);
     expect(folds.has(`t${FOLDS_MAX + 4}`)).toBe(true);
-  });
-});
-
-describe("withFolds", () => {
-  it("folds every line given, and opens them all again to nothing written", () => {
-    const lines = [
-      { keys: ["t1"], byDefault: false },
-      { keys: ["t2", "v2"], byDefault: false },
-      { keys: ["mu3"], byDefault: true },
-    ];
-    const folded = withFolds(new Map(), lines, true);
-    expect([...folded]).toEqual([
-      ["t1", true],
-      ["t2", true],
-    ]);
-    for (const line of lines) expect(isFolded(folded, line.keys, line.byDefault)).toBe(true);
-    const opened = withFolds(folded, lines, false);
-    expect([...opened]).toEqual([["mu3", false]]);
-    for (const line of lines) expect(isFolded(opened, line.keys, line.byDefault)).toBe(false);
-  });
-
-  it("leaves the lines it was not given as they were", () => {
-    const folds = withFolds(new Map([["t9", true]]), [{ keys: ["t1"], byDefault: false }], true);
-    expect(folds.get("t9")).toBe(true);
   });
 });
 

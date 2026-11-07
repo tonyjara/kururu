@@ -1,11 +1,13 @@
 /**
- * The screen pen's overlay page and the main process, and nothing else.
+ * The screen pen's own pages and the main process, and nothing else.
  *
  * `ink.html` is a file the app ships, loaded into one transparent window per
- * display while a session is on (`ink.js`). It is handed the strokes' road
- * in and the session's state out, and no other door: it has no server, no
- * bridge to kururu's own API, and every message it sends is checked in main
- * against the overlays of the session that is on.
+ * display while a session is on (`ink.js`), and `inkbar.html` the toolbar's
+ * window when the pill does not have the tools. They are handed the
+ * strokes' road in and the session's state out, and no other door: no
+ * server, no bridge to kururu's own API, and every message they send is
+ * checked in main against the overlays and the toolbar of the session that
+ * is on.
  */
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -16,8 +18,8 @@ contextBridge.exposeInMainWorld("ink", {
   points: (points) => ipcRenderer.send("ink:points", Array.isArray(points) ? points.slice(0, 2000) : []),
   /** The pen lifted. */
   end: (t) => ipcRenderer.send("ink:end", { t: Number(t) }),
-  /** The pointer is on the toolbar, so the window should take the mouse while the pen is up. */
-  hoverBar: (on) => ipcRenderer.send("ink:hover-bar", on === true),
+  /** The toolbar's size, which its window is made to fit. */
+  barSize: (width, height) => ipcRenderer.send("ink:bar-size", { width: Number(width), height: Number(height) }),
   /** A toolbar button: `pen`, `done`, `drop`, `undo` or `snap`. */
   bar: (what) => ipcRenderer.send("ink:bar", String(what)),
   /** The next stroke's pen: `{ tool: "pen" | "highlighter", color: "red" | "blue" }`. */

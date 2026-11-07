@@ -94,6 +94,21 @@ describe("the label", () => {
     expect(screenMarkLabel({ under, secure: false, shape: "arrow", page: { url: "http://localhost:3000/checkout?token=abc", element } })).toBe('arrow to button "Pay now" on localhost:3000/checkout');
   });
 
+  it("names the part of a place with no name of its own: the control first, else the part", () => {
+    const drawer = { what: "Kuru's drawer", name: "", detail: "its header", workspace: "", element: 'button "Search the conversation"' };
+    // The mark from 2026-11-06 that came out as "the screen".
+    expect(screenMarkLabel({ under: null, secure: false, kururu: drawer })).toBe('kururu: Kuru\'s drawer, button "Search the conversation"');
+    const line = { ...drawer, detail: 'your message at 9:18 PM "what do I need to do to see it?"', element: "" };
+    expect(screenMarkLabel({ under: null, secure: false, shape: "circled", kururu: line })).toBe("circled in kururu: Kuru's drawer, your message at 9:18 PM 'what do I need to…");
+    const box = { ...drawer, detail: "the box you write to Kuru in", element: 'textbox "A message for Kuru"' };
+    expect(screenMarkLabel({ under: null, secure: false, kururu: box })).toBe('kururu: Kuru\'s drawer, textbox "A message for Kuru"');
+    const pill = { what: "Kuru's voice pill", name: "", detail: "", workspace: "", element: 'button "Undo the last mark"' };
+    expect(screenMarkLabel({ under: null, secure: false, kururu: pill })).toBe('kururu: Kuru\'s voice pill, button "Undo the last mark"');
+    // A place with a name keeps to it: the control is in marks.md, not the line.
+    const agent = { what: "agent", name: "Fastermenu migration", detail: "", workspace: "", element: 'button "Send"' };
+    expect(screenMarkLabel({ under: null, secure: false, kururu: agent })).toBe('kururu: agent "Fastermenu migration"');
+  });
+
   it("reads a set written before phase 2, which has none of it", () => {
     expect(screenMarkLabel({ under, secure: false })).toBe('Safari "Stripe — Payments"');
   });
