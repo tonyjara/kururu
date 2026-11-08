@@ -376,7 +376,10 @@ microphone and installs the talk key once, through refs, never per render.
 **Kururu records and Hex only hears**: a finished WAV to Hex's
 `/transcriptions`, never `hex dictation`, its token read per request off its
 discovery file and never held or logged; Hex's list is made from
-`~/Documents/Kururu/dictation/vocabulary.json` and nobody edits it by hand.
+`~/Documents/Kururu/dictation/vocabulary.json` and nobody edits it by hand,
+less the terms that say `"bias": false`; kururu applies the file's
+`sounds_like` to what Hex hears, since the local API does not, so a spelling
+is never an ordinary word or another term.
 → [voice](voice.md#hex)
 
 ## Notes

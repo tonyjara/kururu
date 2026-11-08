@@ -657,8 +657,8 @@ kururu's two-pass pick 11 of 36; whole sentences right, Hex 3 of 8, `yap` 0.
 | English | Ask Curu to open the piling pool request and run the tests in Curu. | Ask Kururu to open the PyLink pull request and run the tests in Kururu. |
 | English | Tell the platypost agent that Banker and Siffin are down on Friday. | Tell the Platypost agent that Bancard and SIFEN are down on Friday. |
 
-What still slips: "Kuru" said before "to" is pulled to Kururu (said alone it
-is Kuru), "Holapy" after "a" stays Olapi at `normal` (`strong` fixes it and
+What still slipped: "Kuru" said before "to" is pulled to Kururu (said alone it
+is Kuru — fixed below, [Kuru and Kururu](#kuru-and-kururu)), "Holapy" after "a" stays Olapi at `normal` (`strong` fixes it and
 breaks the bank card), and English words inside Spanish ("card", "pull")
 are spelled by ear. Five near-miss sentences ("pasá por acá", "the bank card",
 "a platypus at the post office") came through untouched at `normal`.
@@ -673,7 +673,7 @@ says where it is and how — and a list in Hex's window or kururu's settings is
 one Kuru cannot edit.
 
 ```json
-{ "terms": [ { "term": "Pasapy", "sounds_like": ["Pasapi", "Passapi"] }, { "term": "Expo" } ],
+{ "terms": [ { "term": "Pasapy", "sounds_like": ["Pasapi", "Passapi"] }, { "term": "Kururu", "bias": false }, { "term": "Expo" } ],
   "phrases": [ { "heard": "Tarifa Predator", "meant": "tarifa predeterminada" } ] }
 ```
 
@@ -686,6 +686,16 @@ one Kuru cannot edit.
   file; 300 ms of quiet first), and when the talk key goes down if Hex or the
   file changed since — a Hex that restarted is a new pid and is synced again.
   A file that is not JSON leaves Hex's list as it was and Settings says why.
+- **A spelling is a correction.** Hex's local API returns the decoder's
+  words and does not apply `sounds_like` — that is a step of Hex's own paste
+  — so kururu does (`respell`, in `Hex.transcribe`): every spelling becomes
+  its term, whole words, any case, any spacing, in one pass, longest first,
+  and never a spelling that is itself a term. So a spelling is only ever
+  what nobody says on purpose: "piling", "Ghost town" and "Alto techo" were
+  taken out of the file when this went in. `yap`'s words are not respelled.
+- **`"bias": false`** keeps a term out of Hex's list — out of the decoder —
+  while its spellings are still respelled. Settings' vocabulary line counts
+  both. Kururu has it; see below.
 - **`phrases`** are whole-phrase mishearings, read and kept for a cleanup pass
   that is not built. They are never a find-and-replace.
 - **Cleanup is off.** Hex can rewrite through a local OpenCode service with a
@@ -697,6 +707,36 @@ one Kuru cannot edit.
   already stores, about $1–3 a month at an hour and a half a day), and the
   raw words kept when it is slow or fails. Kuru reading `[voice]` loosely
   covers most of it today.
+
+### Kuru and Kururu
+
+Every "Kuru" — the harness — came out "Kururu", the app ("how many tokens
+we spent … with Kururu specifically"). Measured on 2026-11-08 on the owner's
+own voice: 14 lines read into the Mac's microphone, heard alone, in three
+chunks and as one 113 s take, through Hex at `normal`. Twenty names in all:
+Kuru 9, Kururu 5, Holapy 3, nytojara 2, Pasapy 1.
+
+- **The bias was the cause.** With both terms in Hex's list, a Kuru said
+  after any Kururu in the clip came back Kururu: 2 of 9 in the whole take.
+  Kururu out of the list: 9 of 9, and Kururu when meant still 5 of 5 —
+  Parakeet spells it on its own. Order, the two terms' spellings and moving
+  Kuru changed nothing; `strong` made Kuru 0 of 9, and even with Kururu out
+  wrote "OpenCode renew settings" for "Open Kururu settings".
+- **The spellings were never applied**, which is why Holapy was 0 of 3 with
+  "Olapi" listed under it. `respell` and the spellings the clips showed
+  (Guru, Olaby, "all a pee", Naito Jara and four more) did the rest.
+
+| | lines alone | three chunks | the whole take |
+|---|---|---|---|
+| before (both biased, no respell) | 6 of 20 | 11 of 20 | 8 of 20 |
+| after (Kururu `bias: false`, respell) | 18 of 20 | 20 of 20 | 19 of 20 |
+
+What is left: a line a second or two long is heard with less to go on —
+"Kururu is the app" alone came out "Guru is the app", now respelled to Kuru,
+and "Open Kururu settings" alone is "Open could renew settings" either way;
+in the whole take the first "Holapy," of a line was dropped, not misspelled.
+A real message is rarely that short. "Guru" is a spelling of Kuru, so the
+word guru is written Kuru.
 
 ## Installing
 
