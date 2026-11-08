@@ -14,16 +14,30 @@
  * already matches from the front and redoes everything after the first
  * difference, which is idempotent and never more than the list.
  *
+ * **A spelling is a correction, a term need not be a bias.** Hex's local
+ * API, which is how kururu hears, gives back the decoder's words and does
+ * not apply `sounds_like` — that is a step of Hex's own paste — so "Olapi"
+ * stayed Olapi with "Olapi" listed under Holapy. `respell` is that step,
+ * applied by kururu to what Hex heard. And the decoder's bias is not free:
+ * with both Kuru and Kururu in it, a "Kuru" said after "Kururu" anywhere in
+ * the clip came back Kururu, 2 of 9 right on the owner's own voice, and 9 of
+ * 9 with Kururu taken out of the list — which still came out Kururu every
+ * time it was said, a word Parakeet spells on its own. So a term can say
+ * `"bias": false`: left out of Hex's list, its spellings still respelled.
+ *
  * `phrases` are whole-phrase mishearings ("Tarifa Predator" for "tarifa
  * predeterminada"). They are read and kept for a cleanup pass that is not
  * built; they are never a find-and-replace, which is exactly the rule that
- * fires on the one sentence where the heard words were meant.
+ * fires on the one sentence where the heard words were meant. A spelling in
+ * `sounds_like` is, and so is only ever what nobody says on purpose.
  */
 
 /** One term and the ways a transcript has spelled it. */
 export interface VocabularyEntry {
   term: string;
   sounds_like: string[];
+  /** False keeps the term out of the decoder's list; absent is in. Only kururu reads it — Hex never sees the key. */
+  bias?: false;
 }
 
 export interface VocabularyPhrase {
@@ -69,7 +83,7 @@ export function adoptVocabulary(value: unknown): Vocabulary {
       if (!spelling || key === term.toLowerCase() || spellings.some((x) => x.toLowerCase() === key)) continue;
       if (spellings.length < SPELLINGS_MAX) spellings.push(spelling);
     }
-    terms.push({ term, sounds_like: spellings });
+    terms.push(rec.bias === false ? { term, sounds_like: spellings, bias: false } : { term, sounds_like: spellings });
     if (terms.length >= TERMS_MAX) break;
   }
   const phrases: VocabularyPhrase[] = [];
@@ -92,6 +106,39 @@ export function parseVocabulary(text: string): Vocabulary | { error: string } {
   }
   if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as Record<string, unknown>).terms)) return { error: "no \"terms\" list" };
   return adoptVocabulary(parsed);
+}
+
+/** The terms that go into Hex's list, in the file's order, in Hex's shape: `"bias": false` ones left out. Pure. */
+export function hexTerms(terms: readonly VocabularyEntry[]): VocabularyEntry[] {
+  return terms.filter((t) => t.bias !== false).map((t) => ({ term: t.term, sounds_like: [...t.sounds_like] }));
+}
+
+const spellingKey = (s: string): string => s.toLowerCase().replace(/\s+/g, " ");
+
+/**
+ * What Hex heard, with every `sounds_like` spelling put back as its term:
+ * whole words only (a letter or digit on either side is no match), any case,
+ * any run of spaces where the spelling has one, and in one pass, longest
+ * spelling first, so a replacement is never matched again and "Ola Olapi"
+ * wins over "Olapi". A spelling that is itself some term ("Kururu" listed
+ * under Kuru) is skipped, since that would rewrite the word every time it was
+ * meant. Pure.
+ */
+export function respell(text: string, terms: readonly VocabularyEntry[]): string {
+  const names = new Set(terms.map((t) => spellingKey(t.term)));
+  const to = new Map<string, string>();
+  for (const t of terms) {
+    for (const s of t.sounds_like) {
+      const key = spellingKey(s);
+      if (!names.has(key) && !to.has(key)) to.set(key, t.term);
+    }
+  }
+  if (!to.size) return text;
+  const alternatives = [...to.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map((k) => k.split(" ").map((w) => w.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("\\s+"));
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])(?:${alternatives.join("|")})(?![\\p{L}\\p{N}])`, "giu");
+  return text.replace(pattern, (m) => to.get(spellingKey(m)) ?? m);
 }
 
 /** Hex's `vocabulary-list` reply, as entries; anything unreadable is left out. */

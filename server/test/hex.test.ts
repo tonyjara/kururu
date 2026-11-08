@@ -1,12 +1,13 @@
 /**
  * Hex as the ears, the pure half: its discovery file and status read, the
  * vocabulary file made whole, the sync planned so that running it twice does
- * nothing the second time, and Hex's words put on yap's clock for the pen.
+ * nothing the second time, Hex's words respelled from it, and Hex's words
+ * put on yap's clock for the pen.
  * No Hex runs here.
  */
 import { describe, expect, test } from "bun:test";
 import { retimeWords, type TimedText } from "../../shared/ink";
-import { TERM_MAX, adoptVocabulary, hexEntries, parseVocabulary, vocabularyPlan, type VocabularyEntry } from "../../shared/vocabulary";
+import { TERM_MAX, adoptVocabulary, hexEntries, hexTerms, parseVocabulary, respell, vocabularyPlan, type VocabularyEntry } from "../../shared/vocabulary";
 import { hexModel, parseDiscovery } from "../src/hex";
 
 describe("parseDiscovery", () => {
@@ -54,6 +55,53 @@ describe("adoptVocabulary", () => {
   });
   test("phrases need both halves", () => {
     expect(adoptVocabulary({ terms: [], phrases: [{ heard: "Beerness", meant: "viernes" }, { heard: "x" }] }).phrases).toEqual([{ heard: "Beerness", meant: "viernes" }]);
+  });
+});
+
+describe("bias", () => {
+  test("a term that says bias false is kept, and left out of Hex's list", () => {
+    const got = adoptVocabulary({ terms: [{ term: "Kuru", sounds_like: ["Guru"] }, { term: "Kururu", bias: false }, { term: "Holapy", bias: "no" }] });
+    expect(got.terms).toEqual([e("Kuru", "Guru"), { term: "Kururu", sounds_like: [], bias: false }, e("Holapy")]);
+    expect(hexTerms(got.terms)).toEqual([e("Kuru", "Guru"), e("Holapy")]);
+  });
+  test("Hex's list never carries the key, so the sync's comparison is Hex's shape", () => {
+    expect(Object.keys(hexTerms([{ term: "A", sounds_like: [], bias: false }, e("B")])[0]!)).toEqual(["term", "sounds_like"]);
+  });
+});
+
+// The owner's own clips, 2026-11-08: what Hex wrote with Kururu out of its list, and what was said.
+describe("respell", () => {
+  const terms: VocabularyEntry[] = [
+    e("Holapy", "Olapi", "Olaby", "Ola Olapi", "all a pee"),
+    e("Kuru", "Guru", "Kururu"),
+    { term: "Kururu", sounds_like: ["Cururu"], bias: false },
+    e("nytojara", "Naito Jara", "Naitojara", "Naitajara"),
+    e("Pasapy", "Pasapi"),
+    e("Platypost", "platypus post"),
+  ];
+  test("a spelling becomes its term, in any case and any spacing", () => {
+    expect(respell("Le dije a Guru que revise pasapi.", terms)).toBe("Le dije a Kuru que revise Pasapy.");
+    expect(respell("Remove the tickets from Naito  Jara account.", terms)).toBe("Remove the tickets from nytojara account.");
+    expect(respell("My email is naitajara at gmail dot com.", terms)).toBe("My email is nytojara at gmail dot com.");
+    expect(respell("Guru, what's the status of all a pee?", terms)).toBe("Kuru, what's the status of Holapy?");
+  });
+  test("whole words only", () => {
+    expect(respell("Olapiña and Gurus and xOlapi", terms)).toBe("Olapiña and Gurus and xOlapi");
+    expect(respell("Guru's turn", terms)).toBe("Kuru's turn");
+  });
+  test("the longest spelling first, and once: a replacement is not matched again", () => {
+    expect(respell("Ola Olapi, what's the last thing we did in Olaby?", terms)).toBe("Holapy, what's the last thing we did in Holapy?");
+  });
+  test("a spelling that is itself a term is never applied, so the app keeps its name", () => {
+    expect(respell("Kururu is the app and Guru is the agent.", terms)).toBe("Kururu is the app and Kuru is the agent.");
+    expect(respell("open Cururu settings", terms)).toBe("open Kururu settings");
+  });
+  test("characters a pattern would read are only characters", () => {
+    expect(respell("see O'Marchy (a.b) now", [e("Omarchy", "O'Marchy"), e("X", "a.b")])).toBe("see Omarchy (X) now");
+    expect(respell("axb", [e("X", "a.b")])).toBe("axb");
+  });
+  test("no spellings, the words as heard", () => {
+    expect(respell("anything at all", [e("Expo")])).toBe("anything at all");
   });
 });
 

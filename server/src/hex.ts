@@ -36,7 +36,9 @@
  *
  * **The vocabulary is a file and Hex's list is made from it** — see
  * `shared/vocabulary.ts`. The file is watched; a change reaches Hex within a
- * second, and so does a Hex that restarted with another list.
+ * second, and so does a Hex that restarted with another list. Hex's list is
+ * the terms that bias the decoder; the spellings are applied here, to what
+ * Hex gives back (`respell`), because the local API does not apply them.
  *
  * Restartable side: editing this costs a reconnect, and nothing in it
  * touches the pty host.
@@ -47,7 +49,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { BIASED_TERMS, hexEntries, parseVocabulary, vocabularyPlan } from "../../shared/vocabulary";
+import { BIASED_TERMS, hexEntries, hexTerms, parseVocabulary, respell, vocabularyPlan, type VocabularyEntry } from "../../shared/vocabulary";
 import type { ToolStatus } from "../../shared/voice";
 
 const run = promisify(execFile);
@@ -133,6 +135,8 @@ export class Hex {
   private syncing: Promise<void> = Promise.resolve();
   /** Whether Hex's Labs › Vocabulary biasing was on when last asked; null before anybody asked. */
   private biasing: boolean | null = null;
+  /** The file's terms as last read well, for `respell`; null before the first read. A broken file keeps the last good ones. */
+  private terms: VocabularyEntry[] | null = null;
   private watcher: FSWatcher | null = null;
   private watchTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -224,8 +228,8 @@ export class Hex {
   // ---------------------------------------------------------------------------
 
   /**
-   * A WAV on the disk, into words: the transcript, empty for a clip that held
-   * none. Throws when Hex could not be asked or could not answer, which is
+   * A WAV on the disk, into words: the transcript, respelled from the
+   * vocabulary (`respell`), empty for a clip that held none. Throws when Hex could not be asked or could not answer, which is
    * the caller's cue to hear the clip some other way — and starts Hex, for
    * the next clip, when it was not running.
    */
@@ -249,7 +253,7 @@ export class Hex {
     if (!res.ok) throw new Error(`Hex could not hear it: ${typeof answer?.error === "string" ? answer.error : typeof answer?.code === "string" ? answer.code : res.status}`);
     const text = typeof answer?.transcript === "string" ? answer.transcript : typeof answer?.text === "string" ? answer.text : null;
     if (text === null) throw new Error("Hex's answer had no transcript");
-    return text.replace(/\s+/g, " ").trim();
+    return respell(text.replace(/\s+/g, " ").trim(), this.terms ?? this.readTerms());
   }
 
   /**
@@ -328,29 +332,45 @@ export class Hex {
       this.setVocabulary({ ok: false, detail: `${VOCABULARY_FILE.replace(homedir(), "~")} is ${want.error}; Hex keeps the list it had` });
       return;
     }
+    this.terms = want.terms;
+    const biased = hexTerms(want.terms);
+    const out = want.terms.length - biased.length;
     const at = this.discover();
     if (!at) {
-      this.setVocabulary({ ok: false, detail: `${want.terms.length} terms, waiting for Hex` });
+      this.setVocabulary({ ok: false, detail: `${biased.length} terms, waiting for Hex` });
       return;
     }
     const key = `${at.pid}:${stamp}`;
     if (key !== this.synced) {
       try {
         const have = hexEntries(await this.control({ command: "vocabulary-list" }));
-        const plan = vocabularyPlan(have, want.terms);
+        const plan = vocabularyPlan(have, biased);
         for (const term of plan.remove) await this.control({ command: "vocabulary-remove", term });
         for (const entry of plan.add) await this.control({ command: "vocabulary-add", term: entry.term, sounds_like: entry.sounds_like });
         const after = hexEntries(await this.control({ command: "vocabulary-list" }));
-        if (vocabularyPlan(after, want.terms).add.length) throw new Error("Hex's list still differs from the file after the sync");
+        if (vocabularyPlan(after, biased).add.length) throw new Error("Hex's list still differs from the file after the sync");
         this.synced = key;
       } catch (err) {
         this.setVocabulary({ ok: false, detail: `Could not sync into Hex: ${err instanceof Error ? err.message : String(err)}` });
         return;
       }
     }
-    const read = Math.min(BIASED_TERMS, want.terms.length);
-    const steer = this.biasing === false ? "Hex's Labs › Vocabulary biasing is off, so Parakeet ignores them" : read < want.terms.length ? `Parakeet reads the first ${read}` : "all of them steer Parakeet";
-    this.setVocabulary({ ok: this.biasing !== false, detail: `${want.terms.length} terms in Hex; ${steer}` });
+    const read = Math.min(BIASED_TERMS, biased.length);
+    const steer = this.biasing === false ? "Hex's Labs › Vocabulary biasing is off, so Parakeet ignores them" : read < biased.length ? `Parakeet reads the first ${read}` : "all of them steer Parakeet";
+    const kept = out ? `; ${out} kept out of the decoder and only respelled` : "";
+    this.setVocabulary({ ok: this.biasing !== false, detail: `${biased.length} terms in Hex; ${steer}${kept}` });
+  }
+
+  /** The file read now, for a clip heard before the first sync got to it; nothing when it will not read. */
+  private readTerms(): VocabularyEntry[] {
+    try {
+      const want = parseVocabulary(readFileSync(VOCABULARY_FILE, "utf8"));
+      if ("error" in want) return [];
+      this.terms = want.terms;
+      return want.terms;
+    } catch {
+      return [];
+    }
   }
 
   private setVocabulary(status: ToolStatus): void {
