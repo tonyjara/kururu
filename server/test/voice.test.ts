@@ -197,6 +197,12 @@ describe("adoptVoice", () => {
     expect(got.talkKey).toBe("ControlRight");
   });
 
+  test("the recogniser is Hex unless yap was asked for by name", () => {
+    expect(adoptVoice({}).recogniser).toBe("hex");
+    expect(adoptVoice({ recogniser: "yap" }).recogniser).toBe("yap");
+    expect(adoptVoice({ recogniser: "whisper" }).recogniser).toBe("hex");
+  });
+
   test("no languages at all is both", () => {
     expect(adoptVoice({ languages: [] }).languages).toEqual(["en", "es"]);
   });

@@ -24,6 +24,7 @@ in this folder.
 | `usagereport.ts` | What the Usage page draws, from the ledger's cells: ranges and their edges, buckets, whose a cell is, who keeps which colour |
 | `chartcolor.ts` | The colours a chart may wear, Kuru's moved into the band, and the arithmetic that says they can be told apart |
 | `prices.ts` | What a token costs at list price, dated, read off Anthropic's page. An unknown model has no price, never a guess. Kept by the `update-models` skill |
+| `vocabulary.ts` | The dictation vocabulary file made whole, Hex's list read, and the in-order sync planned (`vocabularyPlan`). Pure, tested |
 | `voice.ts` | The voice's vocabulary: settings, the voice catalogue, which language a text is in, which of two transcripts is real, what of a reply to say aloud, the WAV encoder. Pure, tested |
 | `reload.ts` | An agent reloading the window: what holds a reload, who asked in words, what the agent is told. Pure, tested |
 | `kuru.ts` | The conversation with Kuru as one list: turns, your messages' states and each reply's fate merged, the chip's two counts, the card codes in a reply. Pure, tested |
@@ -164,13 +165,14 @@ in this folder.
 | `src/hooks.ts` | The hooks kururu hands a Claude Code it starts in a profile with a login of its own, whose empty `settings.json` would otherwise run it with none |
 | `src/outbox.ts` | Your words on their way to Kuru, kept on the disk from the moment they arrive until Kuru's own hook says it has them. See [voice](voice.md) |
 | `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` for the harness and `POST /mcp/web` for every agent |
-| `src/voice.ts` | The harness's ears and mouth: a clip through `yap` once per language, the words into the harness; a reply through Kokoro (or `say`) a sentence at a time, Spanish phonemised by `espeak-ng`. `/api/voice/hear`, `/api/speech` (`shared/voice.ts`) |
+| `src/voice.ts` | The harness's ears and mouth: a clip through Hex (`hex.ts`), or `yap` once per language, the words into the harness; a reply through Kokoro (or `say`) a sentence at a time, Spanish phonemised by `espeak-ng`. `/api/voice/hear`, `/api/speech` (`shared/voice.ts`) |
 | `src/kuru.ts` | The conversation assembled for the drawer, from the store's turns, the outbox and the voice's missed list — the `kuru` message, `GET /api/kuru`, its search and the page around a result (`/api/kuru/search`, `/api/kuru/around`), the counts on `/api/health` |
 | `src/channels.ts` | What each channel hears of Kuru's turns: told what Kuru took in and said, decides whether a reply is spoken here, echoes your words from here, says when a channel's message failed |
 | `src/telegram.ts` | The Telegram bot: its token owner-only in `~/.config/kururu/telegram.json`, read per request and never sent back; the long poll (no webhook, nothing listens); the queue out; pairing; shared among nodes, the routing, the held messages, the reply map, the lines handed to the reader and the handover. `KURURU_TELEGRAM_API` points it at a stand-in |
 | `src/connectbudget.ts` | How long one address gets to answer when this process connects: 2.5 s, not Node's 250 ms, set before anything else is imported. Why Telegram's replies once sat nine minutes |
 | `src/lead.ts` | One Telegram among the nodes: runs `LeadGate` on the links, the `lead-*` handshake that moves the poll, and the chat's words (`telegram-in`) and every Kuru's lines (`telegram-out`) crossing them. See [nodes](nodes.md#one-telegram) |
 | `src/reload.ts` | Agents' reload asks: sent to every page on this Mac, timed, answered with what each page did. Reloads nothing itself |
+| `src/hex.ts` | Hex as the ears: its local API found by its discovery file, a WAV to `/transcriptions`, `hex start` with kururu, a warm-up on the talk key, and `vocabulary.json` synced into Hex's list in order |
 | `src/kokoro.ts` | Kokoro in a process of its own (`dist/kokoro.mjs`), forked by `voice.ts` and talked to over IPC. Never exits the ordinary way: its ONNX runtime aborts on exit, so it ends by SIGKILL |
 | `src/voicelab.ts` | The voice lab's trial engines, each in a process of its own the way Kokoro is, started for the first sentence that wants one and ended with SIGKILL |
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it — and stopping one: the named command's tree, never a terminal's (`stopTargets`). Never kururu itself (`isKururu`) |

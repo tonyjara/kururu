@@ -364,15 +364,20 @@ reply out of the database's turns, your messages' states off the outbox,
 each reply's fate off the missed list, merged once on the server
 (`shared/kuru.ts`, `server/src/kuru.ts`) into the `kuru` message; its
 composer types to Kuru through the same outbox a clip takes. The chip is the
-only door, and the sidebar has no harness button. Both halves are local — Apple's
-recogniser through `yap`, Kokoro on the CPU with `say` as the fallback — and
+only door, and the sidebar has no harness button. Both halves are local — Hex's
+Parakeet through its local API with Apple's recogniser through `yap` behind
+it, Kokoro on the CPU with `say` as the fallback — and
 no audio leaves the machine; a channel, below, is the one road off it for
 the conversation, and carries only its text. Kokoro runs in a process of its own
 (`server/src/kokoro.ts`) and is never imported into the server, because its
 runtime turns the exit of whatever loaded it into a SIGABRT. The server hears and speaks for every client;
 a window only posts a WAV and plays one. `web/src/voice.ts` holds the
 microphone and installs the talk key once, through refs, never per render.
-→ [voice](voice.md)
+**Kururu records and Hex only hears**: a finished WAV to Hex's
+`/transcriptions`, never `hex dictation`, its token read per request off its
+discovery file and never held or logged; Hex's list is made from
+`~/Documents/Kururu/dictation/vocabulary.json` and nobody edits it by hand.
+→ [voice](voice.md#hex)
 
 ## Notes
 

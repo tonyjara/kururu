@@ -3,7 +3,9 @@
  *
  * Why this is on the server and not in the window, when the window is the
  * one holding the microphone: the two programs that do the work live on this
- * machine. `yap` is Apple's on-device recogniser behind a command line, and
+ * machine. Hex (`hex.ts`) is a local Parakeet model behind an API, with
+ * `yap`, Apple's on-device recogniser behind a command line, for when it is
+ * not there, and
  * Kokoro is an 82-million-parameter model, loaded once and kept in a process
  * of its own beside the server (`kokoro.ts` says why it is not in this one).
  * Neither is a thing a phone could run, and a phone is the client this
@@ -105,9 +107,10 @@ import {
   type VoiceSettings,
   type VoiceStatus,
 } from "../../shared/voice";
-import { timedTranscript, type TimedText } from "../../shared/ink";
+import { retimeWords, timedTranscript, type TimedText } from "../../shared/ink";
 import type { ServerMessage } from "../../shared/wire";
 import { readConfigFile, writeConfigFile } from "./config";
+import { Hex } from "./hex";
 import type { FromKokoro, ToKokoro } from "./kokoro";
 import { Lab } from "./voicelab";
 
@@ -263,6 +266,8 @@ export class Voice {
   private readonly talkers = new Map<object, ReturnType<typeof setTimeout>>();
   /** The engines on trial, in processes of their own — see `voicelab.ts`. */
   private readonly lab = new Lab(() => this.tell());
+  /** The ears when they are there — see `hex.ts`. */
+  private readonly hex = new Hex({ changed: () => this.tell() });
 
   constructor(private readonly deps: VoiceDeps) {
     this.settings = adoptVoice(readConfigFile(FILE));
@@ -288,6 +293,9 @@ export class Voice {
     return {
       settings: this.settings,
       ears: this.ears,
+      hex: this.hex.status,
+      vocabulary: this.hex.vocabulary,
+      hearing: this.hearsWithHex() ? "hex" : "yap",
       spanish: this.spanish,
       model: this.model,
       voices: [...kokoro, ...labOptions(this.lab.installed()), ...this.system],
@@ -297,9 +305,11 @@ export class Voice {
 
   /** Take settings from a client: made whole, written, and told to every window. */
   set(value: unknown): void {
+    const was = this.settings.recogniser;
     this.settings = adoptVoice(value);
     writeConfigFile(FILE, this.settings);
     this.tell();
+    if (this.settings.recogniser === "hex" && was !== "hex") void this.hex.ensure();
     // Choosing a Kokoro voice is wanting Kokoro; fetch it rather than fall
     // back to `say` and leave the person wondering why the pick did nothing.
     if (this.model.state === "missing" && Object.values(this.settings.voices).some((v) => v.engine === "kokoro")) void this.download();
@@ -321,6 +331,10 @@ export class Voice {
     const espeak = findTool("espeak-ng");
     this.ears = yap ? { ok: true, detail: yap } : { ok: false, detail: missingTool("yap") };
     this.spanish = espeak ? { ok: true, detail: espeak } : { ok: false, detail: missingTool("espeak-ng") };
+    if (this.settings.recogniser === "hex") {
+      this.hex.watchVocabulary();
+      void this.hex.ensure();
+    }
     if (process.platform === "darwin" && !this.system.length) {
       try {
         const { stdout } = await run("/usr/bin/say", ["-v", "?"], { timeout: 10_000, maxBuffer: 1024 * 1024 });
@@ -342,7 +356,13 @@ export class Voice {
    * not run — which the outbox tries again, and which is not the same as
    * hearing nothing.
    *
-   * Transcribed once per language the user speaks, all at once — the
+   * Hex first, when it is the choice and installed: one pass, the language
+   * read off the audio and named afterwards by its words (`detectLanguage`),
+   * the vocabulary already in the decoder. Hex not running, not ready, or
+   * failing on the clip is not the clip's failure — `yap` hears it instead,
+   * and the next clip finds Hex started.
+   *
+   * With `yap`: transcribed once per language the user speaks, all at once — the
    * recogniser is one model per locale and cannot tell which was spoken —
    * and the transcripts compared (`pickTranscript`). A locale whose model has
    * not finished downloading says so on stderr and exits non-zero, and the
@@ -354,6 +374,36 @@ export class Voice {
    * words (`shared/ink.ts`); every other clip keeps `--txt`, unchanged.
    */
   async transcribe(path: string, ms: number, timed = false): Promise<{ text: string; lang: VoiceLang; said?: TimedText } | null> {
+    if (this.settings.recogniser === "hex" && this.hex.installed()) {
+      // The pen's clip wants times as well as words, which Hex does not
+      // give: `yap`'s timed pass runs beside it and lends its clock
+      // (`retimeWords`). Its words are thrown away unless Hex fails.
+      const guide = timed ? this.hearYap(path, ms, true).catch(() => null) : null;
+      try {
+        const text = await this.hex.transcribe(path, ms);
+        if (!text) return null;
+        const lang = detectLanguage(text, this.settings.languages);
+        if (!guide) return { text, lang };
+        return { text, lang, said: retimeWords(text, (await guide)?.said ?? null, ms) };
+      } catch {
+        void this.hex.refresh();
+        // Whatever Hex's trouble, the clip is still somebody's sentence: `yap` hears it.
+        if (guide) {
+          const heard = await guide;
+          if (heard) return heard;
+        }
+      }
+    }
+    return this.hearYap(path, ms, timed);
+  }
+
+  /** Whether the next clip goes to Hex, as far as anyone knows before trying. */
+  private hearsWithHex(): boolean {
+    return this.settings.recogniser === "hex" && this.hex.status.ok;
+  }
+
+  /** `yap`'s way: a pass per language, the likelier kept. The rest is `transcribe`'s doc. */
+  private async hearYap(path: string, ms: number, timed: boolean): Promise<{ text: string; lang: VoiceLang; said?: TimedText } | null> {
     const yap = findTool("yap");
     if (!yap) {
       this.ears = { ok: false, detail: missingTool("yap") };
@@ -400,6 +450,7 @@ export class Voice {
     const timer = this.talkers.get(who);
     if (timer) clearTimeout(timer);
     if (on) this.talkers.set(who, setTimeout(() => this.talk(who, false), TALK_MAX_MS).unref());
+    if (on && !timer && this.settings.recogniser === "hex") this.hex.warm();
     else this.talkers.delete(who);
     if (this.hushed() !== was) this.deps.broadcast(this.hush());
   }
@@ -927,6 +978,7 @@ export class Voice {
   close(): void {
     this.child?.kill("SIGKILL");
     this.lab.close();
+    this.hex.close();
   }
 
   /** The one file that is big is the model itself; the rest are kilobytes. Progress is its progress, told every few percent. */

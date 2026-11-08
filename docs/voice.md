@@ -23,7 +23,7 @@ conversation's *text*, never its audio; see [channels](channels.md).
 | The microphone | `web/src/voice.ts` | PCM off an `AudioWorklet`, 16 kHz mono, written as a WAV by hand (`encodeWav`) and posted to `/api/voice/hear` under an id the page mints. Not a `MediaRecorder`: it writes WebM/Opus, which Apple's recogniser will not open. Five minutes in (`CLIP_ROLL_MS`) what there is goes as a message of its own and the recording carries on. |
 | The stash | `web/src/unsent.ts` | Every clip is written to IndexedDB before it is posted and dropped only once the server answers that it has it; sent again on a backoff, on every reconnect, and by the next page to load. See [nothing you say is lost](#nothing-you-say-is-lost). |
 | The outbox | `server/src/outbox.ts` | The clip on the server's disk the moment it arrives, its words beside it once they are made, handed to Kuru in order and kept until Kuru's own session says it took them. Survives restarts; retries a failed transcription and an unconfirmed delivery. |
-| The ears | `server/src/voice.ts` `transcribe` → `yap` | Apple's on-device recogniser, one model per locale, through a Homebrew command line, reading the outbox's file where it lies. The clip is transcribed once per language you speak, in parallel, and `pickTranscript` keeps the one with the language in it. |
+| The ears | `server/src/voice.ts` `transcribe` → `hex.ts`, else `yap` | Hex's Parakeet v3 through its local API, one pass that hears the language off the audio, biased toward [the vocabulary](#the-vocabulary); see [Hex](#hex). When Hex is not installed, not running or fails on a clip, Apple's on-device recogniser through `yap`, which reads the outbox's file where it lies, once per language you speak, in parallel, and `pickTranscript` keeps the one with the language in it. |
 | The words in | `Harness.hear` | Prefixed `[voice]` so Kuru knows a name may be misheard, and typed into its terminal with `now`, as `send_agent` types: a harness mid-turn hears it between tool calls, one showing a prompt or with your hands in its terminal hears it after. Typed and not posted to its inbox, because Claude Code makes everything on the inbox another session's message — see [harness](harness.md#speaking-into-a-running-agent) — and these are your words. Not running, it is started, and the words wait for its first hook report. It tells the outbox when they are typed, or dropped with a harness that went first. |
 | The words out | `http/agents.ts` `/api/report` → `Voice.spoke` | The harness's own Stop report carries `last_assistant_message`; when the reporter is a profile's harness, that reply is spoken — unless the turn answered only a message from Telegram, whose reply is already on the phone (see [channels](channels.md#is-the-reply-spoken-on-the-mac)). The role prompt tells Kuru its final message is heard, not read. The `say` tool speaks one line mid-turn. |
 | The mouth | `server/src/voice.ts` → `kokoro.ts`, or `say` | Kokoro-82M on the CPU through `kokoro-js`, in a process of its own that the server forks on the first sentence and kills with it, a sentence at a time, each announced on the socket as a `speech` chunk the moment it is ready. The Mac's own `say` voices are the fallback that needs nothing. |
@@ -564,8 +564,11 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
 Kuru is spoken to in English and Spanish, sometimes in one sentence. Three
 things follow.
 
-- **Hearing** runs every ticked language's model over the clip and compares
-  the transcripts. The wrong model's output is recognisable — the Spanish
+- **Hearing** is one pass through Hex, whose Parakeet v3 reads the language
+  off the audio and writes a sentence of both as it was said; the language
+  it is in is named afterwards by its words (`detectLanguage`), for the
+  voice that answers. With `yap`, it runs every ticked language's model over
+  the clip and compares the transcripts. The wrong model's output is recognisable — the Spanish
   model hearing English writes Spanish-looking nonsense with none of the
   language's function words; the English one hearing Spanish writes a row of
   commas — so the one that uses more of its own language's commonest words,
@@ -584,10 +587,100 @@ things follow.
   line drops it and Kokoro's prosody lives in it. Without `espeak-ng`,
   Spanish falls back to a Mac voice.
 
+## Hex
+
+Hex (anomalyco/hex, MIT, from the team behind OpenCode) is a dictation app
+with its own key, HUD, sounds and paste. Kururu uses none of that, only its
+engine, and why that is not `hex dictation start` / `stop --print` is the
+whole design (`server/src/hex.ts`): **kururu records and Hex only hears.**
+The clip is often not this Mac's microphone — it is the phone's, or the
+pill's — and a second recorder would race kururu's for the device and want
+a microphone grant of its own. Hex's desktop local API takes a finished WAV
+at `POST /transcriptions` and answers with the words, through the same
+model and vocabulary bias as its own dictation, pasting, playing and
+keeping nothing. So every clip kururu already makes — the talk key, the key
+in every app, the pill, the drawer's mic, the quote's mic, the phone — is
+heard by Hex the same way, and nothing on screen changes.
+
+- **Found by its discovery file**, `~/Library/Application Support/hex/local-api.json`
+  (owner-only: a port, a bearer token, a pid), read at every request and
+  never held; the token goes to 127.0.0.1 only and is in no log or message.
+  A dead pid is a Hex that is not running.
+- **The model is Hex's selection** (`status` over `POST /control`), Parakeet
+  v3 here. It has no language setting that matters: it hears the language
+  from the audio and ignores the hint, which is why `hex model install
+  parakeet_v3 --language auto` is refused and `es` stands in for Auto.
+- **Started with kururu, never stopped.** A server whose ears are Hex runs
+  `hex start` at boot (Launch Services, so Hex is nobody's child), again on
+  a clip that finds it gone — that clip goes to `yap` — at most once a
+  minute, and leaves Hex running when it goes.
+- **Warm by the time you stop talking.** The talk key going down sends a
+  `prepare` for the model: Hex keeps its weights resident three minutes
+  after a run and macOS may swap them after that.
+- **The pen's clips** want word times, which Hex does not give. `yap`'s timed
+  pass runs beside it and lends its clock: each of Hex's words is put where
+  `yap` was at the same fraction of its own transcript (`retimeWords` in
+  `shared/ink.ts`).
+- **What it costs:** about 200–300 ms a clip with the vocabulary on, 80 ms
+  without, against `yap`'s 400–650 ms for its two passes.
+- **Settings → Voice → Ears** is "Hex, yap when it is not there" (the
+  default) or "yap only", with a line each for Hex, the vocabulary and
+  `yap`, and the line under the choice says which the next clip goes to.
+
+**Hex's own face, turned off** on this Mac on 2026-11-08 with `hex settings
+set` — kururu does not set these, and does not fight anybody who changes them
+back: `sound_effects false` (and volume 0), `indicator_position hidden`,
+`show_dock_icon false`, `paste_last_hotkey none`, `double_tap_lock false`,
+`capture.enabled false` (Annotate's ⌥⇧S would have collided with nothing of
+kururu's but is Hex's screen recorder), `history_retention off`,
+`meetings.calendar.remind false`, and `dictation_hotkey` moved to
+⌃⌥⇧⌘F19, since it cannot be unbound and its default is a bare Option hold.
+`labs.vocabulary_biasing true` and `vocabulary_boost normal` are the two that
+make it hear better. What cannot be hidden: **its menu-bar icon**, and an
+update prompt when Hex updates itself (the cask is `auto_updates`).
+`strong` was tried and refused: it wrote "the Bancard is on the table" for
+"the bank card" and "a Platypost at the post office".
+
+## The vocabulary
+
+`~/Documents/Kururu/dictation/vocabulary.json` is the one list of words
+dictation should know, and Hex's list is made from it (`shared/vocabulary.ts`,
+`Hex.syncVocabulary`). It is a file the user owns because the thing that most
+often adds to it is Kuru, told "it keeps writing Pasapi" — the role prompt
+says where it is and how — and a list in Hex's window or kururu's settings is
+one Kuru cannot edit.
+
+```json
+{ "terms": [ { "term": "Pasapy", "sounds_like": ["Pasapi", "Passapi"] }, { "term": "Expo" } ],
+  "phrases": [ { "heard": "Tarifa Predator", "meant": "tarifa predeterminada" } ] }
+```
+
+- **Order is the point.** Parakeet reads the first 64 terms only, so the most
+  misheard go first, and the sync keeps the file's order: what matches from
+  the front stays, everything after the first difference is removed and added
+  again (`vocabularyPlan`), so a second sync of the same file does nothing.
+  A term edited in Hex's own window is gone at the next sync.
+- **Synced** at boot, whenever the folder changes (an editor replaces the
+  file; 300 ms of quiet first), and when the talk key goes down if Hex or the
+  file changed since — a Hex that restarted is a new pid and is synced again.
+  A file that is not JSON leaves Hex's list as it was and Settings says why.
+- **`phrases`** are whole-phrase mishearings, read and kept for a cleanup pass
+  that is not built. They are never a find-and-replace.
+- **Cleanup is off.** Hex can rewrite through a local OpenCode service with a
+  prompt per mode (Output steps), but only for its own dictations — the
+  local API's transcript is raw — and the rewrite wants a model somewhere,
+  which is a key and a bill. Wiring it would be a server-side pass after
+  `transcribe`: the glossary and `phrases` into a short prompt, a fast model
+  (gpt-oss-120b or Gemini Flash Lite through the OpenRouter key kururu
+  already stores, about $1–3 a month at an hour and a half a day), and the
+  raw words kept when it is slow or fails. Kuru reading `[voice]` loosely
+  covers most of it today.
+
 ## Installing
 
 ```sh
-brew install yap        # the ears — macOS 26 or later
+brew install --cask anomalyco/tap/hex   # the ears; then: hex model install parakeet_v3 --language es
+brew install yap        # the ears' fallback — macOS 26 or later
 brew install espeak-ng  # Spanish through Kokoro; English needs nothing
 ```
 

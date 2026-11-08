@@ -13,7 +13,10 @@
  *
  * The page also says what is installed: the ears and the Spanish phonemes are
  * Homebrew programs and the model is a download, and a key that does nothing
- * because a program is missing is the worst kind of broken.
+ * because a program is missing is the worst kind of broken. The ears are two:
+ * Hex when it is there and `yap` behind it, and the page says which the next
+ * clip goes to rather than which was picked, since a picked Hex that is not
+ * running is `yap` until it is.
  *
  * **One switch is about reading rather than hearing:** whether a long
  * message starts folded in Kuru's drawer. It is here because Voice is the
@@ -179,6 +182,8 @@ export function VoicePage() {
     );
   }
   const { settings, ears, spanish, model, voices } = voice;
+  const hex = voice.hex;
+  const byHex = voice.hearing === "hex";
   const set = (patch: Partial<VoiceSettings>) => api.setVoice({ ...settings, ...patch });
 
   const toggleLang = (lang: VoiceLang, on: boolean) => {
@@ -264,7 +269,17 @@ export function VoicePage() {
         const labGroups = [...new Set(lab.map((v) => v.group ?? "Trial"))];
         const known = voices.some((v) => v.engine === chosen.engine && v.id === chosen.voice);
         return (
-          <Group key={lang} title={LANG_NAMES[lang]} foot={i === 0 ? "Each clip is heard in every language switched on and the one it was in wins; the first switched on is the tie-breaker." : undefined}>
+          <Group
+            key={lang}
+            title={LANG_NAMES[lang]}
+            foot={
+              i === 0
+                ? byHex
+                  ? "Hex hears the language from the clip itself, a sentence of both included; the languages switched on here are the ones Kuru answers in, and the accents are for yap when Hex is not there."
+                  : "Each clip is heard in every language switched on and the one it was in wins; the first switched on is the tie-breaker."
+                : undefined
+            }
+          >
             <Toggle label="Heard" on={heard} onChange={(on) => toggleLang(lang, on)} />
             <Select label="Accent" value={settings.locales[lang]} disabled={!heard} ariaLabel={`${LANG_NAMES[lang]} accent`} onChange={(locale) => set({ locales: { ...settings.locales, [lang]: locale } })}>
               {LOCALES[lang].map((locale) => (
@@ -316,12 +331,20 @@ export function VoicePage() {
         title="On this Mac"
         foot={
           <>
-            Kokoro is the better voice and runs on the CPU; the Mac's own voices are used until it is ready. The ears are Apple's recogniser through <Mono>yap</Mono>.
+            Kokoro is the better voice and runs on the CPU; the Mac's own voices are used until it is ready. Hex hears with Parakeet on this Mac, its own key, sounds and paste off; when it is not there or fails, Apple's recogniser hears through <Mono>yap</Mono>. Words it should know go in <Mono>~/Documents/Kururu/dictation/vocabulary.json</Mono>, or tell Kuru.
             {!!voice.lab?.length && <> Trial voices come from <Mono>~/.cache/kururu/voicelab</Mono>; the first sentence after a pick loads the model.</>}
           </>
         }
       >
-        <Readout label="Ears" tone={ears.ok ? "ok" : "bad"} value={ears.ok ? `yap: ${ears.detail}` : ears.detail} />
+        {hex && (
+          <Select label="Ears" hint={byHex ? "Clips go to Hex." : settings.recogniser === "hex" ? "Clips go to yap until Hex answers." : "Clips go to yap."} value={settings.recogniser} ariaLabel="Ears" onChange={(next) => set({ recogniser: next === "yap" ? "yap" : "hex" })}>
+            <option value="hex">Hex, yap when it is not there</option>
+            <option value="yap">yap only</option>
+          </Select>
+        )}
+        {hex && <Readout label="Hex" tone={hex.ok ? "ok" : settings.recogniser === "hex" ? "bad" : "off"} value={hex.detail} />}
+        {hex && voice.vocabulary && settings.recogniser === "hex" && <Readout label="Vocabulary" tone={voice.vocabulary.ok ? "ok" : "bad"} value={voice.vocabulary.detail} />}
+        <Readout label={hex ? "yap" : "Ears"} tone={ears.ok ? "ok" : "bad"} value={ears.ok && !hex ? `yap: ${ears.detail}` : ears.detail} />
         <Readout label="Voice model" tone={modelTone} value={modelLine}>
           {(model.state === "missing" || model.state === "error") && (
             <Btn primary onClick={() => api.downloadVoiceModel()}>

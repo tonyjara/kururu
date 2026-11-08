@@ -57,6 +57,16 @@ export const LOCALES: Record<VoiceLang, readonly { id: string; name: string }[]>
   ],
 };
 
+/**
+ * Which program hears a clip. Hex (`server/src/hex.ts`) is Parakeet v3, one
+ * pass that hears the language from the audio and a vocabulary it is biased
+ * toward; `yap` is Apple's recogniser, a pass per language and no
+ * vocabulary. Hex is the choice and `yap` what is used whenever Hex is not
+ * installed, not running, or fails on a clip, so the key never goes deaf
+ * for a missing app.
+ */
+export type Recogniser = "hex" | "yap";
+
 /** Which program says the words. `lab` is the engines on trial — see `LAB_MODELS`. */
 export type VoiceEngine = "kokoro" | "lab" | "system";
 
@@ -71,7 +81,9 @@ export interface VoiceSettings {
   speak: boolean;
   /** The languages you speak to it, in order of preference. At least one. */
   languages: VoiceLang[];
-  /** The recogniser's locale per language. */
+  /** Which recogniser hears a clip first; see `Recogniser`. */
+  recogniser: Recogniser;
+  /** `yap`'s locale per language. Hex hears the language from the audio and has none. */
   locales: Record<VoiceLang, string>;
   /** The voice it answers in, per language. */
   voices: Record<VoiceLang, VoiceChoice>;
@@ -90,6 +102,7 @@ export interface VoiceSettings {
 export const DEFAULT_VOICE: VoiceSettings = {
   speak: true,
   languages: ["en", "es"],
+  recogniser: "hex",
   locales: { en: "en-US", es: "es-MX" },
   voices: {
     en: { engine: "kokoro", voice: "af_heart" },
@@ -619,6 +632,7 @@ export function adoptVoice(value: unknown): VoiceSettings {
   return {
     speak: typeof raw.speak === "boolean" ? raw.speak : DEFAULT_VOICE.speak,
     languages: languages.length ? languages : [...DEFAULT_VOICE.languages],
+    recogniser: raw.recogniser === "yap" || raw.recogniser === "hex" ? raw.recogniser : DEFAULT_VOICE.recogniser,
     locales,
     voices,
     speed: num(raw.speed, DEFAULT_VOICE.speed, 0.5, 2),
@@ -674,8 +688,14 @@ export interface ModelStatus {
 /** Everything a window needs to draw Settings → Voice and to know whether the key will do anything. Never carries audio. */
 export interface VoiceStatus {
   settings: VoiceSettings;
-  /** `yap`, the ears. */
+  /** `yap`, the ears Hex falls back to. */
   ears: ToolStatus;
+  /** Hex, the ears when it is there. Absent from a server from before it. */
+  hex?: ToolStatus;
+  /** `~/Documents/Kururu/dictation/vocabulary.json` and Hex's copy of it. */
+  vocabulary?: ToolStatus;
+  /** Which recogniser the next clip goes to, as things stand. */
+  hearing?: Recogniser;
   /** `espeak-ng`, which Spanish needs for Kokoro. English does not. */
   spanish: ToolStatus;
   /** Kokoro. */

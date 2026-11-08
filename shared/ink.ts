@@ -559,6 +559,57 @@ export function timedTranscript(json: string): TimedText | null {
   return { text, words };
 }
 
+/**
+ * Better words on another recogniser's clock. Hex hears a clip far better
+ * than `yap` but says only what was said, not when, and the pen's marks are
+ * placed by time (`alignMarks`). So the words are Hex's and the times are
+ * borrowed from `yap`'s timed pass over the same clip: each of Hex's words
+ * is put at the time `yap` was at the same fraction of the way through its
+ * own transcript. Two transcripts of one clip run at the same pace even when
+ * they disagree on the words, which is all a mark one word early or late
+ * needs; matching the words themselves would fail on exactly the words Hex
+ * is here to fix. With no guide — `yap` absent or hearing nothing — the
+ * words are spread evenly over the clip, the same pace without the pauses.
+ * Pure.
+ */
+export function retimeWords(text: string, guide: TimedText | null, ms: number): TimedText {
+  const clean = text.replace(/\s+/g, " ").trim();
+  const length = Math.max(1, clean.length);
+  const span = Number.isFinite(ms) && ms > 0 ? ms : 0;
+  // (fraction of the text, ms) pairs, rising in both, from the guide's placed words.
+  const anchors: [number, number][] = [];
+  if (guide && guide.text.length && guide.words.length) {
+    for (const w of guide.words) {
+      if (w.from < 0 || !Number.isFinite(w.start)) continue;
+      const f = w.from / guide.text.length;
+      const last = anchors[anchors.length - 1];
+      if (!last || (f >= last[0] && w.start >= last[1])) anchors.push([f, w.start]);
+    }
+    const end = guide.words[guide.words.length - 1]!;
+    const last = anchors[anchors.length - 1];
+    if (last && Number.isFinite(end.end) && end.end >= last[1]) anchors.push([1, end.end]);
+  }
+  if (anchors.length < 2) anchors.splice(0, anchors.length, [0, 0], [1, span]);
+  const at = (f: number): number => {
+    if (f <= anchors[0]![0]) return anchors[0]![1];
+    for (let i = 1; i < anchors.length; i++) {
+      const [f1, t1] = anchors[i]!;
+      if (f <= f1) {
+        const [f0, t0] = anchors[i - 1]!;
+        return Math.round(f1 === f0 ? t1 : t0 + ((f - f0) / (f1 - f0)) * (t1 - t0));
+      }
+    }
+    return anchors[anchors.length - 1]![1];
+  };
+  const words: TimedWord[] = [];
+  for (const m of clean.matchAll(/\S+/g)) {
+    const from = m.index ?? 0;
+    const to = from + m[0].length;
+    words.push({ text: m[0], start: at(from / length), end: at(to / length), from, to });
+  }
+  return { text: clean, words };
+}
+
 /** Words people point with, in the two languages the voice speaks. */
 const POINTING = new Set(["this", "that", "these", "those", "here", "there", "it", "esto", "eso", "este", "ese", "esta", "esa", "estos", "esos", "estas", "esas", "aquí", "aqui", "ahí", "ahi", "allí", "alli", "acá", "aca", "allá", "alla", "aquel", "aquella"]);
 /**

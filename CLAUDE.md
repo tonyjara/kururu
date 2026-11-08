@@ -236,6 +236,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **The voice is ears and a mouth around that session, not a second brain** —
   local only, the drawer is the conversation's one home, and Kokoro is never
   imported into the server. → [more](docs/invariants.md#the-voice)
+- **Kururu records and Hex only hears** — a finished WAV to Hex's local
+  `/transcriptions`, `yap` behind it; Hex's vocabulary is made from
+  `~/Documents/Kururu/dictation/vocabulary.json`, in its order. →
+  [voice](docs/voice.md#hex)
 - **A note is a card kept in sight, never a copy of one** — looked up by id on
   every render; in the desktop app, a window of its own. →
   [more](docs/invariants.md#notes)
