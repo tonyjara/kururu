@@ -7,7 +7,8 @@
  *
  * **One popover for the whole page, not one per card.** The words that can
  * be quoted are marked where they are drawn — `quotable` on a card's title
- * and body, a note's body, a reply of Kuru's and a notice's message, and
+ * and body, a note's body, a reply of Kuru's, a notice's message and a
+ * message of your own, and
  * `quotableFile` on a reader's document — with
  * the reference to write in front of the quote: the card's own, the words
  * its menu's "Reference in Kuru" writes, the message's, the words its

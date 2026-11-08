@@ -292,12 +292,14 @@ export function KuruDrawer({
   /**
    * The words a quote of a line's words is written after — the reference
    * its reply arrow writes, so Kuru finds the message as it finds a reply's
-   * — for Kuru's replies and kururu's notices in this node's conversation.
-   * Another node's line is left unquotable: a quote is a line among others
+   * — for Kuru's replies, kururu's notices and your own messages in this
+   * node's conversation. Your own are quoted as `me`, as a reply to one is,
+   * so a word the recogniser heard wrong in what you said can be pointed at
+   * and talked about (the owner, 2026-11-08). Another node's line is left unquotable: a quote is a line among others
    * in the box, with no `@node` in front of it to send it to the Kuru that
    * said it, and the id in it would be that Kuru's.
    */
-  const quoteRefOf = (item: NodeKuruItem & (KuruReply | NoticeItem)): string | null => {
+  const quoteRefOf = (item: NodeKuruItem & (YouItem | KuruReply | NoticeItem)): string | null => {
     if (item.node !== null) return null;
     const ref = replyRefOf(item, item.id, Date.now());
     return ref ? replyReference(ref) : null;
@@ -1078,6 +1080,7 @@ export function KuruDrawer({
                       return line ? () => goTo(line) : null;
                     }}
                     onReplyTo={() => replyTo(item)}
+                    quoteRef={quoteRefOf(item)}
                     flash={flash === item.id || (searching && walked === item.id)}
                     folded={foldedOf(item) === true}
                     onFold={item.text ? () => toggleFold(item) : null}
@@ -1520,6 +1523,7 @@ function You({
   onQuote = null,
   answerOf = noAnswers,
   onReplyTo = null,
+  quoteRef = null,
   flash = false,
   folded = false,
   onFold = null,
@@ -1538,6 +1542,8 @@ function You({
   answerOf?: AnswerOf;
   /** Reply to this message. Null for a clip still on this page, which has no words to quote. */
   onReplyTo?: (() => void) | null;
+  /** What a quote of its words is written after (`quoteRefOf`), or null where they cannot be quoted. */
+  quoteRef?: string | null;
   flash?: boolean;
   folded?: boolean;
   /** Fold it to one row, or open it. Null for a message with no words to fold. */
@@ -1585,7 +1591,7 @@ function You({
       </span>
       {!line && reply && !inline && <Quote quote={reply.ref} node={node ?? to} onOpen={onQuote} />}
       {line ? null : text ? (
-        <p className="kuru-text">
+        <p className="kuru-text" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
           {words(text)}
         </p>
       ) : (

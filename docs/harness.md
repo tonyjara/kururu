@@ -198,8 +198,8 @@ words from.
 ### Part of a card or a message, quoted with a comment
 
 Select words in an open card — a workspace's board or the profile's —
-in a note's body, in a reply of Kuru's or in a kururu notice's message,
-and a small quote mark comes up by the end of the selection. Pressing it
+in a note's body, in a reply of Kuru's, in a kururu notice's message or
+in a message of the user's own, and a small quote mark comes up by the end of the selection. Pressing it
 opens a field for the comment; Enter in it, or its arrow, puts the
 reference, the quote and the comment into the box as a line of their
 own; Escape or a press anywhere else closes it. Several stack up as the
@@ -210,12 +210,16 @@ until the user sends it:
 [card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)] [quote "the button sits under … on every screen"] make it the first thing
 [card ACM-16 "Design the checkout…" (w8/c3f9a1e07b2d4)] [quote title "Design the checkout"] and the mobile one
 [reply to Kuru 18:42 "I started two agents on the checkout…" (t1234)] [quote "the second one rebuilds the cart"] stop that one
+[reply to me 18:40 "Run the review on payable…" (t1231)] [quote "payable"] I said Fable
 ```
 
 The reference is the card's own, whole, so the drawer draws its door and
 the role reads it as any other — or, for a message, the reference its
 reply arrow writes, so a quote that starts the message is drawn as that
-reply's door back to the line. The quote names the part — `quote title`
+reply's door back to the line. The user's own message is `me`, as its
+reply arrow writes it and as the role already reads it, so a word the
+recogniser got wrong in something they said can be pointed at and
+corrected (the owner, 2026-11-08). The quote names the part — `quote title`
 for a card's title — and is cut in the middle rather than at the end
 (`quoteWords`), because which part is a matter of both ends. The role's
 "Cards the user points at" says the quote is the part meant and the
