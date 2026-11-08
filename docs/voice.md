@@ -641,6 +641,28 @@ update prompt when Hex updates itself (the cask is `auto_updates`).
 `strong` was tried and refused: it wrote "the Bancard is on the table" for
 "the bank card" and "a Platypost at the post office".
 
+**Hex against `yap`, 2026-11-08**, on clips made with `say` (Paulina for
+Spanish, Samantha for English, one spliced from both), not a person's voice.
+Key words right: Hex with the vocabulary at `normal` 29 of 36, `yap` through
+kururu's two-pass pick 11 of 36; whole sentences right, Hex 3 of 8, `yap` 0.
+
+| clip | `yap` (en-US + es-MX, `pickTranscript`) | Hex, Parakeet v3 + vocabulary |
+|---|---|---|
+| mixed | Chekuru abrí el cartel de Platipostia C el Merche del brunch, después el de Ploya Vercelel. | Che Kuru, abrí el kart de Platypost y hacé el merge del branch, después el deploy a Vercel. |
+| mixed | Necesito que el Age entrepassapi revise el CIfen y bancarla antes del viernes. | Necesito que el agent de Pasapy revise el SIFEN y Bancard antes del viernes. |
+| mixed | Decile a Legend de Kuru que corra los tests de Pilinki que haga push. | Decirle a Lagent de Kururu que corra los tests de pilinki que haga push. |
+| spliced | kuru, Ab, Full request de Pass y revisa que devolvegrate sea la tarifa predeterminada para el viernes. | Checuru, abrí el full request de Pasapy y revisa que el default rate sea la tarifa predeterminada para el viernes. |
+| Spanish | Mándale a Pasapi el viernes la tarifa predeterminada. | Mándale a Pasapy el viernes la tarifa predeterminada. |
+| Spanish | La tarifa predeterminada de Rogapi cambia el viernes, avísale a Olapi. | La tarifa predeterminada de Rogapy cambia el viernes, avísale a Olapi. |
+| English | Ask Curu to open the piling pool request and run the tests in Curu. | Ask Kururu to open the PyLink pull request and run the tests in Kururu. |
+| English | Tell the platypost agent that Banker and Siffin are down on Friday. | Tell the Platypost agent that Bancard and SIFEN are down on Friday. |
+
+What still slips: "Kuru" said before "to" is pulled to Kururu (said alone it
+is Kuru), "Holapy" after "a" stays Olapi at `normal` (`strong` fixes it and
+breaks the bank card), and English words inside Spanish ("card", "pull")
+are spelled by ear. Five near-miss sentences ("pasá por acá", "the bank card",
+"a platypus at the post office") came through untouched at `normal`.
+
 ## The vocabulary
 
 `~/Documents/Kururu/dictation/vocabulary.json` is the one list of words
