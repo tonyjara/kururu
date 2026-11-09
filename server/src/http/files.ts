@@ -6,7 +6,7 @@
  * before them. Each handler is the body of the `if` it was.
  */
 import { noteCards } from "../../../shared/notecards";
-import { appearance, host, overlay, workspaces } from "../context";
+import { host, overlay, workspaces } from "../context";
 import { NVIM_BODY_LIMIT, nvimBuffer } from "../editors";
 import { parseFileOp, runFileOp } from "../fileops";
 import { allowedRoots, findDocs, listDirs, readBytes, readFile } from "../files";
@@ -76,7 +76,7 @@ export const fileRoutes: Route[] = [
       void (async () => {
         try {
           const file = readFile(root, path);
-          json(res, await renderMarkdown(file.text, root, path, appearance.themeId));
+          json(res, await renderMarkdown(file.text, root, path));
         } catch (err) {
           json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
         }
@@ -122,7 +122,7 @@ export const fileRoutes: Route[] = [
         json(res, { error: "no such card" }, 404);
         return;
       }
-      void renderMarkdown(card.body, "", "card.md", appearance.themeId).then(
+      void renderMarkdown(card.body, "", "card.md").then(
         (rendered) => json(res, { html: rendered.html }),
         (err: unknown) => json(res, { error: err instanceof Error ? err.message : String(err) }, 400),
       );

@@ -1,6 +1,7 @@
 /**
- * That a chart's colours can be told apart, on every theme kururu ships, in both
- * appearances, before anybody has to look.
+ * That a chart's colours can be told apart on the look kururu has, before
+ * anybody has to look, and that the `--chart-*` values written in the
+ * stylesheet are the ones `chartTokens` works out for its accent.
  *
  * The first describe holds the arithmetic to the data-viz method's own published
  * figures for its reference palette, so that a slip in the OKLab or the colour
@@ -10,7 +11,20 @@
  */
 import { describe, expect, it } from "bun:test";
 import { checkPalette, chartTokens, restInk, contrast, CONTRAST_MARK, CVD_FLOOR, CVD_TARGET, deltaE, kuruInk, lightnessChroma, LIGHTNESS_BAND, NORMAL_FLOOR, SERIES, SERIES_SLOTS } from "../../shared/chartcolor";
-import { THEMES } from "../../shared/theme";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** The `:root` block of the stylesheet, as the custom properties it declares. */
+const root: Record<string, string> = {};
+{
+  const css = readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8");
+  const block = css.slice(css.indexOf(":root {"), css.indexOf("\n}\n", css.indexOf(":root {")));
+  for (const match of block.matchAll(/^\s*(--[\w-]+):\s*([^;]+);/gm)) root[match[1]!] = match[2]!.trim();
+}
+const theme = {
+  appearance: "dark" as const,
+  ui: { accent: root["--accent"]!, dim: root["--dim"]!, dimmer: root["--dimmer"]!, chrome: root["--chrome"]!, bg: root["--bg"]! },
+};
 
 describe("the arithmetic", () => {
   const LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
@@ -35,8 +49,8 @@ describe("the arithmetic", () => {
   });
 });
 
-for (const theme of THEMES) {
-  describe(theme.id, () => {
+{
+  describe("the look in the stylesheet", () => {
     const appearance = theme.appearance;
     const kuru = kuruInk(theme.ui.accent, appearance)!;
     const series = SERIES[appearance];
@@ -56,12 +70,8 @@ for (const theme of THEMES) {
     }
 
     it("has a real second channel wherever a mark is under 3:1", () => {
-      // A warn, not a failure: every chart has a legend, a 2px gap and a table.
-      // Dark themes have no such mark at all, and the list for Latte is pinned so
-      // that a change of palette is a decision.
       const low = [kuru, ...series].filter((colour) => contrast(colour, theme.ui.chrome) < CONTRAST_MARK);
-      if (appearance === "dark") expect(low).toEqual([]);
-      else expect(low.length).toBeLessThanOrEqual(5);
+      expect(low).toEqual([]);
     });
 
     it("keeps the accent's hue for Kuru, inside the band", () => {
@@ -75,7 +85,7 @@ for (const theme of THEMES) {
         const b = parseInt(hex.slice(5, 7), 16);
         return { greenest: g >= r && g >= b };
       };
-      // Every built-in accent is a green, and a chart must not make it something else.
+      // The accent is a green, and a chart must not make it something else.
       expect(hue(kuru).greenest).toBe(hue(theme.ui.accent).greenest);
     });
 
@@ -88,8 +98,9 @@ for (const theme of THEMES) {
       expect(Math.min(deltaE(top, rest, "protan"), deltaE(top, rest, "deutan"))).toBeGreaterThanOrEqual(CVD_FLOOR);
     });
 
-    it("can see the quiet colour on its surface and writes every token", () => {
+    it("can see the quiet colour on its surface, and the stylesheet holds every token as worked out", () => {
       const tokens = chartTokens(theme);
+      for (const [name, value] of Object.entries(tokens)) expect(`${name}: ${root[name]}`).toBe(`${name}: ${value}`);
       expect(contrast(tokens["--chart-rest"]!, theme.ui.chrome)).toBeGreaterThanOrEqual(CONTRAST_MARK);
       expect(tokens["--chart-kuru"]).toBe(kuru);
       for (let slot = 1; slot <= SERIES_SLOTS; slot++) {

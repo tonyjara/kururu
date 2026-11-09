@@ -33,15 +33,11 @@
  * the card's title, for the menu bar's list.
  */
 import { useEffect, useRef, useState } from "react";
-import { skinFor } from "../../../shared/skin";
-import { themeFor } from "../../../shared/theme";
 import type { NoteReport, NoteSelf } from "../desktop";
 import { forgetNoteQuote, quoteAcross } from "../notequote";
 import { desktopNotes, locateCard } from "../notes";
 import { installReload } from "../reload";
 import { useKururu } from "../session";
-import { applySkin } from "../skin";
-import { applyTheme } from "../theme";
 import { NoteInside, readNote } from "./Notes";
 import { QuoteToKuru } from "./Quote";
 
@@ -68,23 +64,6 @@ export function NotePage() {
     };
   }, []);
 
-  /**
-   * Wear the server's theme and skin — the chrome's tokens only, since a
-   * note has no terminal whose palette would want a reload. Keyed as `App`
-   * keys it, serialized, because a snapshot is a new object on every tick.
-   */
-  const appearance = snapshot?.appearance;
-  const styles = snapshot?.styles;
-  const appearanceKey = appearance
-    ? JSON.stringify(appearance) + (styles?.installed.map((s) => `${s.kind}/${s.id}@${s.version}`).join() ?? "")
-    : null;
-  useEffect(() => {
-    if (!appearance) return;
-    applyTheme(themeFor(appearance.themeId, styles?.themes));
-    applySkin(skinFor(appearance.skinId, styles?.skins));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appearanceKey]);
-
   const profile = snapshot?.profile ?? null;
   const present: NoteReport["present"] | null =
     !profile || !self ? null : profile.key !== self.profileKey ? "away" : locateCard(profile, self.cardId) ? "here" : "gone";
@@ -97,7 +76,7 @@ export function NotePage() {
   }, [title]);
 
   /**
-   * Said once the note is drawn in its theme, and again only when what is
+   * Said once the note is drawn, and again only when what is
    * said changes: what it is showing, its title, the ground under it — the
    * window behind the page is painted that colour, so a resize does not
    * flash another — and its title bar's height, which is what a folded
@@ -115,7 +94,7 @@ export function NotePage() {
       background: root.current ? groundOf(root.current) : undefined,
       head: head ? Math.ceil(head.getBoundingClientRect().height) : undefined,
     });
-  }, [present, title, code, profile?.name, appearanceKey]);
+  }, [present, title, code, profile?.name]);
 
   if (!snapshot || !self || !profile || !seen || present === "away") return null;
   const notes = desktopNotes();

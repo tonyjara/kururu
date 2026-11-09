@@ -6,81 +6,96 @@
  * agent is saying. Hence the narrow sidebar, the one-line pane bars, and the
  * absence of anything with a shadow on it.
  *
- * Every colour in here is a token, and that is now load-bearing rather than
- * tidy. The values below are written onto the root element at runtime by
- * `web/src/theme.ts` out of whichever theme the server says is on, so a rule
- * that names a hex is a rule that stays one colour while the window around it
- * changes — which is what the last dozen of them did, and why `#ff8a80`,
- * `#33413a` and three different near-blacks are now `--danger`, `--line-high`
- * and `--on-accent`. If you need a colour that is not here, add a token to
- * `UiTokens` and let every theme answer for it; do not reach for a hex.
- *
- * The block below is therefore a default and not the palette. It holds
- * kururu's own theme, which is what kururu opens in, and it is what is on screen
- * for the frame between this stylesheet painting and the first snapshot
- * arriving — a first paint in some other theme's colours would be a flash of
- * the wrong application. It is also what keeps this file readable on its own.
+ * Kururu has one look, and the block below is all of it: the colours, the
+ * shape and the type, as custom properties the rules ask for by name. Nothing
+ * writes them at run time. The values are the ones the owner was on when the
+ * theme registry and the skins were taken out (2026-11-09): Dracula's palette
+ * on the chrome kururu always had.
  *
  * The terminal's own palette is *not* here and cannot be: the emulator paints
- * into a canvas, so CSS reaches none of it. It used to be a second palette kept
- * in step with this one by hand; it is not now. Both halves come out of one
- * `Theme` in `shared/theme.ts`, and the other half is handed to ghostty as an
- * object in `terminals.ts`.
+ * into a canvas, so CSS reaches none of it. It is `TERMINAL` in
+ * `shared/theme.ts`, handed to ghostty as an object in `terminals.ts`, and
+ * `--bg` here is its `background`. The two are kept in step by hand.
  */
 
 :root {
   color-scheme: dark;
 
-  --bg: #0d0f0e;
-  --chrome: #141817;
-  --chrome-high: #1b201e;
-  --line: #242b28;
-  --line-high: #33413a;
-  --text: #d7dbd8;
-  --text-strong: #eef1ef;
-  --dim: #7c857f;
-  --dimmer: #565e59;
-  --accent: #7fd6a2;
-  --on-accent: #06100b;
+  /* The ground the pane grid sits on, and the terminal's background. */
+  --bg: #282a36;
+  /* Sidebar, tab strips, dialogs: everything that is not a terminal. */
+  --chrome: #21222c;
+  --chrome-high: #343746;
+  --line: #44475a;
+  --line-high: #6272a4;
+  --text: #f8f8f2;
+  --text-strong: #ffffff;
+  --dim: #a6aec7;
+  --dimmer: #6272a4;
+  --accent: #50fa7b;
+  /* Text on a bright fill: the accent button, the PREFIX badge. */
+  --on-accent: #21222c;
 
-  --idle: #6b736e;
-  /* Orange, and not the accent green it used to be: "working" was the same
-     colour as every focus ring and unread mark in here, which made the one
-     state worth spotting the least distinguishable thing on the row. Warm
-     enough to be told apart from `--blocked` above it at a glance. */
-  --working: #ff9f43;
-  --blocked: #e3c46a;
-  --done: #7aa6da;
-  --exited: #4a524d;
+  /* The four agent states, and the fifth that is the absence of one.
+     "Working" is orange and not the accent, so the one state worth spotting is
+     not the colour of every focus ring and unread mark. */
+  --idle: #6272a4;
+  --working: #ffb86c;
+  --blocked: #f1fa8c;
+  --done: #8be9fd;
+  --exited: #44475a;
 
-  --danger: #ff8a80;
-  --danger-bg: #b3453c;
-  --on-danger: #ffffff;
+  /* A destructive label is text; the one destructive button is a fill. */
+  --danger: #ff5555;
+  --danger-bg: #ff5555;
+  --on-danger: #21222c;
 
   --scrim: rgba(0, 0, 0, 0.5);
   --shadow: rgba(0, 0, 0, 0.5);
 
+  /* The fourteen tag colours a board column can wear, by the names the server
+     stores (`WORKSPACE_COLORS`). Chosen against the chrome, a few pixels wide. */
+  --ws-green: #50fa7b;
+  --ws-amber: #f1fa8c;
+  --ws-sand: #d8c39a;
+  --ws-coral: #ffb86c;
+  --ws-red: #e06c6c;
+  --ws-brick: #a8604f;
+  --ws-blush: #edaebb;
+  --ws-rose: #ff79c6;
+  --ws-violet: #bd93f9;
+  --ws-lavender: #a8b4e8;
+  --ws-azure: #6fb4e0;
+  --ws-blue: #8be9fd;
+  --ws-cyan: #a4ffff;
+  --ws-lime: #69ff94;
+
+  /* What a chart wears. Not the palette above: a chart's colours have to be
+     told apart from each other, and these are what `chartTokens` in
+     `shared/chartcolor.ts` works out for this accent and these greys.
+     `web/test/usage-palette.test.ts` fails if the two drift. */
+  --chart-kuru: #04b247;
+  --chart-rest: #a6aec7;
+  --chart-1: #3987e5;
+  --chart-1-ink: #ffffff;
+  --chart-2: #c98500;
+  --chart-2-ink: #ffffff;
+  --chart-3: #d55181;
+  --chart-3-ink: #ffffff;
+  --chart-4: #9085e9;
+  --chart-4-ink: #ffffff;
+  --chart-5: #199e70;
+  --chart-5-ink: #ffffff;
+  --chart-6: #d95926;
+  --chart-6-ink: #ffffff;
+
   --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  /* Not a skin token, and the one piece of type a skin does not get to move: a
-     rule that names `--mono` is saying "this is a fragment of terminal" — a pid,
-     a path, a key — and it should go on looking like one whatever the chrome is
-     set in. The terminal's own face is the user's, in `appearance.json`. */
+  /* A rule that names `--mono` is saying "this is a fragment of terminal": a
+     pid, a path, a key. The terminal's own face is the user's, in
+     `appearance.json`. */
   --mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
 
-  /* ----------------------------------------------------------------------
-     The shape, which is the other half and comes from `shared/skin.ts`.
-
-     Everything below is the Soft skin, written out, for the same reason the
-     colours above are kururu's own theme written out: it is what is on screen for the frame
-     between this stylesheet painting and the first snapshot arriving, and it is
-     what keeps this file readable as a stylesheet rather than as half of one.
-     `web/src/skin.ts` overwrites all of it on every snapshot.
-
-     A rule that names a radius, a border width or a font size in pixels is a
-     rule that stays one shape while the window changes around it — which is
-     what a hundred and eighty of them did until this block existed. If you need
-     a step that is not here, add it to `SkinTokens` and let every skin answer
-     for it; do not reach for a px. */
+  /* The shape: six radii, two line weights, six type steps. */
   --radius-xs: 2px;
   --radius-sm: 2px;
   --radius-md: 3px;
@@ -90,7 +105,6 @@
 
   --border: 1px;
   --border-thick: 2px;
-  --border-style: solid;
 
   --fs-xs: 9px;
   --fs-sm: 10px;
@@ -99,30 +113,13 @@
   --fs-lg: 13px;
   --fs-xl: 15px;
   --ui-line-height: 1.4;
-  --ui-letter-spacing: normal;
-  --ui-smoothing: antialiased;
 
-  --frame: none;
-  --frame-on: none;
   --elev-dialog: 0 16px 48px var(--shadow);
   --elev-menu: 0 12px 32px var(--shadow);
 
-  --image-rendering: pixelated;
-
-  --overlay: none;
-  --overlay-opacity: 1;
-
   /* The gap between panes. 3px here and 3px on each pane box makes every
-     gutter 6px, edges included — and a skin made of bezels widens it, because
-     two twelve-pixel frames three pixels apart read as one slab with a seam. */
+     gutter 6px, edges included. */
   --gutter: 3px;
-  /* The focused pane's ring, complete. `none` in a skin whose focused bezel
-     already says which pane this is. */
-  --outline-on: var(--border) var(--border-style) color-mix(in srgb, var(--accent) 30%, transparent);
-  /* The pointer, and the pointer over anything you can press. A skin may hand
-     both a picture, which is served like a font is. */
-  --cursor: auto;
-  --cursor-pointer: pointer;
 
   /* The window's bottom edge, read twice.
      The status bar and the corner of the sidebar the cog sits in are the same
@@ -131,11 +128,7 @@
      tall as whatever was in it, and the step between them was visible exactly
      where the two meet. One number, so they cannot drift. It is a minimum
      rather than a height, because the status bar also has to grow for the home
-     indicator's inset and a skin is allowed a taller type ramp.
-
-     Not a skin token: every skin wants its chrome to have one bottom edge, so
-     there is nothing here for a skin to disagree about, and a token every skin
-     had to answer for to give the same answer is a token that rots. */
+     indicator's inset. */
   --bar-h: 38px;
 
   /* The window's top edge, which is one band: the strip the traffic lights
@@ -153,20 +146,7 @@
   /* The tone of that frame — the top band, the status bar, and every pane's
      tab strip — one step below `--chrome`, so the sidebar, the drawers and
      the well read as the body of the window and the bands as what holds it.
-     Derived rather than themed, on `--strip`'s reasoning: it has to sit on the
-     far side of `--chrome` from the terminals in every palette, including the
-     installed ones drawn before it existed, and a theme answering for it
-     directly could put it anywhere. One step is smaller on a light palette,
-     because a light theme's chrome is already near white and the scaling that
-     turns Mocha's mantle into its crust would turn Latte's into mud — which is
-     why `applyTheme` writes it per theme (`chromeLow` in `web/src/theme.ts`)
-     and this is the dark step, for the first paint, like every default above
-     it. It began as a `light-dark()` over the two steps here, and the build
-     (Lightning CSS) lowers that to a pair of toggles keyed off the
-     stylesheet's own `color-scheme` declarations, which never see the one
-     `applyTheme` writes inline — so the light themes got the dark step. Mixed
-     towards black, which is not a colour here but a direction — "deeper", in
-     either appearance. */
+     Mixed towards black, which is not a colour here but a direction: deeper. */
   --chrome-low: color-mix(in srgb, var(--chrome) 72%, black);
 
   /* The height of what a tab holds: the tallest of its status badge (16px,
@@ -175,16 +155,14 @@
      every pane's strip, whatever is in it, the file tree's head and the
      drawers' heads — and until it was, a strip with only its `+` in it was a
      pixel and a half shorter than the one beside it with tabs, and the heads
-     beside them agreed with neither. Not a skin token, on `--bar-h`'s
-     reasoning: it is worked out from the skin's type, not chosen. */
+     beside them agreed with neither. Worked out from the type, not chosen. */
   --tab-row: max(16px, calc(1.4 * var(--fs-base)), calc(1.2 * var(--fs-base) + 2px));
 
   /* A board column's width: the one every column starts at, and the floor
      and the ceiling a drag is held to (`shared/board.ts`'s `LANE_WIDTH_MIN`
      and `LANE_WIDTH_MAX`, which this has to agree with by hand — one is the
      clamp a width off the wire is checked against, the other is what stops
-     a column collapsing to nothing or swallowing the pane on screen). Not a
-     skin or a theme token, on `--bar-h`'s reasoning: a constant the
+     a column collapsing to nothing or swallowing the pane on screen). A constant the
      stylesheet declares for itself. */
   --board-col-w: 280px;
   --board-col-min: 220px;
@@ -198,135 +176,21 @@
      and the gradient in front of that block have to agree or the controls
      stop looking like part of the strip. */
   --strip: var(--chrome-low);
-
-  --icon-close: "✕";
-  --icon-run: "↯";
-  --icon-restart: "↻";
-  --icon-caret: "▾";
-  --icon-add: "+";
-  --icon-edit: "✎";
-  --icon-external: "↗";
-  --icon-split-right: "◫";
-  --icon-split-down: "⊟";
-  --icon-settings: "⚙";
-  --icon-share: "▦";
-  --icon-follow: "⇄";
-  --icon-pin: "⊙";
-  --icon-panes: "▥";
-  --icon-hide: "⊘";
-  --icon-database: "▤";
-  --icon-stop: "■";
-  --icon-play: "▸";
-  --icon-bot: "⚙";
-  --icon-git: "⎇";
-  --icon-board: "▥";
-  --icon-grip: "⠿";
-  --icon-panel: "⇥";
-  --icon-fold: "⊟";
-  --icon-unfold: "⊞";
-  --icon-terminal: "❯";
-  --icon-more: "⋯";
-  --icon-doc: "¶";
-  --icon-code: "‹›";
-  --icon-phone: "▯";
-
-  /* The icon strip a skin may bring instead of glyphs — every icon as one
-     picture of `--icon-n` cells. `none` is the drawing. `--icon-n` is a
-     constant the stylesheet needs for the arithmetic and is not a skin's to
-     move: it is `ICON_NAMES.length`, and the test holds the two together. */
-  --icon-sheet: none;
-  --icon-n: 30;
-
-  /* ----------------------------------------------------------------------
-     The parts: what a skin *paints*, three properties per region.
-
-     `--p-<part>-frame` is a complete `border-image`, `--p-<part>-w` the
-     `border-width` that makes it take room, and `--p-<part>-bg` one
-     background layer that a rule puts over the theme's ground. All of it is
-     generated by `partVars` in `shared/skin.ts` from what a skin painted, and
-     what is written here is what that function returns for a skin that painted
-     nothing — which `web/test/theme.test.ts` checks, value for value. A state
-     (`pane-on`, `tab-on`) defaults to its parent's picture rather than to
-     nothing, so a skin that drew one bezel gets it on the focused pane too. */
-  --p-sidebar-frame: none;
-  --p-sidebar-w: 0px;
-  --p-sidebar-bg: none;
-  --p-panel-frame: none;
-  --p-panel-w: 0px;
-  --p-panel-bg: none;
-  --p-well-frame: none;
-  --p-well-w: 0px;
-  --p-well-bg: none;
-  --p-pane-frame: none;
-  --p-pane-w: 0px;
-  --p-pane-bg: none;
-  --p-pane-on-frame: var(--p-pane-frame);
-  --p-pane-on-w: var(--p-pane-w);
-  --p-pane-on-bg: var(--p-pane-bg);
-  --p-tabstrip-frame: none;
-  --p-tabstrip-w: 0px;
-  --p-tabstrip-bg: none;
-  --p-tab-frame: none;
-  --p-tab-w: 0px;
-  --p-tab-bg: none;
-  --p-tab-on-frame: var(--p-tab-frame);
-  --p-tab-on-w: var(--p-tab-w);
-  --p-tab-on-bg: var(--p-tab-bg);
-  --p-tool-frame: none;
-  --p-tool-w: 0px;
-  --p-tool-bg: none;
-  --p-button-frame: none;
-  --p-button-w: 0px;
-  --p-button-bg: none;
-  --p-row-on-frame: none;
-  --p-row-on-w: 0px;
-  --p-row-on-bg: none;
-  --p-statusbar-frame: none;
-  --p-statusbar-w: 0px;
-  --p-statusbar-bg: none;
-  --p-dialog-frame: none;
-  --p-dialog-w: var(--border);
-  --p-dialog-bg: none;
 }
 
 * {
   box-sizing: border-box;
 }
 
-/* --------------------------------------------------------------------------
-   Skin machinery
+/* An icon is a class on a span and a pseudo-element, never an `<svg>` in the
+   tree — see `web/src/icons.ts`, which writes each drawing onto the root as
+   `--icon-<name>-svg` once, at load. It is painted as a mask over
+   `currentColor`, so it takes the colour of the button it is in and follows
+   that colour on hover.
 
-   Three small things the token block cannot express on its own: a face to load,
-   a way to draw an icon without a component, and a layer to put an effect on.
-   -------------------------------------------------------------------------- */
-
-/* No `@font-face` lives here any more, and the absence is the design rather
-   than a gap. A face belongs to a *skin*, skins now arrive from
-   `../kururu-styles`, and a rule written in this file could only ever name a
-   font that shipped with kururu — so `web/src/skin.ts` writes the `@font-face`
-   at runtime from what the installed skin declares, pointing at
-   `/api/styles/asset`, which is kururu's own origin. That last part is the one
-   thing that does not bend: a window that fetches a face from a third party
-   tells that third party when its owner is working, so an installed style's
-   assets are files on this machine and a manifest that names a URL is refused
-   at install time. */
-
-/* An icon is a custom property and a pseudo-element, never a component — see
-   the header of `web/src/skin.ts`. `::before` rather than the span's own text so
-   that nothing has to re-render when the skin changes: the property moves and
-   the glyph follows, with React none the wiser.
-
-   Two properties per icon now, and the attribute on the root picks between
-   them. `--icon-<name>-svg` is kururu's drawing (`web/src/icons.ts`), painted as
-   a mask over `currentColor` so it takes the colour of the button it is in and
-   follows that colour on hover. `--icon-<name>` is the glyph, and is drawn only
-   for the names a skin listed in `data-glyphs` — a skin that asked for an ASCII
-   `x` gets an `x` in its own face, and every other skin gets the drawing.
-
-   Sized in em, so an icon is as big as the type of the control it sits in and a
-   skin's type ramp moves both together. 1.2em rather than 1em because a stroke
-   drawing inside a 24-unit box leaves two units of air on each side, where a
-   glyph fills its em to the edge. */
+   Sized in em, so an icon is as big as the type of the control it sits in.
+   1.2em rather than 1em because a stroke drawing inside a 24-unit box leaves
+   two units of air on each side. */
 .icon {
   display: inline-flex;
   align-items: center;
@@ -344,107 +208,36 @@
   -webkit-mask: var(--icon-svg) center / contain no-repeat;
   mask: var(--icon-svg) center / contain no-repeat;
 }
-.icon-close { --icon-svg: var(--icon-close-svg); --icon-glyph: var(--icon-close); --icon-i: 0; }
-.icon-run { --icon-svg: var(--icon-run-svg); --icon-glyph: var(--icon-run); --icon-i: 1; }
-.icon-restart { --icon-svg: var(--icon-restart-svg); --icon-glyph: var(--icon-restart); --icon-i: 2; }
-.icon-caret { --icon-svg: var(--icon-caret-svg); --icon-glyph: var(--icon-caret); --icon-i: 3; }
-.icon-add { --icon-svg: var(--icon-add-svg); --icon-glyph: var(--icon-add); --icon-i: 4; }
-.icon-edit { --icon-svg: var(--icon-edit-svg); --icon-glyph: var(--icon-edit); --icon-i: 5; }
-.icon-external { --icon-svg: var(--icon-external-svg); --icon-glyph: var(--icon-external); --icon-i: 6; }
-.icon-split-right { --icon-svg: var(--icon-split-right-svg); --icon-glyph: var(--icon-split-right); --icon-i: 7; }
-.icon-split-down { --icon-svg: var(--icon-split-down-svg); --icon-glyph: var(--icon-split-down); --icon-i: 8; }
-.icon-settings { --icon-svg: var(--icon-settings-svg); --icon-glyph: var(--icon-settings); --icon-i: 9; }
-.icon-share { --icon-svg: var(--icon-share-svg); --icon-glyph: var(--icon-share); --icon-i: 10; }
-.icon-follow { --icon-svg: var(--icon-follow-svg); --icon-glyph: var(--icon-follow); --icon-i: 11; }
-.icon-pin { --icon-svg: var(--icon-pin-svg); --icon-glyph: var(--icon-pin); --icon-i: 12; }
-.icon-panes { --icon-svg: var(--icon-panes-svg); --icon-glyph: var(--icon-panes); --icon-i: 13; }
-.icon-hide { --icon-svg: var(--icon-hide-svg); --icon-glyph: var(--icon-hide); --icon-i: 14; }
-.icon-database { --icon-svg: var(--icon-database-svg); --icon-glyph: var(--icon-database); --icon-i: 15; }
-.icon-stop { --icon-svg: var(--icon-stop-svg); --icon-glyph: var(--icon-stop); --icon-i: 16; }
-.icon-play { --icon-svg: var(--icon-play-svg); --icon-glyph: var(--icon-play); --icon-i: 17; }
-.icon-bot { --icon-svg: var(--icon-bot-svg); --icon-glyph: var(--icon-bot); --icon-i: 18; }
-.icon-git { --icon-svg: var(--icon-git-svg); --icon-glyph: var(--icon-git); --icon-i: 19; }
-.icon-board { --icon-svg: var(--icon-board-svg); --icon-glyph: var(--icon-board); --icon-i: 20; }
-.icon-grip { --icon-svg: var(--icon-grip-svg); --icon-glyph: var(--icon-grip); --icon-i: 21; }
-.icon-panel { --icon-svg: var(--icon-panel-svg); --icon-glyph: var(--icon-panel); --icon-i: 22; }
-.icon-fold { --icon-svg: var(--icon-fold-svg); --icon-glyph: var(--icon-fold); --icon-i: 23; }
-.icon-unfold { --icon-svg: var(--icon-unfold-svg); --icon-glyph: var(--icon-unfold); --icon-i: 24; }
-.icon-terminal { --icon-svg: var(--icon-terminal-svg); --icon-glyph: var(--icon-terminal); --icon-i: 25; }
-.icon-more { --icon-svg: var(--icon-more-svg); --icon-glyph: var(--icon-more); --icon-i: 26; }
-.icon-doc { --icon-svg: var(--icon-doc-svg); --icon-glyph: var(--icon-doc); --icon-i: 27; }
-.icon-code { --icon-svg: var(--icon-code-svg); --icon-glyph: var(--icon-code); --icon-i: 28; }
-.icon-phone { --icon-svg: var(--icon-phone-svg); --icon-glyph: var(--icon-phone); --icon-i: 29; }
-/* An icon strip, when a skin brought one: every icon is one cell of a single
-   picture, `--icon-n` cells across, and `--icon-i` on each class says which.
-   The strip is scaled so one cell is exactly the icon's box — which is what
-   makes the cell size in the file irrelevant, and is why a manifest names no
-   cell size. `mask` draws the cell in `currentColor`, so a pixel icon follows
-   hover and the theme like the drawing does; `image` draws its own pixels, for
-   a skin whose icons have colours the theme should not touch. These sit before
-   the glyph rules on purpose: a glyph is a per-icon decision and wins. */
-:root[data-icon-sheet] .icon::before {
-  image-rendering: var(--image-rendering);
-  -webkit-mask: var(--icon-sheet) calc(var(--icon-i) * -1.2em) 0 / calc(var(--icon-n) * 1.2em) 1.2em no-repeat;
-  mask: var(--icon-sheet) calc(var(--icon-i) * -1.2em) 0 / calc(var(--icon-n) * 1.2em) 1.2em no-repeat;
-}
-:root[data-icon-sheet="image"] .icon::before {
-  background: var(--icon-sheet) calc(var(--icon-i) * -1.2em) 0 / calc(var(--icon-n) * 1.2em) 1.2em no-repeat;
-  -webkit-mask: none;
-  mask: none;
-}
-:root[data-glyphs~="close"] .icon-close::before,
-:root[data-glyphs~="run"] .icon-run::before,
-:root[data-glyphs~="restart"] .icon-restart::before,
-:root[data-glyphs~="caret"] .icon-caret::before,
-:root[data-glyphs~="add"] .icon-add::before,
-:root[data-glyphs~="edit"] .icon-edit::before,
-:root[data-glyphs~="external"] .icon-external::before,
-:root[data-glyphs~="split-right"] .icon-split-right::before,
-:root[data-glyphs~="split-down"] .icon-split-down::before,
-:root[data-glyphs~="settings"] .icon-settings::before,
-:root[data-glyphs~="share"] .icon-share::before,
-:root[data-glyphs~="follow"] .icon-follow::before,
-:root[data-glyphs~="pin"] .icon-pin::before,
-:root[data-glyphs~="panes"] .icon-panes::before,
-:root[data-glyphs~="hide"] .icon-hide::before,
-:root[data-glyphs~="database"] .icon-database::before,
-:root[data-glyphs~="stop"] .icon-stop::before,
-:root[data-glyphs~="play"] .icon-play::before,
-:root[data-glyphs~="bot"] .icon-bot::before,
-:root[data-glyphs~="git"] .icon-git::before,
-:root[data-glyphs~="board"] .icon-board::before,
-:root[data-glyphs~="grip"] .icon-grip::before,
-:root[data-glyphs~="panel"] .icon-panel::before,
-:root[data-glyphs~="fold"] .icon-fold::before,
-:root[data-glyphs~="unfold"] .icon-unfold::before,
-:root[data-glyphs~="terminal"] .icon-terminal::before,
-:root[data-glyphs~="more"] .icon-more::before,
-:root[data-glyphs~="doc"] .icon-doc::before,
-:root[data-glyphs~="code"] .icon-code::before,
-:root[data-glyphs~="phone"] .icon-phone::before {
-  content: var(--icon-glyph);
-  width: auto;
-  height: auto;
-  background: none;
-  -webkit-mask: none;
-  mask: none;
-}
-
-/* The effect layer: scanlines, a grain, a vignette. Above the panes, which is
-   the only place it can be — the emulator paints into a canvas CSS cannot reach,
-   so a layer underneath one would be invisible over exactly the part of the
-   window worth looking at. It is not rendered at all by a skin that wants none,
-   rather than rendered transparent: a full-window element with pointer events
-   off is still a full-window element, and the one that does not exist cannot be
-   the thing intercepting a drag two months from now. */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 900;
-  pointer-events: none;
-  background: var(--overlay);
-  opacity: var(--overlay-opacity);
-}
+.icon-close { --icon-svg: var(--icon-close-svg); }
+.icon-run { --icon-svg: var(--icon-run-svg); }
+.icon-restart { --icon-svg: var(--icon-restart-svg); }
+.icon-caret { --icon-svg: var(--icon-caret-svg); }
+.icon-add { --icon-svg: var(--icon-add-svg); }
+.icon-edit { --icon-svg: var(--icon-edit-svg); }
+.icon-external { --icon-svg: var(--icon-external-svg); }
+.icon-split-right { --icon-svg: var(--icon-split-right-svg); }
+.icon-split-down { --icon-svg: var(--icon-split-down-svg); }
+.icon-settings { --icon-svg: var(--icon-settings-svg); }
+.icon-share { --icon-svg: var(--icon-share-svg); }
+.icon-follow { --icon-svg: var(--icon-follow-svg); }
+.icon-pin { --icon-svg: var(--icon-pin-svg); }
+.icon-panes { --icon-svg: var(--icon-panes-svg); }
+.icon-hide { --icon-svg: var(--icon-hide-svg); }
+.icon-database { --icon-svg: var(--icon-database-svg); }
+.icon-stop { --icon-svg: var(--icon-stop-svg); }
+.icon-play { --icon-svg: var(--icon-play-svg); }
+.icon-bot { --icon-svg: var(--icon-bot-svg); }
+.icon-git { --icon-svg: var(--icon-git-svg); }
+.icon-board { --icon-svg: var(--icon-board-svg); }
+.icon-grip { --icon-svg: var(--icon-grip-svg); }
+.icon-panel { --icon-svg: var(--icon-panel-svg); }
+.icon-fold { --icon-svg: var(--icon-fold-svg); }
+.icon-unfold { --icon-svg: var(--icon-unfold-svg); }
+.icon-terminal { --icon-svg: var(--icon-terminal-svg); }
+.icon-more { --icon-svg: var(--icon-more-svg); }
+.icon-doc { --icon-svg: var(--icon-doc-svg); }
+.icon-code { --icon-svg: var(--icon-code-svg); }
+.icon-phone { --icon-svg: var(--icon-phone-svg); }
 
 html,
 body,
@@ -456,12 +249,12 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  cursor: var(--cursor);
+  cursor: auto;
   font: var(--fs-lg)/var(--ui-line-height) var(--ui);
   /* The window is the app; nothing about it scrolls as a page. */
   overflow: hidden;
-  -webkit-font-smoothing: var(--ui-smoothing);
-  letter-spacing: var(--ui-letter-spacing);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: normal;
 }
 
 button {
@@ -470,7 +263,7 @@ button {
   background: none;
   border: 0;
   padding: 0;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 
 /**
@@ -555,7 +348,7 @@ button {
 kbd {
   font-family: var(--mono);
   font-size: var(--fs-sm);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-sm);
   padding: 0 3px;
   color: var(--dim);
@@ -699,13 +492,6 @@ kbd {
   height: var(--top-h);
   padding-left: 78px;
   -webkit-app-region: drag;
-}
-/* A sidebar a skin has painted keeps its picture to the top edge; the band's
-   rule still runs under the strip, so the line across the window holds. */
-@container not style(--p-sidebar-bg: none) {
-  .sidebar-top {
-    background: transparent;
-  }
 }
 
 .sidebar-head {
@@ -936,7 +722,7 @@ kbd {
   text-transform: inherit;
   color: inherit;
   text-align: left;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .side-toggle:hover,
 .side-toggle:focus-visible {
@@ -1030,7 +816,7 @@ kbd {
      `onClick` on the `li` in `Sidebar.tsx`. Said here too, because a row that
      highlights under the pointer and does not change the cursor is a row that
      has told you two different things about whether it can be pressed. */
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1116,7 +902,7 @@ kbd {
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
   color: var(--dimmer);
   font-size: var(--fs-sm);
 }
@@ -1154,7 +940,7 @@ kbd {
   border: none;
   background: none;
   text-align: left;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
   color: var(--dim);
 }
 .ws-said-error,
@@ -1185,7 +971,7 @@ kbd {
   min-width: 0;
   margin: 1px 0;
   padding: 4px 8px;
-  border: var(--border) var(--border-style) var(--accent);
+  border: var(--border) solid var(--accent);
   border-radius: var(--radius-lg);
   background: var(--bg);
   color: var(--text);
@@ -1383,7 +1169,7 @@ kbd {
   font-size: var(--fs-sm);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .made-link:hover {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
@@ -1485,7 +1271,7 @@ kbd {
   flex: 1;
   min-width: 0;
   padding: 0 4px;
-  border: var(--border) var(--border-style) var(--accent);
+  border: var(--border) solid var(--accent);
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
@@ -1589,7 +1375,7 @@ kbd {
    absence — the pty is gone and only its screen is left. */
 .status-exited .status-dot {
   background: transparent;
-  border: var(--border) var(--border-style) currentColor;
+  border: var(--border) solid currentColor;
 }
 
 /* The mascot: a row of sheet cells, slid past the box above one cell per step.
@@ -1620,7 +1406,7 @@ kbd {
   left: 0;
   translate: 0 -0.3em;
   background-repeat: no-repeat;
-  image-rendering: var(--image-rendering);
+  image-rendering: pixelated;
   animation-name: hop;
   animation-iteration-count: infinite;
 }
@@ -1892,7 +1678,7 @@ kbd {
 .pane-slots {
   display: flex;
   padding: 3px 8px;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
   font-size: var(--fs-xs);
   color: var(--dim);
   flex: none;
@@ -2169,7 +1955,7 @@ a.machine-name:hover {
   /* A link in the chrome, so it wears the chrome's underline rules rather than
      the browser's. The ↗ is what says it leaves. */
   text-decoration: none;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .dev-row:hover,
 .dev-row:focus-visible {
@@ -2207,7 +1993,7 @@ a.machine-name:hover {
 /* Running, but with no address this client could use — see `previewUrl`. Not a
    link, so it must not look like one or invite the tap that does nothing. */
 .dev-row-off {
-  cursor: var(--cursor);
+  cursor: auto;
   color: var(--dimmer);
 }
 
@@ -2247,7 +2033,7 @@ a.machine-name:hover {
 .dev-stop-busy:hover {
   color: var(--dimmer);
   background: none;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 /* No hover on a phone to bring it out, and a thumb wants more than a pointer —
    the same trade the agent rows make. */
@@ -2444,7 +2230,7 @@ a.machine-name:hover {
   flex-direction: column;
   min-height: 0;
   background: var(--chrome);
-  border-left: var(--border) var(--border-style) var(--line);
+  border-left: var(--border) solid var(--line);
 }
 
 /* The header is the right end of the top band: `--top-h` tall like the
@@ -2677,7 +2463,7 @@ a.machine-name:hover {
 }
 .button:disabled {
   opacity: 0.4;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 /* A link wearing the button's clothes still carries the UA's underline, which
    is the one thing that gives it away as not being one. */
@@ -2688,7 +2474,7 @@ a.button {
 .button-quiet {
   background: var(--chrome-high);
   color: var(--text);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   font-weight: 500;
 }
 .button-danger {
@@ -2755,16 +2541,6 @@ a.button {
 .app-band .pane-box-top .pane {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
-}
-@container not style(--p-well-bg: none) {
-  .app-band .panes::before {
-    display: none;
-  }
-}
-@container not style(--p-well-frame: none) {
-  .app-band .panes::before {
-    display: none;
-  }
 }
 
 /**
@@ -2837,16 +2613,10 @@ a.button {
   flex-direction: column;
   background: var(--bg);
   border-radius: var(--radius-xl);
-  /* The skin's frame, and the only thing left drawing a pane's edge. There used
-     to be a `--line` border under this and there is not now: a grey stroke
-     around every pane is the loudest thing in a window whose whole content is
-     text, and it was drawing four of them across a two-pane split. What
-     separates a pane from the window now is *ground* — `.panes` is the darker
-     `--chrome` well and the pane is `--bg` on it, which is the same distinction
-     made with a step in tone instead of a line. A skin that genuinely wants a
-     frame still gets one, because that is what this token is, and the inset a
-     registry skin asks for lands here untouched. */
-  box-shadow: var(--frame);
+  /* No border: a grey stroke around every pane is the loudest thing in a
+     window whose whole content is text. What separates a pane from the window
+     is *ground* — `.panes` is the darker `--chrome` well and the pane is
+     `--bg` on it. */
   overflow: hidden;
 }
 .app-zen .pane {
@@ -2866,23 +2636,19 @@ a.button {
    it under `.pane-body`, which is positioned and so paints after its parent's
    outline: a terminal's body let the edge show through and a board's columns
    covered it, so a focused board had a ring along its strip and nowhere else.
-   Not a second `box-shadow` either, because that is the skin's (`--frame-on`)
-   and `none` is not a shadow you can put a comma after. `isolation` keeps the
+   `isolation` keeps the
    layer's z-index inside the pane, where it only has to clear the drop zones,
    rather than in contest with whatever lies over the stage. */
 .pane {
   position: relative;
   isolation: isolate;
 }
-.pane-on {
-  box-shadow: var(--frame-on);
-}
 .pane-on::after {
   content: "";
   position: absolute;
   inset: 0;
   z-index: 3;
-  border: var(--outline-on);
+  border: var(--border) solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: inherit;
   pointer-events: none;
 }
@@ -2902,7 +2668,7 @@ a.button {
      height, so a strip holding something taller — a phone's thumb-sized
      buttons — grows rather than clips. */
   min-height: var(--top-h);
-  padding: calc((var(--top-h) - var(--tab-row) - 6px - 2 * var(--p-tab-w)) / 2 - var(--p-tabstrip-w)) 4px;
+  padding: calc((var(--top-h) - var(--tab-row) - 6px) / 2) 4px;
   /* The band's tone — see `--strip` — and the band's rule along its bottom,
      an inset shadow because the border here is the skin's. */
   background: var(--strip);
@@ -2948,8 +2714,11 @@ a.button {
    is what says the two are one thing — and that is the whole signal now: the
    grey ring that used to be round it is gone with the rest of them, and a ring
    was never what made an active tab legible anyway. */
-.tab-on {
+.tab-on,
+.tab-on:hover {
   background: var(--bg);
+}
+.tab-on {
   color: var(--text);
 }
 .tab-exited .tab-label {
@@ -2975,7 +2744,7 @@ a.button {
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0 0.4em;
-  border: var(--border) var(--border-style) var(--line-high);
+  border: var(--border) solid var(--line-high);
   border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: var(--fs-xs);
@@ -2993,7 +2762,7 @@ a.button {
   gap: 0.35em;
   max-width: 16ch;
   padding: 0 0.45em;
-  border: var(--border) var(--border-style) var(--node-hue, var(--line-high));
+  border: var(--border) solid var(--node-hue, var(--line-high));
   border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: var(--fs-xs);
@@ -3029,7 +2798,7 @@ a.button {
    panes keep what their emulators hold and grey, as the sidebar's rows do,
    and the band keeps its colour so the name and "away since" stay legible. */
 .panes-remote .tabstrip {
-  background: var(--p-tabstrip-bg), color-mix(in srgb, var(--node-hue) 18%, var(--strip));
+  background: color-mix(in srgb, var(--node-hue) 18%, var(--strip));
 }
 .panes-remote .strip-lead {
   background: color-mix(in srgb, var(--node-hue) 18%, var(--strip));
@@ -3078,7 +2847,7 @@ a.button {
   width: 18ch;
   min-width: 0;
   padding: 0 4px;
-  border: var(--border) var(--border-style) var(--accent);
+  border: var(--border) solid var(--accent);
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
@@ -3340,7 +3109,7 @@ a.button {
 .dz-refused-text {
   max-width: 40ch;
   padding: 6px 10px;
-  border: var(--border) var(--border-style) var(--line-high);
+  border: var(--border) solid var(--line-high);
   border-radius: var(--radius-lg);
   background: var(--chrome-high);
   font-size: var(--fs-sm);
@@ -3532,16 +3301,13 @@ a.button {
 .tab,
 .tab-new,
 .pane-btn {
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 
 /* The pane you have picked up. Dimmed rather than hidden: you are aiming at
    something else with it, and a hole where it was would move everything else. */
 .pane-lifted {
   opacity: 0.45;
-}
-.tabstrip-lifted {
-  background: var(--chrome-high);
 }
 
 /* The whole pane is the button: there is one thing an empty pane can do, so it
@@ -3560,7 +3326,7 @@ a.button {
   background: none;
   font: inherit;
   color: var(--dimmer);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .pane-empty:hover,
 .pane-empty:focus-visible {
@@ -3572,11 +3338,9 @@ a.button {
   font-size: var(--fs-md);
 }
 .pane-empty-hint::before {
-  /* The one icon that was always a rule rather than a component, and it stays
-     one: it is a hint's prefix, not a control, so there is nothing for an
-     `<Icon>` to sit inside. The space is outside the token because a skin
-     choosing a glyph has said nothing about the gap after it. */
-  content: var(--icon-add) " ";
+  /* A character rather than an `<Icon>`: it is a hint's prefix, not a
+     control, so there is nothing for one to sit inside. */
+  content: "+ ";
 }
 
 .pane-empty-keys {
@@ -3687,7 +3451,7 @@ a.button {
 }
 .sb-agents-none .sb-agents-dot {
   background: transparent;
-  border: var(--border) var(--border-style) currentColor;
+  border: var(--border) solid currentColor;
 }
 
 /* The sidebar's toggle and the workspace's name, together wherever they are:
@@ -3750,7 +3514,7 @@ a.button {
 .sb-panes:disabled {
   color: var(--dimmer);
   opacity: 0.4;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 
 /* The workspace's name, which gives way before any control does: on a phone
@@ -3793,7 +3557,7 @@ a.button {
 /* On a child: the parent's window has hands on these terminals. A fact, in
    the outlined shape, not a mode in a filled one. */
 .sb-watched {
-  border: var(--border) var(--border-style) var(--line-high);
+  border: var(--border) solid var(--line-high);
   color: var(--dim);
   font-weight: 500;
   letter-spacing: 0;
@@ -3848,11 +3612,11 @@ a.button {
   flex-direction: column;
   gap: 8px;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-menu);
   color: var(--text);
-  cursor: var(--cursor);
+  cursor: auto;
 }
 .usage-pop-head {
   display: flex;
@@ -4092,7 +3856,7 @@ a.button {
 }
 .sb-kuru-off .sb-kuru-dot {
   background: transparent;
-  border: var(--border) var(--border-style) currentColor;
+  border: var(--border) solid currentColor;
 }
 .sb-kuru-word {
   font-weight: 500;
@@ -4215,7 +3979,7 @@ a.button {
   max-width: min(92vw, 560px);
   padding: 8px 14px;
   border-radius: var(--radius-xl);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   background: var(--chrome);
   color: var(--text);
   box-shadow: var(--elev-menu);
@@ -4454,7 +4218,7 @@ html.pill-page #root {
   max-width: min(92vw, 460px);
   padding: 8px 14px;
   border-radius: var(--radius-xl);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   background: var(--chrome);
   color: var(--text);
   box-shadow: var(--elev-menu);
@@ -4500,7 +4264,7 @@ html.pill-page #root {
 .help {
   width: min(440px, 90vw);
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-xl);
   padding: 14px;
   box-shadow: var(--elev-dialog);
@@ -4525,7 +4289,7 @@ html.pill-page #root {
   width: 100%;
   background: var(--bg);
   color: var(--text);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   padding: 7px 9px;
   font: var(--fs-md) var(--mono);
@@ -4725,7 +4489,7 @@ html.pill-page #root {
   max-height: calc(100dvh - 8px);
   padding: 4px;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-menu);
   display: flex;
@@ -4757,7 +4521,7 @@ html.pill-page #root {
 .menu-back {
   flex: none;
   margin-bottom: 5px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
   padding-bottom: 7px;
 }
 
@@ -4767,7 +4531,7 @@ html.pill-page #root {
   position: fixed;
   padding: 6px;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-menu);
 }
@@ -4787,7 +4551,7 @@ html.pill-page #root {
   padding: 0;
   border: none;
   border-radius: var(--radius-md);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .chip:hover,
 .chip:focus-visible {
@@ -4884,7 +4648,7 @@ html.pill-page #root {
 }
 .menu-item:disabled {
   opacity: 0.35;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 .menu-danger:hover:not(:disabled),
 .menu-danger:focus-visible {
@@ -4893,7 +4657,7 @@ html.pill-page #root {
 /* A rule above, not below: it separates what follows from what came before. */
 .menu-sep {
   margin-top: 5px;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
   padding-top: 7px;
 }
 
@@ -4922,7 +4686,7 @@ html.pill-page #root {
   flex-direction: column;
   min-height: 0;
   background: var(--chrome);
-  border-left: var(--border) var(--border-style) var(--line);
+  border-left: var(--border) solid var(--line);
 }
 .kuru-sheet {
   position: fixed;
@@ -4992,7 +4756,7 @@ html.pill-page #root {
   flex-wrap: wrap;
   gap: 6px 8px;
   padding: 8px 8px 6px 12px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 .kuru-head-spacer {
   flex: 1;
@@ -5032,7 +4796,7 @@ html.pill-page #root {
   gap: 4px;
   padding: 3px 8px;
   border-radius: var(--radius-md);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   color: var(--dim);
   font-size: var(--fs-sm);
   white-space: nowrap;
@@ -5090,7 +4854,7 @@ html.pill-page #root {
   flex-wrap: wrap;
   gap: 4px;
   padding: 6px calc(12px + var(--kuru-gutter));
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 .kuru-node-chip {
   display: inline-flex;
@@ -5098,7 +4862,7 @@ html.pill-page #root {
   gap: 4px;
   padding: 2px 8px;
   border-radius: var(--radius-lg);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   color: var(--dim);
   font-size: var(--fs-sm);
 }
@@ -5199,7 +4963,7 @@ html.pill-page #root {
   display: flex;
   flex-direction: column;
   max-height: 40%;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 .kuru-pins-head {
   display: flex;
@@ -5289,7 +5053,7 @@ html.pill-page #root {
 }
 .kuru-dot-off {
   background: transparent;
-  border: var(--border) var(--border-style) var(--dimmer);
+  border: var(--border) solid var(--dimmer);
 }
 
 /* The timeline, oldest at the top. A column with gaps rather than a list
@@ -5327,7 +5091,7 @@ html.pill-page #root {
 .kuru-mark::after {
   content: "";
   flex: 1;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 .kuru-item {
   display: flex;
@@ -5368,7 +5132,7 @@ html.pill-page #root {
 /* A line a quote was pressed for, ringed for a moment so the eye finds it —
    a ring and not a ground, since the ground says who spoke. */
 .kuru-flash {
-  outline: var(--border-thick) var(--border-style) var(--accent);
+  outline: var(--border-thick) solid var(--accent);
   outline-offset: 2px;
 }
 /* The search, under the header: a field as wide as there is, then how many, and
@@ -5379,7 +5143,7 @@ html.pill-page #root {
   align-items: center;
   gap: 6px;
   padding: 5px calc(8px + var(--kuru-gutter)) 5px calc(12px + var(--kuru-gutter));
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
   color: var(--dim);
 }
 .kuru-search > svg {
@@ -5509,7 +5273,7 @@ html.pill-page #root {
 .kuru-notice-text {
   margin: 2px 0 2px 9px;
   padding: 2px 0 2px 10px;
-  border-left: var(--border) var(--border-style) var(--line);
+  border-left: var(--border) solid var(--line);
   font-size: var(--fs-base);
   line-height: 1.45;
   color: var(--dim);
@@ -5635,7 +5399,7 @@ html.pill-page #root {
   min-width: 0;
   margin: 1px 0 2px;
   padding: 1px 0 1px 8px;
-  border-left: var(--border-thick) var(--border-style) var(--accent);
+  border-left: var(--border-thick) solid var(--accent);
   text-align: left;
   font-size: var(--fs-sm);
   line-height: 1.35;
@@ -5782,7 +5546,7 @@ button.kuru-quote:hover {
 }
 .kuru-md blockquote {
   padding: 0 0 0 0.8em;
-  border-left: var(--border-thick) var(--border-style) var(--line);
+  border-left: var(--border-thick) solid var(--line);
   color: var(--dim);
 }
 .kuru-md :not(pre) > code {
@@ -5799,7 +5563,7 @@ button.kuru-quote:hover {
 .kuru-md pre {
   position: relative;
   padding: 8px 10px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--text) 5%, transparent);
   font-family: var(--mono);
@@ -5826,7 +5590,7 @@ button.kuru-quote:hover {
   border-radius: var(--radius-sm);
   color: var(--dim);
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   opacity: 0;
   transition: opacity 120ms;
 }
@@ -5864,7 +5628,7 @@ button.kuru-quote:hover {
    the same reason. */
 .kuru-md th,
 .kuru-md td {
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   padding: 3px 8px;
   text-align: left;
   vertical-align: top;
@@ -5881,7 +5645,7 @@ button.kuru-quote:hover {
 }
 .kuru-md hr {
   border: 0;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
   margin: 0.5em 0;
 }
 .kuru-md a {
@@ -5978,7 +5742,7 @@ button.kuru-quote:hover {
   flex: none;
   padding: 8px calc(10px + var(--kuru-gutter));
   padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 /* What the next message replies to, over the box until it is sent or let
    go: one line — the arrow, whose, the opening cut at the width — and ✕.
@@ -5989,7 +5753,7 @@ button.kuru-quote:hover {
   gap: 6px;
   margin: 0 0 6px;
   padding: 2px 2px 2px 8px;
-  border-left: var(--border-thick) var(--border-style) var(--accent);
+  border-left: var(--border-thick) solid var(--accent);
   font-size: var(--fs-sm);
   color: var(--dim);
 }
@@ -6050,7 +5814,7 @@ button.kuru-quote:hover {
   gap: 2px;
   padding: 3px;
   border-radius: var(--radius-md);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   background: var(--bg);
 }
 .kuru-box:focus-within {
@@ -6124,7 +5888,7 @@ button.kuru-quote:hover {
   font-size: var(--fs-sm);
   line-height: 1.45;
   white-space: nowrap;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .kc:hover {
   background: color-mix(in srgb, var(--accent) 24%, transparent);
@@ -6197,14 +5961,14 @@ button.kc {
   padding: 4px;
   list-style: none;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-menu);
   display: flex;
   flex-direction: column;
 }
 .kuru-suggest-item {
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .kuru-suggest-on {
   background: var(--chrome-high);
@@ -6315,7 +6079,7 @@ button.kc {
   flex-direction: column;
   gap: 2px;
   padding-left: 8px;
-  border-left: var(--border-thick) var(--border-style) var(--line);
+  border-left: var(--border-thick) solid var(--line);
 }
 .needs-ws-head {
   display: flex;
@@ -6443,7 +6207,7 @@ a.needs-go {
   width: 7px;
   height: 7px;
   border-radius: var(--radius-round);
-  border: var(--border) var(--border-style) var(--done);
+  border: var(--border) solid var(--done);
 }
 /* Who put a card in the profile board's Needs you, on the card and on its
    row here: Kuru in the accent, the one the user did not do and should
@@ -6599,7 +6363,7 @@ a.needs-go {
   display: flex;
   width: min(940px, 96vw);
   height: min(700px, 86vh);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-xl);
   background: var(--chrome);
   box-shadow: var(--elev-dialog);
@@ -6612,7 +6376,7 @@ a.needs-go {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: var(--border) var(--border-style) var(--line);
+  border-right: var(--border) solid var(--line);
 }
 .st-side-head {
   display: flex;
@@ -6689,7 +6453,7 @@ a.needs-go {
   align-items: center;
   gap: var(--st-gap);
   padding: 10px var(--st-x) 10px 18px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 .st-head-text {
   flex: 1 1 auto;
@@ -6709,7 +6473,7 @@ a.needs-go {
 .st-pill {
   flex: none;
   padding: 2px 8px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: calc(var(--radius-xl) * 3);
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -6771,7 +6535,7 @@ a.needs-go {
   align-items: center;
   gap: var(--st-gap);
   padding: 8px var(--st-x);
-  border-left: var(--border-thick) var(--border-style) var(--blocked);
+  border-left: var(--border-thick) solid var(--blocked);
   border-radius: var(--radius-lg);
   background: var(--chrome);
   color: var(--text);
@@ -6806,7 +6570,7 @@ a.needs-go {
   margin: 0;
   padding: 0;
   min-width: 0;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-xl);
   background: var(--chrome);
 }
@@ -6818,7 +6582,7 @@ a.needs-go {
 .st-sub > * + *,
 .st-step + .st-step,
 .st-step-body > * + * {
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 .st-foot {
   margin: 0 var(--st-x);
@@ -6857,7 +6621,7 @@ a.needs-go {
   grid-template-columns: minmax(0, 1fr);
 }
 label.st-row {
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .st-row-text {
   display: flex;
@@ -6946,11 +6710,11 @@ label.st-row {
   margin: 0;
   width: 2.4em;
   height: 1.4em;
-  border: var(--border) var(--border-style) transparent;
+  border: var(--border) solid transparent;
   border-radius: calc(var(--radius-xl) * 3);
   background: var(--line);
   font-size: var(--fs-md);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
   transition: background 120ms;
 }
 .st-switch::before {
@@ -6973,7 +6737,7 @@ label.st-row {
 }
 .st-switch:disabled {
   opacity: 0.4;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 @media (prefers-reduced-motion: reduce) {
   .st-switch,
@@ -6988,7 +6752,7 @@ label.st-row {
   flex-wrap: wrap;
   gap: 2px;
   padding: 2px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--bg);
 }
@@ -7019,7 +6783,7 @@ label.st-row {
   min-width: 0;
   max-width: 100%;
   padding: 5px 8px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
@@ -7041,7 +6805,7 @@ label.st-row {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .st-dropdown:hover:not(:disabled) {
   border-color: var(--line-high);
@@ -7050,11 +6814,7 @@ label.st-row {
   color: var(--dim);
 }
 .st-dropdown:disabled {
-  cursor: var(--cursor);
-}
-.st-select-mini {
-  padding: 2px 4px;
-  font-size: var(--fs-sm);
+  cursor: auto;
 }
 .st-input::placeholder {
   color: var(--dimmer);
@@ -7078,10 +6838,6 @@ label.st-row {
    is as tall as its words. */
 .st-textarea-line {
   resize: none;
-}
-.st-input-mini {
-  width: 3.8em;
-  padding: 2px 4px;
 }
 /* A name in a list: a field that does not look like one until you are in it. */
 .st-input-bare {
@@ -7185,7 +6941,7 @@ label.st-row {
   align-items: center;
   gap: 5px;
   padding: 5px 11px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--chrome-high);
   color: var(--text);
@@ -7199,7 +6955,7 @@ label.st-row {
 }
 .st-btn:disabled {
   opacity: 0.4;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 .st-btn-primary {
   border-color: transparent;
@@ -7228,18 +6984,6 @@ label.st-row {
 .st-ask-q {
   font-size: var(--fs-sm);
   color: var(--text);
-}
-.st-textbtn {
-  padding: 0 2px;
-  border: none;
-  background: none;
-  color: var(--dim);
-  font-size: var(--fs-sm);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.st-textbtn:hover {
-  color: var(--accent);
 }
 .st-link,
 .st-a {
@@ -7308,7 +7052,7 @@ label.st-row {
   gap: 2px;
 }
 .st-item-pick {
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .st-item-name {
   display: flex;
@@ -7323,11 +7067,6 @@ label.st-row {
   font-size: var(--fs-sm);
   color: var(--dim);
   overflow-wrap: anywhere;
-}
-.st-item-meta {
-  display: block;
-  font-size: var(--fs-xs);
-  color: var(--dimmer);
 }
 /* Settings → Specs (`Specs.tsx`). A part whose reading is not what is typed
    says so in the text's own ink rather than the hint's dim, behind the
@@ -7413,7 +7152,7 @@ a.st-btn {
   min-width: 0;
   margin: 0;
   padding: 0.5em 0.75em;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
@@ -7423,13 +7162,6 @@ a.st-btn {
   overflow-wrap: anywhere;
   user-select: all;
 }
-.st-item-busy {
-  opacity: 0.8;
-}
-.st-busy {
-  font-size: var(--fs-sm);
-  color: var(--working);
-}
 .st-item-bad .st-item-sub,
 .st-item-bad .st-item-name {
   color: var(--danger);
@@ -7438,15 +7170,9 @@ a.st-btn {
   color: var(--dimmer);
   text-decoration: line-through;
 }
-.st-version {
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  font-weight: 400;
-  color: var(--dimmer);
-}
 .st-badge {
   padding: 0 5px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: var(--fs-xs);
@@ -7465,241 +7191,6 @@ a.st-btn {
   padding: var(--st-y) var(--st-x);
   font-size: var(--fs-base);
   color: var(--dim);
-}
-
-/* The bar over a long list: which shelf, and a filter. */
-.st-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--st-gap);
-  padding: var(--st-y) var(--st-x);
-}
-.st-toolbar .st-seg {
-  flex: 1 1 auto;
-}
-/* Larger than the chrome's own size, for the reason the document picker's
-   filter is: iOS zooms the page when it focuses a field under 16px. */
-.st-search {
-  flex: 1 1 160px;
-  min-width: 0;
-  padding: 5px 8px;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-md);
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--ui);
-  font-size: var(--fs-xl);
-  outline: none;
-  appearance: none;
-  -webkit-appearance: none;
-}
-.st-search:focus {
-  border-color: var(--line-high);
-}
-.st-search::placeholder {
-  color: var(--dimmer);
-}
-.st-jump {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  text-decoration: underline;
-}
-
-/* Pictures to choose between. */
-.st-gallery {
-  display: grid;
-  gap: var(--st-gap);
-  padding: var(--st-x);
-}
-.st-gallery-sm {
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-}
-.st-gallery-md {
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-}
-.st-gallery-lg {
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-}
-.st-pic {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
-  color: var(--text);
-  text-align: left;
-  overflow: hidden;
-}
-.st-pic:hover {
-  border-color: var(--line-high);
-}
-/* The ring is `--ring` where the card sets one — a theme card wears its own
-   accent, so the mark that says "this one" is a sample of what picking it
-   does — and the window's accent otherwise. */
-.st-pic-on,
-.st-pic-on:hover {
-  border-color: var(--ring, var(--accent));
-  box-shadow: 0 0 0 var(--border-thick) var(--ring, var(--accent));
-}
-.st-pic-shot {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.st-pic-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.st-pic-name {
-  font-size: var(--fs-md);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.st-pic-sub {
-  font-size: var(--fs-xs);
-  color: var(--dim);
-}
-/* A theme card: the name, then its five swatches — chrome, accent, and the
-   three marks that say an agent wants you. Colours come inline from the
-   theme itself; a stylesheet holds one palette at a time and this is many. */
-.st-theme {
-  flex-direction: row-reverse;
-  justify-content: space-between;
-}
-.st-theme-swatches {
-  display: flex;
-  gap: 3px;
-}
-.st-theme-swatch {
-  width: 7px;
-  height: 14px;
-  border-radius: var(--radius-xs);
-}
-/* A skin card draws its own corner, line and face inline; this is only the
-   little pane inside it, wearing the frame recipe a label cannot tell you. */
-.st-skin-pane {
-  flex: none;
-  width: 46px;
-  height: 34px;
-  display: flex;
-  flex-direction: column;
-  border-color: var(--line-high);
-  background: var(--bg);
-  overflow: hidden;
-}
-.st-skin-bar {
-  display: flex;
-  align-items: center;
-  height: 11px;
-  padding: 0 4px;
-  background: var(--chrome-high);
-  color: var(--dim);
-  line-height: 1;
-}
-
-/* A registry entry's preview, one box whatever it is a preview of, so the
-   rows line up. The colours and the shape come inline from the entry. */
-.st-shot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 36px;
-  flex: none;
-  overflow: hidden;
-  border-radius: var(--radius-md);
-  color: var(--dim);
-}
-.st-shot-theme {
-  position: relative;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-end;
-  border: var(--border) var(--border-style) var(--line);
-}
-.st-shot-chrome {
-  height: 10px;
-  flex: none;
-}
-.st-shot-dots {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  flex: 1;
-}
-.st-shot-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-round);
-}
-.st-shot-skin {
-  border-color: var(--line-high);
-  background: var(--bg);
-}
-.st-shot-picture img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  image-rendering: auto;
-}
-/* `.mascot` is `position: absolute` and relies on a positioned, one-cell
-   parent to show one frame; without one its containing block is the viewport. */
-.st-shot-mascot {
-  --status-size: 30px;
-  border: var(--border) var(--border-style) var(--line);
-  background: var(--bg);
-}
-.st-shot-cell {
-  position: relative;
-  width: var(--status-size);
-  height: var(--status-size);
-  overflow: hidden;
-}
-/* The one preview that is a control: a sound has no picture. */
-.st-shot-sound {
-  border: var(--border) var(--border-style) var(--line);
-  background: var(--bg);
-  color: var(--dim);
-  cursor: var(--cursor-pointer);
-}
-.st-shot-sound:hover:not(:disabled),
-.st-shot-sound:focus-visible {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.st-shot-sound:disabled {
-  cursor: var(--cursor);
-  color: var(--dimmer);
-}
-.st-shot-pack {
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 1px;
-  padding: 0 4px;
-  border: var(--border) var(--border-style) var(--line);
-  background: var(--bg);
-  font-size: var(--fs-xs);
-  line-height: 1.1;
-  color: var(--dimmer);
-}
-.st-shot-part {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* A walkthrough: numbered rows that turn into ticks. A done step folds. */
@@ -7724,7 +7215,7 @@ a.st-btn {
   color: var(--text);
   font: inherit;
   text-align: left;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .st-step-n {
   flex: none;
@@ -7733,7 +7224,7 @@ a.st-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-round);
   background: var(--chrome-high);
   color: var(--dim);
@@ -7764,7 +7255,7 @@ a.st-btn {
   display: flex;
   flex-direction: column;
   padding-left: 32px;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 :root[data-narrow] .st-step-body {
   padding-left: 0;
@@ -7780,7 +7271,7 @@ a.st-btn {
   list-style: none;
   font-size: var(--fs-base);
   color: var(--text);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .st-details-sum::-webkit-details-marker {
   display: none;
@@ -7843,7 +7334,7 @@ a.st-btn {
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--bg);
 }
@@ -7870,7 +7361,7 @@ a.st-btn {
 }
 .st-proc-head,
 .st-proc-group .st-item {
-  border-left: var(--border-thick) var(--border-style) var(--line);
+  border-left: var(--border-thick) solid var(--line);
 }
 .st-proc-head {
   display: flex;
@@ -7937,7 +7428,7 @@ a.st-btn {
   gap: 3px;
   min-width: 22px;
   padding: 2px 6px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-bottom-width: var(--border-thick);
   border-radius: var(--radius-md);
   background: var(--chrome-high);
@@ -8012,7 +7503,7 @@ a.st-btn {
 .st-sheet-wrap {
   max-height: 40vh;
   padding: 8px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--bg);
   overflow: auto;
@@ -8021,7 +7512,7 @@ a.st-btn {
    `--cell` is set per element by the page: the cell size is the thing chosen. */
 .st-sheet {
   position: relative;
-  image-rendering: var(--image-rendering);
+  image-rendering: pixelated;
   background-repeat: no-repeat;
   touch-action: none;
   cursor: crosshair;
@@ -8038,7 +7529,7 @@ a.st-btn {
 /* Outlined rather than tinted: a wash over pixel art hides the frame you are reading. */
 .st-sheet-sel {
   position: absolute;
-  border: var(--border) var(--border-style) var(--accent);
+  border: var(--border) solid var(--accent);
   box-shadow: 0 0 0 1px var(--shadow);
   pointer-events: none;
 }
@@ -8054,7 +7545,7 @@ a.st-btn {
   align-items: center;
   gap: 8px;
   padding: 12px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--bg);
 }
@@ -8065,188 +7556,6 @@ a.st-btn {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-/* Studio: a card per part, the colours as swatches, the icon strip and glyphs. */
-.st-part {
-  display: flex;
-  gap: 10px;
-  min-width: 0;
-  padding: 8px;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
-}
-.st-part-on {
-  border-color: var(--line-high);
-}
-.st-part-over {
-  border-color: var(--accent);
-  background: var(--chrome-high);
-}
-.st-part-shot {
-  flex: none;
-  width: 96px;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  border: var(--border) dashed var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--chrome);
-  color: var(--dim);
-  font-size: var(--fs-xs);
-  line-height: 1.2;
-  text-align: center;
-  overflow: hidden;
-}
-.st-part-shot:hover {
-  border-color: var(--line-high);
-}
-.st-part-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.st-part-name {
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-strong);
-}
-.st-part-covers {
-  font-size: var(--fs-sm);
-  color: var(--dim);
-}
-.st-part-hint {
-  font-size: var(--fs-xs);
-  color: var(--dimmer);
-  line-height: 1.3;
-}
-.st-part-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  margin-top: 4px;
-}
-.st-part-num {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--fs-xs);
-  color: var(--dimmer);
-}
-.st-part-remove {
-  margin-left: auto;
-}
-.st-colors {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 4px 10px;
-  padding: var(--st-y) var(--st-x);
-}
-.st-color {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 4px;
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-sm);
-  color: var(--dim);
-}
-.st-color-on {
-  background: var(--chrome-high);
-  color: var(--text);
-}
-/* A swatch that is a colour input in disguise: the native picker is the one
-   control the browser draws better than this file could. */
-.st-swatch {
-  position: relative;
-  flex: none;
-  width: 22px;
-  height: 18px;
-  border: var(--border) var(--border-style) var(--line);
-  border-radius: var(--radius-xs);
-  overflow: hidden;
-  cursor: var(--cursor-pointer);
-}
-.st-swatch input {
-  position: absolute;
-  inset: -8px;
-  width: 200%;
-  height: 200%;
-  opacity: 0;
-  cursor: var(--cursor-pointer);
-}
-.st-color-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.st-color-from {
-  font-size: var(--fs-xs);
-  color: var(--dimmer);
-}
-.st-strip-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--st-gap);
-  width: 100%;
-}
-.st-strip {
-  height: 28px;
-  min-width: 160px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 6px;
-  border: var(--border) dashed var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--dimmer);
-  font-size: var(--fs-xs);
-}
-.st-strip-on {
-  border-style: solid;
-}
-.st-strip-img {
-  height: 20px;
-  image-rendering: pixelated;
-}
-.st-glyphs {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 4px 8px;
-  width: 100%;
-}
-.st-glyph {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-xs);
-  color: var(--dim);
-}
-.st-glyph .icon {
-  width: 16px;
-  color: var(--text);
-}
-.st-glyph-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--mono);
-}
-.st-glyph-input {
-  width: 36px;
-  padding: 3px 4px;
-  text-align: center;
 }
 
 /* Channels: the pairing panel, the QR beside the words on a desktop and above them on a phone. */
@@ -8371,9 +7680,6 @@ a.st-btn {
 .st-dialog-narrow .st-select {
   max-width: 100%;
 }
-.st-dialog-narrow .st-gallery {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
 .st-dialog-narrow .st-bar {
   display: none;
 }
@@ -8400,7 +7706,7 @@ a.st-btn {
 .set-text {
   background: var(--bg);
   color: var(--text);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   padding: 5px 7px;
   font: var(--fs-md) var(--mono);
@@ -8420,7 +7726,7 @@ a.st-btn {
 .set-choice {
   padding: 4px 10px;
   border-radius: var(--radius-lg);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   background: var(--chrome-high);
   color: var(--dim);
   font-size: var(--fs-base);
@@ -8434,7 +7740,7 @@ a.st-btn {
   padding: 6px 8px;
   border-radius: var(--radius-sm);
   background: var(--chrome-high);
-  border-left: var(--border-thick) var(--border-style) var(--blocked);
+  border-left: var(--border-thick) solid var(--blocked);
   color: var(--dim);
   font-size: var(--fs-sm);
 }
@@ -8471,7 +7777,7 @@ a.st-btn {
   gap: 8px;
   width: 100%;
   padding: 5px 6px;
-  border: var(--border) var(--border-style) transparent;
+  border: var(--border) solid transparent;
   border-radius: var(--radius-lg);
   background: none;
   color: var(--text);
@@ -8517,7 +7823,7 @@ a.st-btn {
   max-width: 100%;
   margin: 0;
   padding: 10px 12px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--chrome);
   font: var(--fs-base)/1.5 var(--mono);
@@ -8554,7 +7860,7 @@ a.st-btn {
 .reach-share {
   margin: 12px 0 2px;
   padding: 10px 12px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--chrome);
   color: var(--dim);
@@ -8624,7 +7930,7 @@ a.st-btn {
    at, so it sits beside the title without competing with it. */
 .reach-toggle {
   padding: 1px 5px;
-  border: var(--border) var(--border-style) transparent;
+  border: var(--border) solid transparent;
   border-radius: var(--radius-md);
   color: var(--dimmer);
   font-size: var(--fs-sm);
@@ -8705,7 +8011,7 @@ a.st-btn {
 }
 .reach-alt {
   padding: 2px 6px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   background: var(--chrome-high);
   color: var(--dim);
@@ -8797,7 +8103,7 @@ a.st-btn {
   align-items: center;
   gap: 6px;
   padding: 6px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 
 .docs-title {
@@ -8812,7 +8118,7 @@ a.st-btn {
   min-width: 0;
   padding: 6px 8px;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--text);
   font-family: var(--ui);
@@ -8897,7 +8203,7 @@ a.st-btn {
 .docs-foot {
   flex: none;
   padding: 4px;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 
 .docs-elsewhere {
@@ -8940,12 +8246,12 @@ a.st-btn {
 
 .md h1 {
   font-size: 1.7em;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
   padding-bottom: 0.3em;
 }
 .md h2 {
   font-size: 1.35em;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
   padding-bottom: 0.25em;
 }
 .md h3 { font-size: 1.15em; }
@@ -8968,7 +8274,7 @@ a.st-btn {
 .md a {
   color: var(--accent);
   text-decoration: none;
-  border-bottom: var(--border) var(--border-style) color-mix(in srgb, var(--accent) 35%, transparent);
+  border-bottom: var(--border) solid color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .md a:hover {
   border-bottom-color: var(--accent);
@@ -8986,7 +8292,7 @@ a.st-btn {
 .md li > ol { margin: 0.2em 0; }
 
 .md blockquote {
-  border-left: var(--border-thick) var(--border-style) var(--line);
+  border-left: var(--border-thick) solid var(--line);
   padding: 0 0 0 1em;
   color: var(--dim);
 }
@@ -8997,7 +8303,7 @@ a.st-btn {
   font-family: var(--mono);
   font-size: 0.88em;
   background: var(--chrome-high);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-sm);
   padding: 0.1em 0.35em;
 }
@@ -9011,7 +8317,7 @@ a.st-btn {
   font-family: var(--mono);
   font-size: 0.92em;
   line-height: 1.5;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   padding: 10px 12px;
   overflow-x: auto;
@@ -9037,7 +8343,7 @@ a.st-btn {
 
 .md th,
 .md td {
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   padding: 5px 10px;
   text-align: left;
 }
@@ -9057,7 +8363,7 @@ a.st-btn {
 
 .md hr {
   border: 0;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
   margin: 2em 0;
 }
 
@@ -9094,7 +8400,7 @@ a.st-btn {
 .mermaid-error {
   margin-top: 8px;
   padding-top: 6px;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
   color: var(--danger);
   font-family: var(--ui);
   font-size: var(--fs-base);
@@ -9103,7 +8409,7 @@ a.st-btn {
 /* The strip's label for a reader with no document yet: a tab that is not a
    button, because there is nothing to switch to until the editor opens one. */
 .tab-reader {
-  cursor: var(--cursor);
+  cursor: auto;
   font-style: italic;
 }
 
@@ -9153,7 +8459,7 @@ a.st-btn {
   flex-direction: column;
   position: relative;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-lg);
   scroll-snap-align: start;
 }
@@ -9193,9 +8499,9 @@ a.st-btn {
   gap: 4px;
   padding: 7px 6px 7px 9px;
   background: var(--bg);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .board-card:hover {
   border-color: var(--line-high);
@@ -9295,7 +8601,7 @@ a.st-btn {
   color: var(--dim);
   font-size: var(--fs-md);
   line-height: 1;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .board-icon-btn:hover:not(:disabled) {
   color: var(--text);
@@ -9375,7 +8681,7 @@ a.st-btn {
   padding: 0;
   font-size: var(--fs-xs);
   color: var(--dimmer);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .board-card-more:hover {
   color: var(--text);
@@ -9430,7 +8736,7 @@ a.st-btn {
   margin: 0;
   font-size: var(--fs-sm);
   color: var(--dim);
-  cursor: var(--cursor);
+  cursor: auto;
 }
 
 /* A slow git action in flight. The spinner is a ring in the text's own colour
@@ -9467,7 +8773,7 @@ a.st-btn {
 
 .board-robot:disabled {
   opacity: 0.35;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 
 /* The board's own buttons: one height, one radius, one weight, so a row of
@@ -9485,14 +8791,14 @@ a.st-btn {
   font-size: var(--fs-base);
   font-weight: 600;
   white-space: nowrap;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .board-btn:hover:not(:disabled) {
   filter: brightness(1.08);
 }
 .board-btn:disabled {
   opacity: 0.4;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 .board-btn-quiet {
   background: transparent;
@@ -9526,7 +8832,7 @@ a.st-btn {
 .board-seg {
   flex: none;
   display: inline-flex;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
@@ -9543,10 +8849,10 @@ a.st-btn {
   font-size: var(--fs-sm);
   line-height: 1;
   text-decoration: none;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .board-seg-btn + .board-seg-btn {
-  border-left: var(--border) var(--border-style) var(--line);
+  border-left: var(--border) solid var(--line);
 }
 .board-seg-btn:hover {
   color: var(--text);
@@ -9584,7 +8890,7 @@ a.st-btn {
   width: 7px;
   height: 7px;
   border-radius: var(--radius-round);
-  border: var(--border) var(--border-style) var(--exited);
+  border: var(--border) solid var(--exited);
 }
 .board-run-finished .board-run-mark {
   border-color: var(--done);
@@ -9650,7 +8956,7 @@ a.st-btn {
   border-radius: var(--radius-md);
   color: var(--dimmer);
   font-size: var(--fs-base);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .board-empty:hover {
   color: var(--text);
@@ -9717,11 +9023,11 @@ a.st-btn {
   gap: 5px;
   height: 26px;
   padding: 0 8px 0 6px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   color: var(--dim);
   font-size: var(--fs-sm);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
   user-select: none;
 }
 .board-toggle:hover {
@@ -9756,14 +9062,14 @@ a.st-btn {
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   color: var(--dim);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .reader-zoom:hover {
   color: var(--text);
 }
 /* At 100% the number is a readout, not a button: there is nothing to go back to. */
 .reader-zoom:disabled {
-  cursor: var(--cursor);
+  cursor: auto;
 }
 .reader-zoom:disabled:hover {
   color: var(--dim);
@@ -9785,7 +9091,7 @@ a.st-btn {
    that was pressing it. */
 .pane-btn:disabled {
   opacity: 0.35;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 .pane-btn:disabled:hover {
   color: var(--dimmer);
@@ -9861,7 +9167,7 @@ a.st-btn {
   color: var(--text);
   background: var(--chrome-high);
   border-radius: var(--radius-md);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 /* The ones with a word on them — esc, home, pgdn — need the room the glyphs do
    not. Still a floor rather than a width, so a longer label grows the key. */
@@ -9930,163 +9236,17 @@ a.st-btn {
   background: var(--chrome-high);
 }
 
-/* --------------------------------------------------------------------------
-   Parts — the pictures a skin paints
-
-   Everything above this line describes kururu's chrome in tokens: a radius, a
-   line weight, a colour. This block is where a skin gets to *draw* it instead.
-   Each region below reads three properties `partVars` in `shared/skin.ts`
-   wrote onto the root — a `border-image`, the `border-width` that gives it
-   room, and one background layer laid over the theme's ground — and a region
-   nobody painted reads `none`, `0px`, `none`, which is the rule doing nothing.
-
-   The frame is the element's own border, on purpose. A bezel drawn as a
-   border *takes room*: the tab strip and the terminal move inward to sit
-   inside it, and the pane's grid is proposed again for the smaller box, which
-   is a SIGWINCH and is the honest cost of a frame. A picture laid over the edge
-   instead would keep the layout and cover the first row of text. The two rows
-   in the sidebar are the exception and draw theirs on `::after` — a row's
-   width is the sidebar's, and a frame that took room there would make the
-   selected row a different height from its neighbours.
-
-   `image-rendering` is set on every painted element because a bezel is pixel
-   art nine times out of ten, and reset on the pane's body because the property
-   inherits and a reader's photographs should not come out as blocks.
-
-   The `background` shorthands are two layers each — the skin's, then the
-   theme's colour — and `none, var(--chrome)` is exactly as valid as
-   `url(…), var(--chrome)`, which is what lets one declaration serve both. It
-   does mean these rules restate a colour the base rule already set; that is the
-   price of a layer, and it is paid here rather than in thirty rules above.
-   -------------------------------------------------------------------------- */
-
-.sidebar {
-  background: var(--p-sidebar-bg), var(--chrome);
-  border-width: var(--p-sidebar-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-sidebar-frame);
-  image-rendering: var(--image-rendering);
-}
-
-/* The three boxes in the sidebar. A sidebar picture is the one a skin is most
-   tempted to make busy — clouds, sand, a texture — and it is also the one with
-   the most text on it, so the sections that hold the rows get a ground of their
-   own. Unpainted it is nothing at all; painted it takes room like every frame,
-   and the sections stand apart by a gutter so two frames do not read as one. */
-.side-section {
-  background: var(--p-panel-bg), transparent;
-  border-width: var(--p-panel-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-panel-frame);
-  image-rendering: var(--image-rendering);
-}
-@container not style(--p-panel-frame: none) {
-  .side-section {
-    margin: 0 var(--gutter) var(--gutter);
-  }
-}
-@container not style(--p-panel-bg: none) {
-  .side-section {
-    margin: 0 var(--gutter) var(--gutter);
-  }
-}
-
-.panes {
-  background: var(--p-well-bg), var(--chrome);
-  border-width: var(--p-well-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-well-frame);
-  image-rendering: var(--image-rendering);
-}
-
-.pane {
-  background: var(--p-pane-bg), var(--bg);
-  border-width: var(--p-pane-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-pane-frame);
-  image-rendering: var(--image-rendering);
-}
-.pane-on {
-  background: var(--p-pane-on-bg), var(--bg);
-  border-width: var(--p-pane-on-w);
-  border-image: var(--p-pane-on-frame);
-}
-/* Zen takes the frame off with the radius: the one pane is the window, and a
-   bezel around the window is a bezel around nothing. */
-.app-zen .pane {
-  border-width: 0;
-  border-image: none;
-}
-.pane-body {
-  image-rendering: auto;
-}
-
-.tabstrip {
-  background: var(--p-tabstrip-bg), var(--strip);
-  border-width: var(--p-tabstrip-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-tabstrip-frame);
-  image-rendering: var(--image-rendering);
-}
-/* The block of pane controls sits *on* the strip and has to be opaque, so the
-   tabs pass under it — and on a painted strip a flat theme colour there is a
-   light box on a dark bezel. It wears the strip's own picture instead: the tile
-   as a background layer, and the nine-slice's *middle* through a border-image
-   whose width is forced to zero, which makes `fill` paint the centre of the
-   picture over the whole box. The fade in front of it is a gradient into the
-   theme's colour and cannot follow a picture, so it is hidden when one is on;
-   `@container style()` is what lets a stylesheet ask whether a custom property
-   is `none`, and a browser without it merely keeps the fade. */
-.tab-actions {
-  background: var(--p-tabstrip-bg), var(--strip);
-  border-image: var(--p-tabstrip-frame);
-  border-image-width: 0;
-  border-image-outset: 0;
-  image-rendering: var(--image-rendering);
-}
-@container not style(--p-tabstrip-frame: none) {
-  .tab-actions::before {
-    display: none;
-  }
-}
-@container not style(--p-tabstrip-bg: none) {
-  .tab-actions::before {
-    display: none;
-  }
-}
-
+/* Sprites are pixel art, and the chrome says so for everything in it: the
+   property inherits, so it is set on the chrome's boxes and taken back on the
+   two bodies that hold a reader's pictures. */
+.sidebar,
+.side-section,
+.panes,
+.pane,
+.tabstrip,
+.tab-actions,
 .tab,
-.tab-new {
-  border-width: var(--p-tab-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-tab-frame);
-  image-rendering: var(--image-rendering);
-}
-.tab {
-  background: var(--p-tab-bg), transparent;
-}
-.tab:hover {
-  background: var(--p-tab-bg), var(--chrome-high);
-}
-/* The `+` is a `.tab` too, and the rule above took its ground away. It sticks
-   over the tabs that scroll under it, so on a phone a skin whose tab picture is
-   clear in the middle showed the titles through it; it keeps the strip's. */
-.tab-new {
-  background: var(--p-tab-bg), var(--strip);
-}
-.tab-on,
-.tab-on:hover {
-  background: var(--p-tab-on-bg), var(--bg);
-  border-width: var(--p-tab-on-w);
-  border-image: var(--p-tab-on-frame);
-}
-
+.tab-new,
 .pane-btn,
 .tab-close,
 .voice-close,
@@ -10095,89 +9255,19 @@ a.st-btn {
 .sb-panes,
 .dev-stop,
 .st-iconbtn,
-.sidebar-close {
-  /* At rest these draw no ground of their own, so the skin's layer sits over
-     nothing; the hover rules above still win with the theme's colour, which is
-     right — a picture of a button lights up the way the button always has. */
-  background: var(--p-tool-bg), transparent;
-  border-width: var(--p-tool-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-tool-frame);
-  image-rendering: var(--image-rendering);
-}
-
-.button {
-  background: var(--p-button-bg), var(--accent);
-  border-width: var(--p-button-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-button-frame);
-  image-rendering: var(--image-rendering);
-}
-.button-quiet {
-  background: var(--p-button-bg), var(--chrome-high);
-  border-color: var(--line);
-  border-width: max(var(--border), var(--p-button-w));
-  border-image: var(--p-button-frame);
-}
-.button-danger {
-  background: var(--p-button-bg), var(--danger-bg);
-}
-
-/* The two selected rows. The picture's ground goes on the row; its frame goes
-   on a pseudo-element over the row — see the header for why these two are the
-   exception. Both are the row's own element: `.ws-item` is the positioned
-   ancestor for the workspace row, and `.agent-item` is its own. */
-.ws-list .ws-item-on {
-  position: relative;
-  background: var(--p-row-on-bg), var(--chrome-high);
-  image-rendering: var(--image-rendering);
-  /* A stacking context of its own, so the frame below can sit *under* the
-     row's text with a negative z-index and still be above the row's ground.
-     Without it, `z-index: -1` would drop the frame behind the sidebar itself,
-     and without the negative z-index the frame's filled middle paints over
-     the workspace's name — which is how this was first seen. */
-  isolation: isolate;
-}
-.agent-list .agent-item-on {
-  background: var(--p-row-on-bg), var(--chrome-high);
-  image-rendering: var(--image-rendering);
-  isolation: isolate;
-}
-.ws-list .ws-item-on::after,
-.agent-list .agent-item-on::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  border-width: var(--p-row-on-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-row-on-frame);
-  border-radius: inherit;
-}
-
-.statusbar {
-  background: var(--p-statusbar-bg), var(--chrome-low);
-  border-width: var(--p-statusbar-w);
-  border-style: solid;
-  border-color: transparent;
-  border-image: var(--p-statusbar-frame);
-  image-rendering: var(--image-rendering);
-}
-
+.sidebar-close,
+.button,
+.ws-list .ws-item-on,
+.agent-list .agent-item-on,
+.statusbar,
 .dialog,
 .st-dialog,
 .help,
 .menu,
 .picker {
-  background: var(--p-dialog-bg), var(--chrome);
-  border-width: var(--p-dialog-w);
-  border-image: var(--p-dialog-frame);
-  image-rendering: var(--image-rendering);
+  image-rendering: pixelated;
 }
+.pane-body,
 .st-body {
   image-rendering: auto;
 }
@@ -10238,7 +9328,7 @@ a.st-btn {
   padding: 6px 8px 10px;
   color: var(--dim);
   font-size: var(--fs-base);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .board-col-open:hover {
   color: var(--text);
@@ -10276,7 +9366,7 @@ a.st-btn {
   font-weight: 600;
   color: var(--text);
   background: var(--bg);
-  border: var(--border) var(--border-style) var(--accent);
+  border: var(--border) solid var(--accent);
   border-radius: var(--radius-md);
   outline: none;
 }
@@ -10285,7 +9375,7 @@ a.st-btn {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: var(--cursor);
+  cursor: auto;
 }
 /* The column's colour, as a swatch you press to change it. A ring with
    nothing in it for a column with none, so there is still something to press. */
@@ -10295,7 +9385,7 @@ a.st-btn {
   height: 10px;
   border-radius: var(--radius-round);
   background: var(--tag, transparent);
-  border: var(--border) var(--border-style) var(--tag, var(--line-high));
+  border: var(--border) solid var(--tag, var(--line-high));
 }
 .board-col-dot:hover,
 .board-col-dot:focus-visible {
@@ -10375,7 +9465,7 @@ a.st-btn {
   border-radius: var(--radius-lg);
   color: var(--dimmer);
   font-size: var(--fs-base);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
   scroll-snap-align: start;
 }
 .board-col-add:hover {
@@ -10410,7 +9500,7 @@ a.st-btn {
   min-width: 0;
   pointer-events: auto;
   background: color-mix(in srgb, var(--tag, var(--accent)) 4%, var(--chrome));
-  border: var(--border) var(--border-style) var(--line-high);
+  border: var(--border) solid var(--line-high);
   border-radius: var(--radius-lg);
   box-shadow: var(--elev-menu);
   overflow: hidden;
@@ -10435,7 +9525,7 @@ a.st-btn {
   display: flex;
   align-items: center;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line-high);
+  border: var(--border) solid var(--line-high);
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-menu);
 }
@@ -10451,7 +9541,7 @@ a.st-btn {
   padding: 0;
   border-radius: var(--radius-lg);
   color: var(--accent);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .quote-pop-btn:hover,
 .quote-pop-btn:focus-visible {
@@ -10479,7 +9569,7 @@ a.st-btn {
   flex: 1;
   min-width: 0;
   padding: 4px 7px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
@@ -10501,7 +9591,7 @@ a.st-btn {
   border-radius: var(--radius-lg);
   background: var(--accent);
   color: var(--on-accent);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 /* The mic beside the mark and beside the field, held to say the comment:
    Kuru's own mic (`.kuru-mic`), in the danger colour while it listens, with
@@ -10519,7 +9609,7 @@ a.st-btn {
   padding: 0;
   border-radius: var(--radius-lg);
   color: var(--dim);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
   touch-action: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -10585,7 +9675,7 @@ a.st-btn {
   min-height: 34px;
   padding: 0 4px 0 10px;
   background: color-mix(in srgb, var(--tag, var(--accent)) 14%, var(--chrome));
-  border-bottom: var(--border) var(--border-style) color-mix(in srgb, var(--tag, var(--accent)) 28%, var(--line));
+  border-bottom: var(--border) solid color-mix(in srgb, var(--tag, var(--accent)) 28%, var(--line));
   cursor: grab;
   /* A finger on the bar moves the note rather than the page under it. */
   touch-action: none;
@@ -10691,7 +9781,7 @@ a.st-btn {
 .note-empty-btn {
   padding: 0;
   text-align: left;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .note-empty-btn:hover {
   color: var(--text);
@@ -10725,7 +9815,7 @@ a.st-btn {
   flex-direction: column;
   gap: 4px;
   padding: 6px 12px 8px;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 
 /* The handles: a strip along each edge and a square at each corner, inside
@@ -10913,7 +10003,7 @@ html.note-page #root {
 .timeline-editor {
   padding: 8px;
   background: var(--chrome);
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 .timeline-editor .board-composer {
   max-width: 520px;
@@ -10923,7 +10013,7 @@ html.note-page #root {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 .timeline-grid {
   display: grid;
@@ -10945,13 +10035,13 @@ html.note-page #root {
   z-index: 3;
   grid-row: 1;
   background: var(--chrome);
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 .timeline-corner {
   left: 0;
   z-index: 4;
   grid-column: 1;
-  border-right: var(--border) var(--border-style) var(--line);
+  border-right: var(--border) solid var(--line);
 }
 .timeline-head {
   display: flex;
@@ -10988,7 +10078,7 @@ html.note-page #root {
    a double-click lands on where there is no bar. */
 .timeline-day {
   grid-row: 2 / -1;
-  border-left: var(--border) var(--border-style) color-mix(in srgb, var(--line) 40%, transparent);
+  border-left: var(--border) solid color-mix(in srgb, var(--line) 40%, transparent);
 }
 .timeline-day-week {
   border-left-color: var(--line);
@@ -11014,7 +10104,7 @@ html.note-page #root {
   min-width: 0;
   padding: 0 4px 0 10px;
   background: var(--bg);
-  border-right: var(--border) var(--border-style) var(--line);
+  border-right: var(--border) solid var(--line);
   font-size: var(--fs-base);
 }
 .timeline-title {
@@ -11061,7 +10151,7 @@ html.note-page #root {
   filter: brightness(1.12);
 }
 .timeline-span:focus-visible {
-  outline: var(--border-thick) var(--border-style) var(--line-high);
+  outline: var(--border-thick) solid var(--line-high);
   outline-offset: 1px;
 }
 .timeline-span-held {
@@ -11122,7 +10212,7 @@ html.note-page #root {
   display: flex;
   flex-direction: column;
   background: var(--chrome);
-  border-top: var(--border) var(--border-style) var(--line);
+  border-top: var(--border) solid var(--line);
 }
 .timeline-loose-head {
   display: flex;
@@ -11160,8 +10250,8 @@ html.note-page #root {
   max-width: 280px;
   padding: 4px 8px;
   background: var(--bg);
-  border: var(--border) var(--border-style) var(--line);
-  border-left: var(--border-thick) var(--border-style) var(--tag, var(--line));
+  border: var(--border) solid var(--line);
+  border-left: var(--border-thick) solid var(--tag, var(--line));
   border-radius: var(--radius-md);
   font-size: var(--fs-base);
   cursor: grab;
@@ -11214,7 +10304,7 @@ html.note-page #root {
   flex-direction: column;
   min-height: 0;
   background: var(--chrome);
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-dialog);
   overflow: hidden;
@@ -11225,7 +10315,7 @@ html.note-page #root {
   align-items: center;
   gap: 8px;
   padding: 6px 8px 6px 14px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 .db-head .dialog-title {
   flex: none;
@@ -11259,7 +10349,7 @@ html.note-page #root {
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--dim);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .db-body {
   flex: 1;
@@ -11272,7 +10362,7 @@ html.note-page #root {
   min-height: 0;
   overflow: auto;
   padding: 6px;
-  border-right: var(--border) var(--border-style) var(--line);
+  border-right: var(--border) solid var(--line);
 }
 .db-conns,
 .db-schemas,
@@ -11296,7 +10386,7 @@ html.note-page #root {
   color: var(--dim);
   font: inherit;
   text-align: left;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .db-conn:hover,
 .db-conn-on {
@@ -11346,7 +10436,7 @@ html.note-page #root {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   text-align: left;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .db-schema-head:hover {
   color: var(--text);
@@ -11375,7 +10465,7 @@ html.note-page #root {
   font-family: var(--mono);
   font-size: var(--fs-md);
   text-align: left;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .db-table:hover,
 .db-table-on {
@@ -11412,7 +10502,7 @@ html.note-page #root {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
   color: var(--dim);
   font-size: var(--fs-base);
 }
@@ -11465,7 +10555,7 @@ html.note-page #root {
   margin: 0;
   padding: 10px 12px;
   border: none;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
   background: var(--bg);
   color: var(--text);
   font: var(--fs-md)/1.5 var(--mono);
@@ -11480,13 +10570,13 @@ html.note-page #root {
    colour, because the next run can delete something. */
 .db-writes {
   padding: 3px 8px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--dim);
   font-family: inherit;
   font-size: var(--fs-sm);
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .db-writes:hover {
   border-color: var(--line-high);
@@ -11509,7 +10599,7 @@ html.note-page #root {
   margin: 0;
   padding: 10px 12px;
   overflow: auto;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
   color: var(--danger);
   font-family: var(--mono);
   font-size: var(--fs-md);
@@ -11540,7 +10630,7 @@ html.note-page #root {
   top: 0;
   z-index: 1;
   padding: 6px 10px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
   background: var(--chrome);
   color: var(--text);
   font-weight: normal;
@@ -11566,7 +10656,7 @@ html.note-page #root {
   max-width: 480px;
   padding: 3px 10px;
   overflow: hidden;
-  border-bottom: var(--border) var(--border-style) var(--strip);
+  border-bottom: var(--border) solid var(--strip);
   color: var(--text);
   text-overflow: ellipsis;
 }
@@ -11651,7 +10741,7 @@ html.note-page #root {
   gap: 2px;
 }
 .search-hit {
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   background: var(--chrome-high);
 }
@@ -11667,7 +10757,7 @@ html.note-page #root {
   color: var(--text);
   text-align: left;
   font: inherit;
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .search-hit-btn:hover {
   background: var(--chrome);
@@ -11748,7 +10838,7 @@ html.note-page #root {
 }
 .ch-toggle {
   padding: 1px 6px;
-  border: var(--border) var(--border-style) var(--line);
+  border: var(--border) solid var(--line);
   border-radius: var(--radius-md);
   background: none;
   color: var(--dim);
@@ -11782,7 +10872,7 @@ html.note-page #root {
   width: max-content;
   max-width: min(260px, 70vw);
   padding: 6px 8px;
-  border: var(--border) var(--border-style) var(--line-high);
+  border: var(--border) solid var(--line-high);
   border-radius: var(--radius-md);
   background: var(--chrome-high);
   box-shadow: var(--elev-menu);
@@ -12015,7 +11105,7 @@ html.note-page #root {
 }
 .ch-seg {
   display: block;
-  border-top: var(--border-thick) var(--border-style) var(--chrome);
+  border-top: var(--border-thick) solid var(--chrome);
 }
 .ch-seg:last-child {
   border-top: none;
@@ -12107,7 +11197,7 @@ html.note-page #root {
 }
 .ch-segpart:hover,
 .ch-segpart:focus-visible {
-  outline: var(--border) var(--border-style) var(--text);
+  outline: var(--border) solid var(--text);
   outline-offset: 1px;
 }
 
@@ -12148,10 +11238,10 @@ html.note-page #root {
 .ch-strip-plot {
   position: relative;
   height: 52px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 .ch-strip-plot:focus-visible {
-  outline: var(--border) var(--border-style) var(--line-high);
+  outline: var(--border) solid var(--line-high);
 }
 .ch-strip-mark {
   background: var(--line-high);
@@ -12176,7 +11266,7 @@ html.note-page #root {
 .ch-table th,
 .ch-table td {
   padding: 3px 6px;
-  border-bottom: var(--border) var(--border-style) var(--line);
+  border-bottom: var(--border) solid var(--line);
 }
 .ch-table tbody tr:last-child td {
   border-bottom: none;
@@ -12237,7 +11327,7 @@ html.note-page #root {
   white-space: nowrap;
 }
 .ch-tap {
-  cursor: var(--cursor-pointer);
+  cursor: pointer;
 }
 .st-dialog-narrow .ch-what {
   max-width: 60vw;

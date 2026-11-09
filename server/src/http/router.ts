@@ -13,7 +13,7 @@ import { mcpRoutes } from "./mcp";
 import { nodeRead, nodeRoutes } from "./nodes";
 import { kuruRoutes } from "./kuru";
 import { voiceRoutes } from "./voice";
-import { styleRoutes } from "./styles";
+import { mascotRoutes } from "./mascot";
 import { fileRoutes } from "./files";
 import { slotRoutes } from "./slots";
 import { markRead, markRoutes } from "./marks";
@@ -146,7 +146,7 @@ export interface Route {
  * it is refused here, loudly, before anything is served.
  */
 const ROUTES = new Map<string, Route>();
-for (const route of [...serverRoutes, ...agentRoutes, ...mcpRoutes, ...nodeRoutes, ...kuruRoutes, ...voiceRoutes, ...styleRoutes, ...fileRoutes, ...slotRoutes, ...markRoutes]) {
+for (const route of [...serverRoutes, ...agentRoutes, ...mcpRoutes, ...nodeRoutes, ...kuruRoutes, ...voiceRoutes, ...mascotRoutes, ...fileRoutes, ...slotRoutes, ...markRoutes]) {
   if (ROUTES.has(route.path)) throw new Error(`two routes for ${route.path}`);
   ROUTES.set(route.path, route);
 }

@@ -9,7 +9,6 @@ import { countsAsAgent } from "../../../shared/model";
 import { oneLine, outcomeText, RELOAD_TIMEOUT_MAX_MS, RELOAD_TIMEOUT_MIN_MS, RELOAD_TIMEOUT_MS, WHY_MAX } from "../../../shared/reload";
 import { cookieHeader, hasToken, isShared, listenAddresses, loopbackTokenRequired, rotateToken, setShare, sharing, token } from "../access";
 import {
-  appearance,
   backup,
   host,
   hostInfo,
@@ -260,7 +259,7 @@ export const serverRoutes: Route[] = [
       let notesHtml: string | null = null;
       if (check.notes) {
         try {
-          notesHtml = (await renderMarkdown(check.notes, "", "release-notes.md", appearance.themeId)).html;
+          notesHtml = (await renderMarkdown(check.notes, "", "release-notes.md")).html;
         } catch {
           notesHtml = null;
         }

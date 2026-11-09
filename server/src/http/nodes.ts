@@ -7,7 +7,7 @@
  */
 import type { ServerResponse } from "node:http";
 import { qualifyRoot } from "../../../shared/remote";
-import { appearance, nodes, watches } from "../context";
+import { nodes, watches } from "../context";
 import { json, MEDIA_TYPE, readJsonBody, serveRaw } from "./respond";
 import type { Route } from "./router";
 
@@ -70,7 +70,7 @@ export async function nodeRead(res: ServerResponse, node: string, op: string, qu
         });
       }
       case "markdown": {
-        const answer = (await watches.ask(node, { type: "doc-ask", op: "markdown", root, path, themeId: appearance.themeId })) as Record<string, unknown>;
+        const answer = (await watches.ask(node, { type: "doc-ask", op: "markdown", root, path })) as Record<string, unknown>;
         // An attribute is the only place a bare quote survives the renderer —
         // markdown-it escapes one in text — so this finds the image links and
         // nothing a document says.

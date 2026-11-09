@@ -25,7 +25,6 @@ import type { AgentPlacement } from "../../../shared/agentpane";
 import type { HostInfo, LoginSummary, MascotSet, ProfileSummary, Workspace } from "../../../shared/model";
 import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
 import type { ProjectSettingsMap } from "../../../shared/projects";
-import type { StyleLibrary } from "../../../shared/styles";
 import type { Appearance } from "../../../shared/theme";
 import type { WorkspaceProject } from "../../../shared/wire";
 import { channelReady } from "../../../shared/channels";
@@ -39,7 +38,6 @@ import { AgentsPage } from "./Agents";
 import { BackupsPage } from "./Backups";
 import { BarPage } from "./Bar";
 import { ChannelsPage } from "./Channels";
-import { ExplorePage } from "./Explore";
 import { KeyboardPage } from "./Keyboard";
 import { MachinesPage } from "./Machines";
 import { NodesPage } from "./Nodes";
@@ -49,8 +47,7 @@ import { OpenRouterPage } from "./OpenRouter";
 import { ProcessesPage } from "./Processes";
 import { ProfilesPage } from "./Profiles";
 import { SpecsPage } from "./Specs";
-import { StudioPage } from "./Studio";
-import { ThemePage } from "./Theme";
+import { TerminalPage } from "./Terminal";
 import { UsagePage } from "./Usage";
 import { EditingScope, type Tone } from "./ui";
 import { VaultPage } from "./Vault";
@@ -59,9 +56,7 @@ import { WebPage } from "./Web";
 import { WorkspacesPage } from "./Workspaces";
 
 export type Tab =
-  | "theme"
-  | "explore"
-  | "studio"
+  | "terminal"
   | "mascot"
   | "bar"
   | "profiles"
@@ -92,9 +87,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
   {
     label: "Appearance",
     pages: [
-      ["theme", "Theme", "What the window is wearing."],
-      ["explore", "Explore", "Themes, skins, mascots and sounds other people made."],
-      ["studio", "Studio", "Make a skin, with the window as the preview."],
+      ["terminal", "Terminal", "The type and the cursor every terminal is set in."],
       ["mascot", "Mascot", "What moves in the sidebar while an agent works."],
       ["bar", "Bottom bar", "Which chips the bar along the bottom shows."],
     ],
@@ -141,8 +134,8 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
 /** The page names alone, derived rather than typed out a second time, for `App` to check a stored name against. */
 export const TAB_NAMES: readonly Tab[] = GROUPS.flatMap((group) => group.pages.map(([name]) => name));
 
-/** The cog's page, which on a phone means the list: nobody taps a cog for a theme gallery. */
-export const FIRST_TAB: Tab = "theme";
+/** The cog's page, which on a phone means the list. */
+export const FIRST_TAB: Tab = "terminal";
 
 function pageOf(tab: Tab): readonly [Tab, string, string] {
   for (const group of GROUPS) for (const page of group.pages) if (page[0] === tab) return page;
@@ -151,7 +144,6 @@ function pageOf(tab: Tab): readonly [Tab, string, string] {
 
 export function Settings({
   appearance,
-  styles,
   mascots,
   notify,
   launch,
@@ -169,7 +161,7 @@ export function Settings({
   projects,
   projectSettings,
   initialTab,
-  resumed = false,
+  asked = false,
   narrow,
   onClose,
   onEditing,
@@ -179,7 +171,6 @@ export function Settings({
   activeWorkspaceId: string;
   projects: WorkspaceProject[];
   projectSettings: ProjectSettingsMap;
-  styles: StyleLibrary;
   mascots: MascotSet;
   notify: NotifyConfig;
   launch: LaunchSettings;
@@ -195,8 +186,8 @@ export function Settings({
   agentPlacement: AgentPlacement;
   /** Which page this opening is about. Only the opening: where you go afterwards is this window's business. */
   initialTab: Tab;
-  /** Put back by the reload a theme pick does, so it opens on the page it was on even on a phone. */
-  resumed?: boolean;
+  /** The address asked for this page (`#settings`), so it opens on the page even on a phone. */
+  asked?: boolean;
   /** A phone, or a window as narrow as one: the list is a screen of its own and a page opens over it. */
   narrow: boolean;
   onClose: () => void;
@@ -204,8 +195,8 @@ export function Settings({
   onEditing: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
-  /** On a phone, whether the list is showing rather than a page. Starts on the list unless a page was asked for by name, or put back by a reload. */
-  const [listing, setListing] = useState(narrow && initialTab === FIRST_TAB && !resumed);
+  /** On a phone, whether the list is showing rather than a page. Starts on the list unless a page was asked for by name. */
+  const [listing, setListing] = useState(narrow && initialTab === FIRST_TAB && !asked);
   const [, title, tagline] = pageOf(tab);
   const pill = usePill(tab);
 
@@ -264,7 +255,6 @@ export function Settings({
                     tab={tab}
                     props={{
                       appearance,
-                      styles,
                       mascots,
                       notify,
                       launch,
@@ -306,7 +296,6 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 
 type PageProps = {
   appearance: Appearance;
-  styles: StyleLibrary;
   mascots: MascotSet;
   notify: NotifyConfig;
   launch: LaunchSettings;
@@ -333,12 +322,8 @@ type PageProps = {
 
 function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
   switch (tab) {
-    case "theme":
-      return <ThemePage appearance={p.appearance} styles={p.styles} />;
-    case "explore":
-      return <ExplorePage styles={p.styles} volume={p.notify.volume} />;
-    case "studio":
-      return <StudioPage styles={p.styles} appearance={p.appearance} />;
+    case "terminal":
+      return <TerminalPage appearance={p.appearance} />;
     case "mascot":
       return <MascotPage mascots={p.mascots} />;
     case "bar":

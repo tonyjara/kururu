@@ -82,7 +82,6 @@ import { useVoiceUi } from "./voice";
 import { actionFor, isModifier, isPrefix, keyName, workspaceDigit, PREFIX_BYTE, PREFIX_TIMEOUT_MS, type Action } from "./keys";
 import { desktop } from "./desktop";
 import { agentLabel, basename, tabLabel } from "./labels";
-import { skinFor } from "../../shared/skin";
 import * as api from "./session";
 import type { MachinePin, MachineStatus } from "../../shared/machines";
 import { useKururu } from "./session";
@@ -221,47 +220,11 @@ const NARROW = "(max-width: 720px)";
 const KEYBOARD_MIN = 120;
 
 /**
- * Where Settings was, across the one reload kururu does to itself.
- *
- * Picking a theme reloads the window (see the effect below), and a reload takes
- * the dialog with it because whether Settings is open is `useState` and nothing
- * more — deliberately, since it is this window's business and not the server's.
- * That is right in every case but this one: browsing themes is a compare, and a
- * picker that closes on every pick makes the second comparison cost four
- * clicks.
- *
- * `sessionStorage`, not `localStorage`, and the difference is the whole design:
- * it is scoped to this tab and this run of it, so a window opened fresh
- * tomorrow does not come up holding a dialog somebody closed by reloading
- * months ago. Read once and cleared, so a hand-typed ⌘R after the fact is a
- * plain reload and not a second reopening.
- */
-const SETTINGS_KEY = "kururu.settings.resume";
-
-function keepSettings(tab: SettingsTab | null): void {
-  if (!tab) return;
-  try {
-    sessionStorage.setItem(SETTINGS_KEY, tab);
-  } catch {
-    // Storage that refuses is a dialog that closes. The theme still lands.
-  }
-}
-
-/**
- * Trusted no further than a string: this is storage a person can edit, and the
- * value ends up choosing a page. An unknown one opens nothing, which is the
- * same answer as never having written it.
- */
-function resumeSettings(): SettingsTab | null {
-  return askedSettings() ?? resumedSettings();
-}
-
-/**
  * `#settings`, or `#settings=<page>`, in the address the window was sent
  * to: the desktop's "omarchy's Settings" moves the window to a node's own
  * page for that and nothing else (`desktop/nodes.js`), so the page opens on
  * it. Read once and taken out of the address, so a ⌘R there is a plain
- * reload, as the stored one is.
+ * reload.
  */
 function askedSettings(): SettingsTab | null {
   const match = /^#settings(?:=([a-z-]+))?$/.exec(location.hash);
@@ -271,19 +234,8 @@ function askedSettings(): SettingsTab | null {
   } catch {
     // An address that cannot be rewritten opens Settings again on a reload; harmless.
   }
-  const page = match[1] ?? "theme";
-  return (SETTINGS_TABS as readonly string[]).includes(page) ? (page as SettingsTab) : "theme";
-}
-
-function resumedSettings(): SettingsTab | null {
-  let saved: string | null = null;
-  try {
-    saved = sessionStorage.getItem(SETTINGS_KEY);
-    sessionStorage.removeItem(SETTINGS_KEY);
-  } catch {
-    return null;
-  }
-  return saved && (SETTINGS_TABS as readonly string[]).includes(saved) ? (saved as SettingsTab) : null;
+  const page = match[1] ?? "terminal";
+  return (SETTINGS_TABS as readonly string[]).includes(page) ? (page as SettingsTab) : "terminal";
 }
 
 export function App() {
@@ -378,14 +330,13 @@ export function App() {
    * and the profile name opens the page about profiles. Only the opening — where
    * the dialog goes next is its own business.
    */
-  const [settings, setSettings] = useState<SettingsTab | null>(resumeSettings);
+  const [settings, setSettings] = useState<SettingsTab | null>(askedSettings);
   /**
-   * Whether this opening is the one a theme's reload put back. On a phone the
-   * cog's page is the list, so a resumed `theme` read as the cog and dropped
-   * somebody who had just pressed a pack onto the list instead of the page they
-   * pressed it on. A resumed page is a page asked for by name.
+   * Whether this opening is the one the address asked for. On a phone the
+   * cog's page is the list, and a page asked for by `#settings` is a page
+   * asked for by name, so it opens on the page.
    */
-  const [settingsResumed, setSettingsResumed] = useState(() => settings !== null);
+  const [settingsAsked, setSettingsAsked] = useState(() => settings !== null);
   /**
    * The profile menu, and the button it hangs under.
    *
@@ -595,7 +546,7 @@ export function App() {
     else goToNodeNeed(next.there);
   }, [queue, nodes, onScreen, workspace, remote, goToNeed, goToNodeNeed]);
 
-  useAppearance(snapshot, () => keepSettings(settings));
+  useAppearance(snapshot);
 
   useNarrowLayout(narrow, kuruDrawer.open, setSidebarOpen, setFilesSheet);
 
@@ -882,7 +833,7 @@ export function App() {
           if (narrow) setSidebarOpen(false);
           return setFilesOpen((open) => !open);
         case "settings":
-          return setSettings("theme");
+          return setSettings("terminal");
         case "zen-mode":
           return setZen((on) => !on);
         case "resize-mode":
@@ -1463,7 +1414,7 @@ export function App() {
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
           onPrompt={setDialog}
-          onSettings={() => setSettings("theme")}
+          onSettings={() => setSettings("terminal")}
           onReach={() => setReach(true)}
           onBoard={() => {
             openProfileBoard();
@@ -1732,7 +1683,6 @@ export function App() {
       {settings && (
         <Settings
           appearance={snapshot.appearance}
-          styles={snapshot.styles}
           mascots={snapshot.mascots}
           notify={snapshot.notify}
           launch={snapshot.launch}
@@ -1750,11 +1700,11 @@ export function App() {
           projects={projects}
           projectSettings={snapshot.projectSettings}
           initialTab={settings}
-          resumed={settingsResumed}
+          asked={settingsAsked}
           narrow={narrow}
           onClose={() => {
             setSettings(null);
-            setSettingsResumed(false);
+            setSettingsAsked(false);
           }}
           onEditing={setEditing}
         />
@@ -1780,17 +1730,6 @@ export function App() {
       )}
       {reach && <Reach onClose={() => setReach(false)} />}
       {dialog && <Dialog state={dialog} onClose={() => setDialog(null)} />}
-      {/* The skin's effect layer — scanlines, a grain — over everything
-          including the terminal canvases, which is the only place it can go and
-          be visible. Rendered only when there is one to draw rather than always
-          and transparently: a fixed, full-window element is a real element even
-          at zero opacity, and the surest way for it to never be the thing that
-          swallowed a drag is for it not to exist. It reads the skin rather than
-          a CSS token because that is the one question CSS cannot answer about
-          itself — whether `--overlay` is `none`. */}
-      {skinFor(snapshot.appearance.skinId, snapshot.styles.skins).tokens.overlay !== "none" && (
-        <div className="overlay" aria-hidden="true" />
-      )}
     </div>
   );
 }

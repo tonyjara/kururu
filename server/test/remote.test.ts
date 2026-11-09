@@ -149,7 +149,7 @@ describe("which node a verb is for", () => {
   it("leaves this node's verbs here", () => {
     expect(route({ type: "input", agentId: "a1", data: "x" }, null)).toEqual({ to: "here" });
     expect(route({ type: "split", dir: "row" }, null)).toEqual({ to: "here" });
-    expect(route({ type: "set-theme", themeId: "x" }, OMARCHY)).toEqual({ to: "here" });
+    expect(route({ type: "set-bar", bar: { hidden: [] } }, OMARCHY)).toEqual({ to: "here" });
     expect(route({ type: "watch", agentIds: [q("a1"), "a2"] }, OMARCHY)).toEqual({ to: "here" });
   });
   it("sends a verb that names a node's things to it, every id bare", () => {

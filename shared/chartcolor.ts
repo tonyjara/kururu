@@ -168,7 +168,7 @@ export function restInk(ui: { dim: string; dimmer: string }, kuru: string): stri
   return ui.dimmer;
 }
 
-/** Every colour a chart uses, written onto the root element by `applyTheme` beside the board's. */
+/** Every colour a chart uses, as the custom properties the stylesheet's `:root` holds. `web/test/usage-palette.test.ts` holds the two together. */
 export function chartTokens(theme: { appearance: ThemeAppearance; ui: { accent: string; dim: string; dimmer: string } }): Record<string, string> {
   const series = SERIES[theme.appearance];
   const kuru = kuruInk(theme.ui.accent, theme.appearance) ?? series[0]!;

@@ -12,7 +12,7 @@ import { agentLabel, agentSummary } from "../../shared/labels";
 import { panes, paneWithAgent } from "../../shared/layout";
 import type { ClientMessage, EditorChoice } from "../../shared/wire";
 import { readProcTable } from "./agents/procs";
-import { appearance, host, overlay, workspaces } from "./context";
+import { host, overlay, workspaces } from "./context";
 import { processCwds } from "./cwd";
 import { allowedRoots, findDocs, listDir, readBytes, readFile, resolveInRoot } from "./files";
 import { findNvims, childIndex as footChildren, type FootProc, type FootTable, type FoundNvim, readFootTable, readTree } from "./footprint";
@@ -208,8 +208,7 @@ export async function readForWatcher(msg: Extract<ClientMessage, { type: "files-
     throw new Error("not a read this node answers");
   }
   if (msg.op === "markdown") {
-    const themeId = typeof msg.themeId === "string" ? msg.themeId : appearance.themeId;
-    return renderMarkdown(readFile(root, path).text, root, path, themeId);
+    return renderMarkdown(readFile(root, path).text, root, path);
   }
   if (msg.op === "raw") {
     const file = readBytes(root, path);

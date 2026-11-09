@@ -1,5 +1,5 @@
 /**
- * How kururu looks and behaves for the person: the mascots, the keyboard, the theme and the skin, the launchers, notifications, the terminal's appearance and where agents open.
+ * How kururu looks and behaves for the person: the mascots, the keyboard, the launchers, notifications, the terminal's appearance and where agents open.
  *
  * One area of what a client can ask over its socket, cut out of the switch
  * that was `index.ts`'s; `dispatch.ts` asks each area in turn and stops at
@@ -12,11 +12,10 @@ import { bindKey } from "../../../shared/keys";
 import { adoptLaunch } from "../../../shared/launchers";
 import { adoptMascot } from "../../../shared/model";
 import { adoptNotify } from "../../../shared/notify";
-import { skinFor } from "../../../shared/skin";
 import { adoptBar } from "../../../shared/statusbar";
-import { adoptAppearance, themeFor } from "../../../shared/theme";
+import { adoptAppearance } from "../../../shared/theme";
 import type { ClientMessage } from "../../../shared/wire";
-import { appearance, type ClientState, keys, mascots, provide, pushSnapshot, styles, workspaces } from "../context";
+import { appearance, type ClientState, keys, mascots, provide, pushSnapshot, workspaces } from "../context";
 import { writeKeys } from "../keys";
 import { saveAppearance, saveLaunch, saveMascots, saveNotify } from "../look";
 import { freshMascotId } from "../mascot";
@@ -119,28 +118,6 @@ export function lookVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
       pushSnapshot();
       return true;
     }
-
-    /**
-     * `themeFor` is the check and the fallback in one, which is the shape
-     * `mascotFor` has and is right for the same reason: an id naming nothing is
-     * what a downgrade looks like, and the default drawn is a better answer than
-     * a refusal nobody is listening for. What gets written is therefore always
-     * an id this version can draw.
-     */
-    case "set-theme":
-      saveAppearance({ ...appearance, themeId: themeFor(msg.themeId, styles.themes).id });
-      return true;
-
-    /**
-     * The same shape `set-theme` has, and nothing more, because the difference
-     * between the two is entirely on the client: a skin moves the line weight
-     * and the type ramp, so applying one re-measures every terminal, whereas a
-     * theme never does. That belongs where the measuring happens — nothing here
-     * resizes anything, for the reason `set-terminal-appearance` gives below.
-     */
-    case "set-skin":
-      saveAppearance({ ...appearance, skinId: skinFor(msg.skinId, styles.skins).id });
-      return true;
 
     case "set-agents-kururu-mcp-only":
       if (typeof msg.profileId !== "string") return true;

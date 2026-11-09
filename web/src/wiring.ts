@@ -22,61 +22,27 @@ import { installInk } from "./ink";
 import { installReload } from "./reload";
 import { isLoopback } from "./preview";
 import * as api from "./session";
-import { applyAppearance } from "./theme";
+import { applyTerminalAppearance } from "./terminals";
 import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote } from "./voice";
 
 /**
- * Wear whatever the server says. The chrome's tokens go onto the root element
- * and the palette goes to every pooled emulator, neither of which is anything
- * React draws — which is the point of doing it in an effect rather than in the
- * tree. A theme is a property of the document, and threading forty colours
- * through a context so that components could re-render to learn them would be
- * paying a render of the whole window for something the cascade does for free.
+ * Give every pooled emulator the type and cursor the server says. Nothing
+ * React draws, which is the point of doing it in an effect rather than in the
+ * tree.
  *
  * Keyed on the appearance *serialized*, and that is not laziness. A snapshot
  * goes out on every status tick and arrives as JSON, so the object is a new
  * one several times a second however little has changed — keying on it would
  * ask every pooled emulator whether its font had moved twice a second, for the
- * lifetime of the window. Five fields stringified is the cheapest thing that
- * is actually stable.
+ * lifetime of the window.
  */
-export function useAppearance(snapshot: SessionSnapshot | null, beforeReload: () => void): void {
-  const appearance = snapshot?.appearance;
-  /**
-   * The installed styles are in the key as well, because the *same* appearance
-   * means a different window once one is installed or removed: the ids in
-   * `appearance` do not move when a theme arrives under one of them, and without
-   * this the palette that was just downloaded would sit there unapplied until
-   * something else changed. Their versions rather than the whole library, on the
-   * reasoning above — a palette stringified several times a second is the cost
-   * this key exists to avoid.
-   */
-  const styles = snapshot?.styles;
-  const appearanceKey = appearance
-    ? JSON.stringify(appearance) + (styles?.installed.map((s) => `${s.kind}/${s.id}@${s.version}`).join() ?? "")
-    : null;
+export function useAppearance(snapshot: SessionSnapshot | null): void {
+  const terminal = snapshot?.appearance.terminal;
+  const key = terminal ? JSON.stringify(terminal) : null;
   useEffect(() => {
-    if (!appearance) return;
-    /**
-     * A palette the emulators cannot be talked out of — see
-     * `applyTerminalAppearance`, which explains why a colour is settled inside
-     * the wasm and why nothing short of new terminals moves one. Reloading is
-     * the only lever, and this is the layer that should pull it: the dialog
-     * somebody picked the theme in is App's state and nobody else's, so App says
-     * what to keep across the reload (`beforeReload`).
-     *
-     * Safe to do the instant it is reported, because the appearance arrives on
-     * a *snapshot*. The server has already written it down, so the window that
-     * comes back reads the new theme as the one it was always on — which is
-     * also why this cannot loop: the reload lands on a first application, and a
-     * first application is never a change.
-     */
-    if (applyAppearance(appearance, styles)) {
-      beforeReload();
-      location.reload();
-    }
+    if (terminal) applyTerminalAppearance(terminal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appearanceKey]);
+  }, [key]);
 }
 
 /**
@@ -95,8 +61,7 @@ export function useNarrowLayout(
    * Tell the stylesheet which shape the window is in.
    *
    * An attribute on the root rather than a `@media` rule of its own, so the
-   * breakpoint is stated once — see `NARROW` in `App.tsx`. It is the same trick
-   * `theme.ts` and `skin.ts` use for a different reason: the cascade is the
+   * breakpoint is stated once — see `NARROW` in `App.tsx`. The cascade is the
    * cheapest way to tell several hundred rules something, and it costs no
    * render at all.
    */

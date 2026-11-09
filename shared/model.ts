@@ -35,7 +35,6 @@ import type { MadeFile } from "./made";
 import type { MachinePin } from "./machines";
 import type { NotifySettings } from "./notify";
 import type { ProjectSettingsMap } from "./projects";
-import type { StyleLibrary } from "./styles";
 import type { Appearance } from "./theme";
 
 /**
@@ -566,10 +565,8 @@ function clamp(value: unknown, low: number, high: number, fallback: number): num
  *
  * Named for the workspaces that wore them first. A workspace has no colour now —
  * its mascot already tells it from the others, and a tag beside the mascot said
- * the same thing less clearly — but the name stays, because the theme's
- * `workspace` block and its `--ws-*` tokens are the styles registry's
- * vocabulary, and renaming a slot there would cost every installed theme its
- * palette to fix a word.
+ * the same thing less clearly — but the name stays, in `--ws-*` and in every
+ * saved board.
  *
  * Names rather than CSS values, and the server only ever accepts one of these.
  * Two reasons, and the second is the one that matters: a name can be restyled
@@ -1048,10 +1045,6 @@ export interface SessionSnapshot {
    * Which theme is on and what the terminals are set in. Server-owned like the
    * keyboard and for the same reasons — a phone and a desktop cannot end up
    * looking like two applications, and a reload does not cost you the choice.
-   *
-   * A theme *id* travels, never a palette: `shared/theme.ts` holds what each one
-   * means and both halves import it, so a flavour restyled in a later version
-   * restyles everywhere rather than being frozen in somebody's config file.
    */
   appearance: Appearance;
   /**
@@ -1090,24 +1083,6 @@ export interface SessionSnapshot {
    * when it is switched on and not yet in force.
    */
   host: HostInfo;
-  /**
-   * The themes and skins installed from `../kururu-styles`, resolved.
-   *
-   * This is the one place a palette genuinely does travel, and it is the
-   * exception that proves the rule above: an installed theme is not in
-   * `shared/theme.ts` and never will be, so there is no id both halves could
-   * look up. The server reads the manifests, checks them — see
-   * `shared/styles.ts`, where every value in here is somebody else's string —
-   * and sends the same `Theme` and `Skin` shapes the built-ins already are, so
-   * every list in the window is one concatenation rather than two code paths.
-   *
-   * In the snapshot rather than behind its own fetch, for the mascots' reason:
-   * the client cannot draw the window without it, it changes while the window is
-   * open because Settings is a second client writing it, and it is nothing next
-   * to a list of agents. The *catalogue* — what there is to install — is the
-   * opposite on all three counts and is a fetch.
-   */
-  styles: StyleLibrary;
   /**
    * Another node's workspace, while one is on this screen instead of a local
    * one — its tree and agents with every id qualified (`shared/remote.ts`).

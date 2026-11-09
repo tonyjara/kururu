@@ -1,108 +1,27 @@
 /**
- * What kururu looks like: one palette, covering both things that draw.
+ * What kururu looks like, for the half CSS cannot reach: the terminal.
  *
- * This module exists because there were two palettes and they were kept in step
- * by hand. The chrome is CSS custom properties in `styles.css`; the terminal is
- * an object handed to ghostty, which paints into a canvas CSS cannot reach. A
- * comment at the top of the stylesheet used to say so and call it "the price of
- * a renderer CSS cannot reach" — and it was, right up until a *second* palette
- * was worth having, at which point the price stopped being one hand-sync and
- * started being one per theme forever. So a theme names both halves at once and
- * the two consumers are two readers of one record.
+ * Kururu has one look. It had a theme registry, skins, packs and a studio, and
+ * all of that was taken out on 2026-11-09 so the look could be started again
+ * from one set of values with nothing to keep in step. The chrome's colours and
+ * shape are plain custom properties in the `:root` block of
+ * `web/src/styles.css`; this module holds what cannot live there, because the
+ * emulator paints into a canvas: the terminal's palette, handed to ghostty as
+ * an object in `web/src/terminals.ts`.
  *
- * A theme is a flat set of tokens rather than a scheme that derives them, and
- * that is the one decision in here worth defending. Deriving `--dim` from
- * `--text` by a lightness step is how you get a palette that is correct in the
- * abstract and wrong on the row it is actually drawn on; Catppuccin already did
- * the deriving, by hand, with eyes — `subtext0` is not `text` at 70%. What a
- * theme therefore does is *map* a palette somebody designed onto the handful of
- * jobs kururu has. The palette constants below are the published ones, verbatim,
- * so a flavour can be checked against its source rather than against taste.
+ * The two halves are kept in step by hand, and with one palette that is a
+ * fair price: `TERMINAL.background` is `--bg`, and the rest of the ANSI set is
+ * the published Dracula one, which is where the chrome's colours came from.
  *
- * The user's choice is an **id**, not a copy of the tokens. That is the same
- * argument `shared/keys.ts` makes about storing the difference from the
- * defaults: a saved palette would freeze kururu's tokens at the version you
- * first opened Settings in, and a token added later — the way `--line-high` and
- * `--on-accent` were added the day this module landed — would be unset forever
- * for everybody who had ever picked a theme. An id cannot rot that way. It
- * follows that there is no per-token override here and that is deliberate: a
- * theme is picked, not edited, and a palette somebody wants to amend is a theme
- * that belongs in this list where every flavour of it gets the same treatment.
- *
- * Fonts and the cursor sit beside the theme rather than inside it, because they
- * are a different kind of decision and survive changing your mind about colour.
- * Nobody picks Macchiato and means "and 14px".
+ * What a person may still change is the terminal's type and cursor and the
+ * bottom bar's chips: preferences, not a look. They are the `Appearance` at
+ * the foot, saved in `~/.config/kururu/appearance.json`.
  */
-import { DEFAULT_SKIN_ID, isStyleId } from "./skin";
 import { adoptBar, DEFAULT_BAR, type BarSettings } from "./statusbar";
 
-
 /**
- * The chrome, as `styles.css` asks for it.
- *
- * These are the names in `var(--…)`, camel-cased — `applyTheme` in
- * `web/src/theme.ts` does the one mechanical translation back. Kept as a record
- * with a key per job rather than per colour, so a theme is forced to answer
- * "what is a danger label here" rather than being allowed to leave it to
- * whatever the last theme happened to set.
- */
-export interface UiTokens {
-  /** The ground the pane grid sits on. Always the terminal's background too. */
-  bg: string;
-  /** Sidebar, tab strips, dialogs — everything that is not a terminal. */
-  chrome: string;
-  /** Hovered and selected chrome. */
-  chromeHigh: string;
-  /** Borders and rules. */
-  line: string;
-  /** A border that has been picked out: a focused pane, a focused input. */
-  lineHigh: string;
-  text: string;
-  /** Bold text, and anything that wants to sit a step above `text`. */
-  textStrong: string;
-  dim: string;
-  dimmer: string;
-  accent: string;
-  /**
-   * Text on a bright fill — the accent button, the PREFIX badge, the resize
-   * badge. One token for all three rather than one each: they are the same job,
-   * and a theme that answered it three times would answer it three ways.
-   */
-  onAccent: string;
-
-  /** The four agent states, and the fifth that is the absence of one. */
-  idle: string;
-  /**
-   * Orange, and not the accent: "working" was once the same colour as every
-   * focus ring and unread mark in the window, which made the one state worth
-   * spotting the least distinguishable thing on the row. Warm enough to be told
-   * apart from `blocked` above it at a glance.
-   */
-  working: string;
-  blocked: string;
-  done: string;
-  exited: string;
-
-  /** A destructive label — a close cross, a delete row. Text, not a fill. */
-  danger: string;
-  /** The one destructive *button*, which is a fill and needs its own pairing. */
-  dangerBg: string;
-  onDanger: string;
-
-  /** Behind a dialog, and under a menu. Both carry alpha. */
-  scrim: string;
-  shadow: string;
-}
-
-/**
- * The terminal, as ghostty asks for it — `ITheme`, exactly, so it can be handed
+ * The terminal, as ghostty asks for it: `ITheme`, exactly, so it can be handed
  * over without a translation step that could quietly drop a slot.
- *
- * The ANSI mapping is the theme's business and the published Catppuccin ports
- * are followed rather than improved: normal and bright share a hue for the six
- * chromatic slots, which looks like an oversight and is the spec. An agent that
- * prints in bold red is printing Catppuccin red, and a flavour that invented a
- * brighter one would no longer be the thing on the tin.
  */
 export interface TerminalTokens {
   background: string;
@@ -129,27 +48,40 @@ export interface TerminalTokens {
 }
 
 /**
- * The fourteen tag colours, which board columns wear and which are named for
- * the workspaces that wore them first (see `WORKSPACE_COLORS`). They are in the
- * theme for the reason `web/src/colors.ts` gives for existing at all: they are
- * chosen *against the chrome* rather than against each other — and a palette
- * chosen against one chrome is wrong on another. `green` and `blue` are
- * `accent` and `done` exactly in every theme, so a tag never introduces a
- * colour the window did not already have.
- *
- * There were eight, and eight was enough while a tag was only ever chosen. A
- * palette that has to *allocate* — every new column is born with a colour, see
- * `freeColor` in `shared/board.ts` — wants more room than one that only has to
- * offer.
- *
- * Fourteen rather than sixteen because that is what the flavour has. Catppuccin
- * publishes exactly fourteen accents and each name below takes one of them,
- * once — so the set is the palette's rather than something invented beside it,
- * and nothing here is two neighbours of one hue pretending to be two colours.
- *
- * The order is the picker's, and it is a spectrum: warm through to cool, so
- * "one that is not like its neighbours" is a decision you make by looking
- * rather than by reading fourteen names.
+ * The palette every terminal is built with. Dracula's published ANSI set,
+ * verbatim, with the cursor in the chrome's accent. A constant because
+ * ghostty-vt resolves colour inside the wasm as it parses, so a terminal's
+ * palette is settled when it is made and nothing here ever changes it.
+ */
+export const TERMINAL: TerminalTokens = {
+  background: "#282a36",
+  foreground: "#f8f8f2",
+  cursor: "#50fa7b",
+  cursorAccent: "#282a36",
+  selectionBackground: "#44475a",
+  black: "#21222c",
+  red: "#ff5555",
+  green: "#50fa7b",
+  yellow: "#f1fa8c",
+  blue: "#bd93f9",
+  magenta: "#ff79c6",
+  cyan: "#8be9fd",
+  white: "#f8f8f2",
+  brightBlack: "#6272a4",
+  brightRed: "#ff6e6e",
+  brightGreen: "#69ff94",
+  brightYellow: "#ffffa5",
+  brightBlue: "#d6acff",
+  brightMagenta: "#ff92df",
+  brightCyan: "#a4ffff",
+  brightWhite: "#ffffff",
+};
+
+/**
+ * The fourteen tag colours board columns wear, by name; the values are
+ * `--ws-<name>` in the stylesheet. Named for the workspaces that wore them
+ * first (see `WORKSPACE_COLORS`). The order is the picker's, and it is a
+ * spectrum: warm through to cool.
  */
 export type WorkspaceColorName =
   | "green"
@@ -166,430 +98,6 @@ export type WorkspaceColorName =
   | "blue"
   | "cyan"
   | "lime";
-
-export interface Theme {
-  id: string;
-  name: string;
-  /**
-   * Which way round this one is. Nothing in kururu reads it to *derive* a
-   * colour — every token is named — but a light theme has to be able to say so
-   * for the things outside the token system: `color-scheme`, which is what
-   * makes a native scrollbar and a form control stop being dark, and the
-   * emulator's own idea of what a default background is.
-   */
-  appearance: "dark" | "light";
-  ui: UiTokens;
-  terminal: TerminalTokens;
-  workspace: Record<WorkspaceColorName, string>;
-}
-
-// ---------------------------------------------------------------------------
-// Catppuccin
-// ---------------------------------------------------------------------------
-
-/**
- * The four flavours, as published. Copied verbatim and named by their own names
- * so the mapping below reads as the port it is — `base`, `mantle`, `surface0`
- * mean something to anybody who has themed anything else with these, and a
- * hex here would mean nothing to anybody.
- */
-interface Catppuccin {
-  rosewater: string;
-  flamingo: string;
-  pink: string;
-  mauve: string;
-  red: string;
-  maroon: string;
-  peach: string;
-  yellow: string;
-  green: string;
-  teal: string;
-  sky: string;
-  sapphire: string;
-  blue: string;
-  lavender: string;
-  text: string;
-  subtext1: string;
-  subtext0: string;
-  overlay2: string;
-  overlay1: string;
-  overlay0: string;
-  surface2: string;
-  surface1: string;
-  surface0: string;
-  base: string;
-  mantle: string;
-  crust: string;
-}
-
-const MOCHA: Catppuccin = {
-  rosewater: "#f5e0dc",
-  flamingo: "#f2cdcd",
-  pink: "#f5c2e7",
-  mauve: "#cba6f7",
-  red: "#f38ba8",
-  maroon: "#eba0ac",
-  peach: "#fab387",
-  yellow: "#f9e2af",
-  green: "#a6e3a1",
-  teal: "#94e2d5",
-  sky: "#89dceb",
-  sapphire: "#74c7ec",
-  blue: "#89b4fa",
-  lavender: "#b4befe",
-  text: "#cdd6f4",
-  subtext1: "#bac2de",
-  subtext0: "#a6adc8",
-  overlay2: "#9399b2",
-  overlay1: "#7f849c",
-  overlay0: "#6c7086",
-  surface2: "#585b70",
-  surface1: "#45475a",
-  surface0: "#313244",
-  base: "#1e1e2e",
-  mantle: "#181825",
-  crust: "#11111b",
-};
-
-const MACCHIATO: Catppuccin = {
-  rosewater: "#f4dbd6",
-  flamingo: "#f0c6c6",
-  pink: "#f5bde6",
-  mauve: "#c6a0f6",
-  red: "#ed8796",
-  maroon: "#ee99a0",
-  peach: "#f5a97f",
-  yellow: "#eed49f",
-  green: "#a6da95",
-  teal: "#8bd5ca",
-  sky: "#91d7e3",
-  sapphire: "#7dc4e4",
-  blue: "#8aadf4",
-  lavender: "#b7bdf8",
-  text: "#cad3f5",
-  subtext1: "#b8c0e0",
-  subtext0: "#a5adcb",
-  overlay2: "#939ab7",
-  overlay1: "#8087a2",
-  overlay0: "#6e738d",
-  surface2: "#5b6078",
-  surface1: "#494d64",
-  surface0: "#363a4f",
-  base: "#24273a",
-  mantle: "#1e2030",
-  crust: "#181926",
-};
-
-const FRAPPE: Catppuccin = {
-  rosewater: "#f2d5cf",
-  flamingo: "#eebebe",
-  pink: "#f4b8e4",
-  mauve: "#ca9ee6",
-  red: "#e78284",
-  maroon: "#ea999c",
-  peach: "#ef9f76",
-  yellow: "#e5c890",
-  green: "#a6d189",
-  teal: "#81c8be",
-  sky: "#99d1db",
-  sapphire: "#85c1dc",
-  blue: "#8caaee",
-  lavender: "#babbf1",
-  text: "#c6d0f5",
-  subtext1: "#b5bfe2",
-  subtext0: "#a5adce",
-  overlay2: "#949cbb",
-  overlay1: "#838ba7",
-  overlay0: "#737994",
-  surface2: "#626880",
-  surface1: "#51576d",
-  surface0: "#414559",
-  base: "#303446",
-  mantle: "#292c3c",
-  crust: "#232634",
-};
-
-const LATTE: Catppuccin = {
-  rosewater: "#dc8a78",
-  flamingo: "#dd7878",
-  pink: "#ea76cb",
-  mauve: "#8839ef",
-  red: "#d20f39",
-  maroon: "#e64553",
-  peach: "#fe640b",
-  yellow: "#df8e1d",
-  green: "#40a02b",
-  teal: "#179299",
-  sky: "#04a5e5",
-  sapphire: "#209fb5",
-  blue: "#1e66f5",
-  lavender: "#7287fd",
-  text: "#4c4f69",
-  subtext1: "#5c5f77",
-  subtext0: "#6c6f85",
-  overlay2: "#7c7f93",
-  overlay1: "#8c8fa1",
-  overlay0: "#9ca0b0",
-  surface2: "#acb0be",
-  surface1: "#bcc0cc",
-  surface0: "#ccd0da",
-  base: "#eff1f5",
-  mantle: "#e6e9ef",
-  crust: "#dce0e8",
-};
-
-/**
- * One flavour, mapped onto kururu's jobs.
- *
- * Two mappings here are choices rather than transcription and are worth naming.
- *
- * `bg` is `base` and `chrome` is `mantle`, which puts the chrome *darker* than
- * the ground — the reverse of what kururu's own palette does. That is
- * Catppuccin's own convention (it is what its VS Code and Zed ports do with a
- * sidebar) and it is also right here for a reason of kururu's: `bg` is the
- * terminal background as well, so tying it to `base` is what makes a pane and
- * the emulator inside it one surface instead of two that nearly match.
- *
- * `accent` is `green` rather than `mauve`, which is Catppuccin's signature. The
- * accent is load-bearing in a way a brand colour is not: it is the focus ring,
- * the unread mark, the first workspace tag, and the terminal cursor, and it has
- * been green in every screenshot of this app. Wearing Catppuccin is not the same
- * as becoming it — and there is a frog.
- *
- * `onAccent` is `crust` on the dark flavours and `base` on Latte, and that
- * asymmetry is the whole reason a light theme was worth shipping: every token
- * that reads "the dark one" was hardcoded to a near-black before this, and
- * Latte is what found them.
- */
-function catppuccin(id: string, name: string, p: Catppuccin, appearance: "dark" | "light"): Theme {
-  const dark = appearance === "dark";
-  return {
-    id,
-    name,
-    appearance,
-    ui: {
-      bg: p.base,
-      chrome: p.mantle,
-      chromeHigh: p.surface0,
-      line: p.surface1,
-      lineHigh: p.surface2,
-      text: p.text,
-      // `text` is the end of Catppuccin's neutral ramp in both directions —
-      // there is nothing lighter on a dark flavour and nothing darker on Latte,
-      // by design — so emphasis here comes from weight rather than from a step
-      // this palette deliberately does not offer. Kururu's own theme, which has
-      // one, still uses it.
-      textStrong: p.text,
-      dim: p.subtext0,
-      dimmer: p.overlay0,
-      accent: p.green,
-      onAccent: dark ? p.crust : p.base,
-
-      idle: p.overlay1,
-      working: p.peach,
-      blocked: p.yellow,
-      done: p.blue,
-      exited: p.surface2,
-
-      danger: p.red,
-      dangerBg: p.red,
-      onDanger: dark ? p.crust : p.base,
-
-      // Alpha, and the one place a theme cannot name a palette entry: a scrim
-      // over a light window has to be a light window's scrim or the dialog
-      // reads as a modal over a photograph.
-      scrim: dark ? "rgba(0, 0, 0, 0.5)" : "rgba(76, 79, 105, 0.28)",
-      shadow: dark ? "rgba(0, 0, 0, 0.5)" : "rgba(76, 79, 105, 0.18)",
-    },
-    terminal: {
-      background: p.base,
-      foreground: p.text,
-      cursor: p.green,
-      cursorAccent: p.base,
-      selectionBackground: p.surface2,
-      // The published ANSI port. Normal and bright share a hue on the six
-      // chromatic slots; see `TerminalTokens`.
-      black: p.surface1,
-      red: p.red,
-      green: p.green,
-      yellow: p.yellow,
-      blue: p.blue,
-      magenta: p.pink,
-      cyan: p.teal,
-      white: p.subtext1,
-      brightBlack: p.surface2,
-      brightRed: p.red,
-      brightGreen: p.green,
-      brightYellow: p.yellow,
-      brightBlue: p.blue,
-      brightMagenta: p.pink,
-      brightCyan: p.teal,
-      brightWhite: p.subtext0,
-    },
-    workspace: {
-      // The flavour's fourteen accents, each used once. The names are wire slots
-      // — the server stores one of `WORKSPACE_COLORS` and nothing else — so each
-      // takes the published accent nearest to it and nothing is invented beside
-      // them. That one-to-one is worth more than any individual match: a tag
-      // that is a mix of two accents is a colour the flavour never shipped, and
-      // a window that is Catppuccin everywhere except on the board's columns is
-      // not the thing on the tin.
-      //
-      // `lime` is the name that bends furthest, and it is the reason to say this
-      // out loud rather than leave it to be noticed: Catppuccin publishes no
-      // yellow-green, so lime holds `teal` here and sits beside `cyan` in the
-      // order above because that is where the colour it actually draws belongs.
-      // It is kept under the wrong name because the name is on disk in
-      // everybody's boards, and a rename would cost them the colour to fix a word.
-      green: p.green,
-      amber: p.yellow,
-      sand: p.rosewater,
-      coral: p.peach,
-      red: p.red,
-      brick: p.maroon,
-      blush: p.flamingo,
-      rose: p.pink,
-      violet: p.mauve,
-      lavender: p.lavender,
-      azure: p.sapphire,
-      blue: p.blue,
-      cyan: p.sky,
-      lime: p.teal,
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Kururu's own
-// ---------------------------------------------------------------------------
-
-/**
- * The palette kururu had before it had a choice, and the one it opens in again.
- * Every value here is one that was already in `styles.css`, `terminals.ts` or
- * `colors.ts` — this theme is those three files, gathered — and it is the
- * theme of kururu's own pack (`KURURU_PACK` in `shared/styles.ts`).
- */
-const KURURU: Theme = {
-  id: "kururu",
-  name: "Kururu",
-  appearance: "dark",
-  ui: {
-    bg: "#0d0f0e",
-    chrome: "#141817",
-    chromeHigh: "#1b201e",
-    line: "#242b28",
-    lineHigh: "#33413a",
-    text: "#d7dbd8",
-    textStrong: "#eef1ef",
-    dim: "#7c857f",
-    dimmer: "#565e59",
-    accent: "#7fd6a2",
-    onAccent: "#06100b",
-
-    idle: "#6b736e",
-    working: "#ff9f43",
-    blocked: "#e3c46a",
-    done: "#7aa6da",
-    exited: "#4a524d",
-
-    danger: "#ff8a80",
-    dangerBg: "#b3453c",
-    onDanger: "#ffffff",
-
-    scrim: "rgba(0, 0, 0, 0.5)",
-    shadow: "rgba(0, 0, 0, 0.5)",
-  },
-  terminal: {
-    background: "#0d0f0e",
-    foreground: "#d7dbd8",
-    cursor: "#7fd6a2",
-    cursorAccent: "#0d0f0e",
-    selectionBackground: "#2b3a33",
-    black: "#1b1f1d",
-    red: "#e57373",
-    green: "#7fd6a2",
-    yellow: "#e3c46a",
-    blue: "#7aa6da",
-    magenta: "#c28fd8",
-    cyan: "#77c8c8",
-    white: "#c8cec9",
-    brightBlack: "#5a635e",
-    brightRed: "#ff8a80",
-    brightGreen: "#9bf0bd",
-    brightYellow: "#ffdd8a",
-    brightBlue: "#9cc3f0",
-    brightMagenta: "#dbabef",
-    brightCyan: "#96e5e5",
-    brightWhite: "#f0f3f1",
-  },
-  workspace: {
-    // The eight this theme shipped with, and six more mixed to sit beside them
-    // rather than ported from anywhere: kururu's own palette is desaturated and
-    // a Catppuccin accent dropped into it reads as a colour from another window.
-    // `lime` here is an actual yellow-green, which the Catppuccin flavours
-    // cannot be — see the note beside theirs.
-    green: "#7fd6a2",
-    amber: "#e3c46a",
-    sand: "#d8c39a",
-    coral: "#e08f7a",
-    red: "#e06c6c",
-    brick: "#a8604f",
-    blush: "#edaebb",
-    rose: "#dd8fae",
-    violet: "#b49ae0",
-    lavender: "#a8b4e8",
-    azure: "#6fb4e0",
-    blue: "#7aa6da",
-    cyan: "#74c7c4",
-    lime: "#b5cf7a",
-  },
-};
-
-/**
- * Every theme, in the order Settings lists them. Kururu's own first because it
- * is the default. It was Mocha for a while, on the argument that kururu's green
- * was arrived at rather than designed; what overturned that is that kururu now
- * has a look of its own to go back to — the Kururu pack, which every other
- * pack is worn over — and a fresh window that opened in a palette that pack
- * does not name would be one somebody could never return to by pressing it.
- */
-export const THEMES: readonly Theme[] = [
-  KURURU,
-  catppuccin("catppuccin-mocha", "Catppuccin Mocha", MOCHA, "dark"),
-  catppuccin("catppuccin-macchiato", "Catppuccin Macchiato", MACCHIATO, "dark"),
-  catppuccin("catppuccin-frappe", "Catppuccin Frappé", FRAPPE, "dark"),
-  catppuccin("catppuccin-latte", "Catppuccin Latte", LATTE, "light"),
-];
-
-export const DEFAULT_THEME_ID = "kururu";
-
-/**
- * Every theme there is *here*, plus whatever has been installed. `allSkins`'s
- * shape, for `allSkins`'s reasons, including the ordering.
- */
-export function allThemes(extra: readonly Theme[] = []): readonly Theme[] {
-  return extra.length === 0 ? THEMES : [...extra, ...THEMES];
-}
-
-/**
- * The theme for an id, falling back rather than refusing.
- *
- * An id naming nothing is what a downgrade looks like — a config written by a
- * version that had a flavour this one does not — and the right answer to that is
- * the default, drawn, rather than a window with no colours in it. It is the same
- * call `mascotFor` makes about a deleted mascot, for the same reason: the
- * fallback *is* the answer, so there is nothing a check would buy.
- *
- * `extra` is the themes this server has installed from the registry. It is a
- * parameter rather than something this module reaches for, because `shared/` is
- * imported by both halves and neither of them may hold mutable state the other
- * cannot see: the server reads the installed set off disk, the client reads it
- * out of the snapshot, and this function is told.
- */
-export function themeFor(id: string | null | undefined, extra: readonly Theme[] = []): Theme {
-  const all = allThemes(extra);
-  return all.find((t) => t.id === id) ?? all.find((t) => t.id === DEFAULT_THEME_ID) ?? all[0]!;
-}
 
 // ---------------------------------------------------------------------------
 // The terminal's type
@@ -617,9 +125,7 @@ export const DEFAULT_FONT_SIZE = 12;
 /**
  * The type a terminal is set in, and the shape of its cursor.
  *
- * Beside the theme rather than in it, because they outlive a change of mind
- * about colour: nobody picks Macchiato and means "and 14px". Server-owned like
- * the theme, which means one font size for the desktop and the phone — and that
+ * Server-owned, which means one font size for the desktop and the phone — and that
  * is correct rather than merely simple, because the size policy is already
  * `smallest` over the clients that can see a terminal (`server/src/sizing.ts`).
  * A phone at 16px proposes fewer columns and the pty follows it; the desktop is
@@ -645,37 +151,21 @@ export interface TerminalAppearance {
 }
 
 /**
- * Everything about how kururu looks, as one saved decision.
- *
- * One file rather than two — `~/.config/kururu/appearance.json` — because these
- * are one subject and a person changing them is on one page. `keys.json` is
- * separate for the opposite reason: a keyboard is not a look.
+ * What a person may change about how kururu looks, as one saved decision:
+ * `~/.config/kururu/appearance.json`. The colours and the shape are not in
+ * it; there is one look and it is the stylesheet's.
  */
 export interface Appearance {
-  themeId: string;
-  /**
-   * Which *shape* the window is, independent of which colours it is in.
-   *
-   * Beside `themeId` rather than inside the theme because the two axes are
-   * orthogonal — see the header of `shared/skin.ts` — and the test of that is
-   * that both crossings are things somebody wants: an eight-bit chrome in
-   * Catppuccin, and rounded chrome in an eight-bit palette. An id rather than
-   * the tokens, for the reason every other saved decision in kururu is an id.
-   */
-  skinId: string;
   terminal: TerminalAppearance;
   /**
    * Which of the bottom bar's chips are drawn — see `shared/statusbar.ts`. In
    * here rather than a file of its own because it is what the window looks
-   * like and nothing more, and every pack and theme change already spreads the
-   * rest of this object, so wearing a look never brings a hidden chip back.
+   * like and nothing more.
    */
   bar: BarSettings;
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {
-  themeId: DEFAULT_THEME_ID,
-  skinId: DEFAULT_SKIN_ID,
   terminal: {
     fontFamily: "",
     fontSize: DEFAULT_FONT_SIZE,
@@ -702,21 +192,14 @@ export const DEFAULT_APPEARANCE: Appearance = {
  * enumerates them and offers a dropdown, which is a different question from what
  * is *valid*, and this is the one that has to hold for a hand-edited file.
  *
- * The two ids are checked for being ids and otherwise left alone, which is a
- * change the registry forced and an improvement on its own terms. They used to
- * be resolved here — run through `themeFor` and written back as whatever this
- * version could draw — and that is exactly wrong once a theme can be installed
- * and removed: uninstalling one would rewrite the choice to the default, and
- * reinstalling it would not bring the choice back. Resolution belongs at the
- * moment of drawing, where the fallback is a frame long rather than permanent.
+ * A `themeId` or `skinId` in a file from before 2026-11-09 is not read and is
+ * dropped the next time the file is written.
  */
 export function adoptAppearance(value: unknown): Appearance {
-  const raw = (value ?? {}) as { themeId?: unknown; skinId?: unknown; terminal?: unknown; bar?: unknown };
+  const raw = (value ?? {}) as { terminal?: unknown; bar?: unknown };
   const term = (raw.terminal ?? {}) as Partial<Record<keyof TerminalAppearance, unknown>>;
   const d = DEFAULT_APPEARANCE.terminal;
   return {
-    themeId: isStyleId(raw.themeId) ? raw.themeId : DEFAULT_THEME_ID,
-    skinId: isStyleId(raw.skinId) ? raw.skinId : DEFAULT_SKIN_ID,
     terminal: {
       fontFamily: adoptFontFamily(term.fontFamily),
       fontSize: clampFontSize(term.fontSize),
@@ -734,15 +217,7 @@ function clampFontSize(value: unknown): number {
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
 }
 
-/**
- * A face somebody named, made safe to put in a `font-family`.
- *
- * Exported because a **pack** names one too — see `adoptPackManifest` — and a
- * manifest from the registry is exactly the hostile string this was written
- * against. One adopter for both, so the answer to "what may end up in that
- * declaration" is in one place rather than drifting between a settings box and
- * a file somebody on the internet wrote.
- */
+/** A face somebody named, made safe to put in a `font-family`. */
 export function adoptFontFamily(value: unknown): string {
   if (typeof value !== "string") return "";
   // `;` and `}` are the two that could close this declaration and open a rule of

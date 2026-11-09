@@ -95,8 +95,8 @@ export const CONFIG_FILES: readonly string[] = [
   "web.json",
 ];
 
-/** The directories of `~/.config/kururu` that go whole: installed and studio styles, and mascot sheets. */
-export const CONFIG_DIRS: readonly string[] = ["styles", "sheets"];
+/** The directories of `~/.config/kururu` that go whole: the mascot sheets. */
+export const CONFIG_DIRS: readonly string[] = ["sheets"];
 
 /** What stays, said on the page so nobody has to take it on trust. */
 export const EXCLUDED: readonly { what: string; why: string }[] = [

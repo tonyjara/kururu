@@ -1219,7 +1219,7 @@ export type ClientMessage =
    * asker's theme where this node knows it, and `raw` is a file's bytes as
    * base64 — an image the markup points at.
    */
-  | { type: "doc-ask"; id: number; op: "markdown" | "raw"; root: string; path: string; themeId?: string }
+  | { type: "doc-ask"; id: number; op: "markdown" | "raw"; root: string; path: string }
   /**
    * Ask nvims to `:qa` — Settings → Processes' buttons, for any nvim on the
    * machine, in kururu or not.
@@ -1441,31 +1441,6 @@ export type ClientMessage =
   | { type: "reset-keys" }
 
   // --- how it looks --------------------------------------------------------
-  /**
-   * Wear a different theme. An id from `shared/theme.ts` and nothing else — the
-   * server refuses anything it does not recognise, which is
-   * `set-profile-column-color`'s rule and is here for a stronger version of the
-   * same reason: a palette is not one value in a style attribute, it is forty,
-   * and kururu is reachable from the tailnet.
-   *
-   * An id rather than the tokens, so that a theme improved in a later version
-   * improves for everybody who picked it instead of leaving them on a copy taken
-   * the day they chose.
-   */
-  | { type: "set-theme"; themeId: string }
-  /**
-   * Which shape the window is, which is a separate decision from which colours
-   * — see `shared/skin.ts`. An id for `set-theme`'s reason, and doubly so here:
-   * a skin's tokens include a `font-family` and a `box-shadow`, so a message
-   * carrying them would be a client on the tailnet writing CSS values into the
-   * root element of every other client looking at this server.
-   *
-   * Changing it **does** re-measure every terminal, which is the one way this
-   * differs from `set-theme`: a skin moves the line weight and the type, and
-   * both move the box a pty is sized to. That resize goes through the same
-   * settle a dragged divider does, for the same reason.
-   */
-  | { type: "set-skin"; skinId: string }
   /**
    * The type a terminal is set in, and the shape of its cursor. A whole
    * `TerminalAppearance` rather than one field at a time, which is the one place

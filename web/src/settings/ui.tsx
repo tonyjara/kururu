@@ -38,7 +38,6 @@ import {
   useRef,
   useState,
   type ComponentPropsWithoutRef,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import { Icon } from "../components/Icon";
@@ -1078,93 +1077,9 @@ export function AddRow({
   );
 }
 
-/**
- * The bar over a long list: which shelf, and a filter. One line, wrapping on
- * a phone with the box dropping under the pills rather than squeezed beside
- * them. The pills are a `Segments`, which is the same control as a choice row
- * because it is one — over the list rather than over a setting.
- */
-export function Toolbar({ children }: { children: ReactNode }) {
-  return <div className="st-toolbar">{children}</div>;
-}
-
-/**
- * The filter box. Escape empties it before it closes the dialog, which is what
- * somebody with a full box means by it; whoever owns the value stands the
- * keyboard down while there is something in it to lose.
- */
-export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
-  return (
-    <input
-      className="st-search"
-      type="search"
-      value={value}
-      placeholder={placeholder}
-      aria-label={placeholder}
-      spellCheck={false}
-      autoCapitalize="off"
-      autoCorrect="off"
-      onChange={(event) => onChange(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || !value) return;
-        event.stopPropagation();
-        onChange("");
-      }}
-    />
-  );
-}
-
 /** What a card says when its list is empty: one line, in the hint's voice, where a row would be. */
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="st-empty">{children}</p>;
-}
-
-/** Pictures to choose between, in a grid that wraps. The chosen one wears the accent ring. */
-export function Gallery({ children, size = "md", label }: { children: ReactNode; size?: "sm" | "md" | "lg"; label?: string }) {
-  return (
-    <div className={`st-gallery st-gallery-${size}`} role={label ? "radiogroup" : undefined} aria-label={label}>
-      {children}
-    </div>
-  );
-}
-
-/** One picture in a gallery. The picture draws itself; this is the frame, the name and the ring. */
-export function Card({
-  picture,
-  name,
-  sub,
-  on,
-  onClick,
-  style,
-  className,
-  title,
-}: {
-  picture: ReactNode;
-  name: ReactNode;
-  sub?: ReactNode;
-  on: boolean;
-  onClick: () => void;
-  style?: CSSProperties;
-  className?: string;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={on}
-      className={`st-pic${on ? " st-pic-on" : ""}${className ? ` ${className}` : ""}`}
-      style={style}
-      onClick={onClick}
-      title={title}
-    >
-      <span className="st-pic-shot">{picture}</span>
-      <span className="st-pic-text">
-        <span className="st-pic-name">{name}</span>
-        {sub && <span className="st-pic-sub">{sub}</span>}
-      </span>
-    </button>
-  );
 }
 
 /** A walkthrough. The steps are its rows. */

@@ -13,18 +13,16 @@
  * would bring fifteen hundred icons to use fifteen, and would also be one more
  * `bun install`, which on this project strips the executable bit off node-pty's
  * spawn helper under a running host. To add one, copy the children of its
- * `<svg>` from lucide-static and give it a name in `shared/skin.ts` first.
+ * `<svg>` from lucide-static, give it a name below and a `.icon-<name>` line in
+ * `styles.css`.
  *
  * They reach the page as `mask-image` on a `::before`, not as `<svg>` elements
- * in the TSX, and that keeps the rule `Icon.tsx` and `skin.ts` are built on: an
- * icon is a custom property, so a skin that swaps one for a glyph moves a
- * property and nothing re-renders. A mask is what makes a data URI take
+ * in the TSX: an icon is a class on a span and a custom property on the root,
+ * so nothing about one ever re-renders. A mask is what makes a data URI take
  * `currentColor` — an SVG drawn as an image cannot see the colour of the
  * element it sits in, and every one of these changes colour on hover.
  */
-import { ICON_NAMES, type IconName } from "../../shared/skin";
-
-const VECTORS: Record<IconName, string> = {
+const VECTORS = {
   close: /* x */ `<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`,
   /* zap. A dev server is started, not played: the triangle read as a media
      control on a row that has nothing to play, and it is now on `play` below,
@@ -64,7 +62,12 @@ const VECTORS: Record<IconName, string> = {
   doc: /* file-text */ `<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>`,
   code: /* file-code */ `<path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/>`,
   phone: /* smartphone */ `<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>`,
-};
+} satisfies Record<string, string>;
+
+/** The icons there are: the names `<Icon>` takes and the stylesheet has a class for. */
+export type IconName = keyof typeof VECTORS;
+
+export const ICON_NAMES = Object.keys(VECTORS) as IconName[];
 
 /**
  * The ones that are solid rather than drawn in line: a bolt, a play triangle and
@@ -87,13 +90,11 @@ export function iconUrl(name: IconName): string {
 }
 
 /**
- * Written once, at load, and never again: no skin can change a drawing, only
- * ask for a glyph in its place, so there is nothing about these that depends on
- * which skin is on. Done at import rather than beside `applySkin` so the first
- * paint — before any snapshot has arrived — already has them, and an icon is
- * never an empty 1em box that fills in a moment later.
+ * Written once, at import, so the first paint already has them and an icon is
+ * never an empty box that fills in a moment later. `Icon.tsx` imports this
+ * module, so every page that draws an icon has run it.
  */
-export function applyIcons(): void {
+if (typeof document !== "undefined") {
   const root = document.documentElement;
   for (const name of ICON_NAMES) root.style.setProperty(`--icon-${name}-svg`, iconUrl(name));
 }

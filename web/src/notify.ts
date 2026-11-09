@@ -118,8 +118,7 @@ function load(url: string): Promise<AudioBuffer | null> {
       /**
        * A sound that will not load is silence, and silence is the right answer.
        * The two ways to get here are an id naming a file this machine no longer
-       * has — `themeFor`'s case, where the fallback lasts as long as the
-       * mismatch does — and a format the browser cannot decode, which is
+       * has and a format the browser cannot decode, which is
        * supposed to be impossible because the server converts what it must.
        * Neither is worth interrupting somebody about, which would be an
        * unusually poor joke in this module.
@@ -142,19 +141,8 @@ export async function playSound(id: string, volume: number): Promise<void> {
   await playUrl(soundUrl(id), volume);
 }
 
-/**
- * The same noise, from a URL rather than an id — which is the Styles tab
- * auditioning a sound nobody has installed.
- *
- * Split out rather than given an `id` that means two things, because the two
- * URLs answer different questions: `/api/sound` is *what this machine has* and
- * `/api/styles/preview` is *what the registry is offering*, and a sound in the
- * second is by definition not in the first yet. It is the same decode cache,
- * keyed by url, and the same one context — so a sound auditioned before
- * installing and then chosen afterwards is two entries for one noise, which is
- * a few kilobytes and is worth not conflating two ids over.
- */
-export async function playUrl(url: string, volume: number): Promise<void> {
+/** The noise at a URL of this server's, decoded once and kept. */
+async function playUrl(url: string, volume: number): Promise<void> {
   if (!url) return;
   const a = audio();
   if (!a) return;

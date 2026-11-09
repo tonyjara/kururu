@@ -53,7 +53,6 @@ import type { Grid } from "./sizing";
 import { Sleeper } from "./sleep";
 import type { Slots } from "./slots";
 import { Store } from "./store";
-import { readLibrary } from "./styles";
 import { Launches } from "./usage/attribute";
 import { NodeUsage } from "./usage/remote";
 import type { UsageReader } from "./usage/sweep";
@@ -576,15 +575,6 @@ export let hostProtocol = 1;
 export let logins: LoginSummary[] = [];
 
 export let appearance = readAppearance();
-/**
- * What has been installed from `../kururu-styles`.
- *
- * Held rather than re-read per snapshot, for the reason above: a snapshot goes
- * out on every status change and this is a directory of files. It is re-read
- * when it changes, which is when an install or a remove comes back — and on a
- * server restart, which is also how a style dropped in by hand takes effect.
- */
-export let styles = readLibrary();
 
 /**
  * The two halves, joined. The host knows what is running and the arrangement
@@ -634,7 +624,6 @@ export function snapshot(): SessionSnapshot {
     launch,
     projectSettings: projects,
     appearance,
-    styles,
     remote: watches?.view() ?? null,
   };
 }
@@ -846,7 +835,6 @@ interface Provided {
   hostProtocol: typeof hostProtocol;
   logins: typeof logins;
   appearance: typeof appearance;
-  styles: typeof styles;
   mascots: typeof mascots;
   keys: typeof keys;
   notify: typeof notify;
@@ -932,9 +920,6 @@ const assigners: { [K in keyof Provided]: (value: Provided[K]) => void } = {
   },
   appearance: (value) => {
     appearance = value;
-  },
-  styles: (value) => {
-    styles = value;
   },
   mascots: (value) => {
     mascots = value;

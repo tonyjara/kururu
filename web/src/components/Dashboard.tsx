@@ -11,7 +11,7 @@
 import type { ReactNode } from "react";
 import { dashboardTabLabel, isDashboardTab, type DashboardTab } from "../../../shared/dashboard";
 import type { Profile } from "../../../shared/model";
-import type { IconName } from "../../../shared/skin";
+import type { IconName } from "../icons";
 import { ProfileBoard } from "./ProfileBoard";
 
 interface DashView {

@@ -32,10 +32,6 @@ export const CONTENT_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
   ".map": "application/json; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
-  // What a `sound` style may ship — `SOUND_FORMATS`, and nothing wider. These
-  // reach a browser through `/api/styles/asset` and `/api/styles/preview`,
-  // which serve whatever an entry recorded; a type guessed as
-  // `application/octet-stream` is one Safari will not decode.
   ".wav": "audio/wav",
   ".mp3": "audio/mpeg",
   ".m4a": "audio/mp4",

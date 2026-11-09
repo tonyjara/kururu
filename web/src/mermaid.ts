@@ -107,12 +107,8 @@ function config(): MermaidConfig {
     securityLevel: "strict",
     theme: "base",
     themeVariables: themeVariables(),
-    /**
-     * `dataset.theme` is set by `applyTheme`, but what mermaid wants is which
-     * way round the theme is rather than which one it is, and `colorScheme` is
-     * the token that already says so for every theme including ones added later.
-     */
-    darkMode: document.documentElement.style.colorScheme !== "light",
+    /** Kururu's one look is dark; see `color-scheme` in the stylesheet's `:root`. */
+    darkMode: true,
     /**
      * A ceiling, because a document is a file on disk and a file on disk can be
      * a generated graph with ten thousand edges in it. Mermaid's layout is

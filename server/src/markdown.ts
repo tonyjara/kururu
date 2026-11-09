@@ -32,10 +32,6 @@ import type { Token } from "markdown-it";
 import { createHighlighterCore, type HighlighterCore, type ThemeRegistration } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import wasm from "shiki/wasm";
-import vitesseDark from "shiki/themes/vitesse-dark.mjs";
-import catppuccinFrappe from "shiki/themes/catppuccin-frappe.mjs";
-import catppuccinLatte from "shiki/themes/catppuccin-latte.mjs";
-import catppuccinMacchiato from "shiki/themes/catppuccin-macchiato.mjs";
 import catppuccinMocha from "shiki/themes/catppuccin-mocha.mjs";
 import { posix } from "node:path";
 
@@ -80,37 +76,15 @@ const LANGS = [
 ];
 
 /**
- * A syntax theme per kururu theme, and the one colour of each that is dropped.
+ * The one syntax theme: Catppuccin Mocha, which is what code in the reader
+ * has been drawn in under the one look kururu kept.
  *
- * It was one theme and two hardcoded hexes: vitesse-dark, with its background
- * swapped for kururu's own so that a code block did not put a second shade of
- * nearly-black inside a pane that already had one. That substitution was right
- * and its constants were not — the moment kururu had five palettes, a block
- * pinned to `#11140f` was a rectangle of the old theme sitting inside the new
- * one, which is the exact bug the CSS token sweep existed to remove and it would
- * have survived the sweep by being on the wrong side of the wire.
- *
- * So the background is replaced with `transparent` rather than with a colour.
- * A block then sits in the page the way a quote does — it takes whatever `--bg`
- * the pane around it has, which is the client's current theme, resolved by the
- * cascade rather than by anything here agreeing with anything there. Each
- * theme's own background is read off the theme rather than written down beside
- * it, so there is no hex in this file to fall out of step.
- *
- * Shiki ships all four Catppuccin flavours, which is what makes the mapping
- * worth having at all: highlighting Catppuccin Mocha markdown in vitesse-dark
- * would be a pane of one palette with a code block of another. Kururu's own
- * theme keeps vitesse-dark, which is what it was designed against.
+ * Its background is replaced with `transparent` rather than with a colour. A
+ * block then sits in the page the way a quote does and takes the `--bg` of
+ * the pane around it, resolved by the cascade, so there is no hex in this
+ * file to fall out of step with the stylesheet.
  */
-const SYNTAX: Record<string, { name: string; theme: ThemeRegistration }> = {
-  "catppuccin-mocha": { name: "catppuccin-mocha", theme: catppuccinMocha },
-  "catppuccin-macchiato": { name: "catppuccin-macchiato", theme: catppuccinMacchiato },
-  "catppuccin-frappe": { name: "catppuccin-frappe", theme: catppuccinFrappe },
-  "catppuccin-latte": { name: "catppuccin-latte", theme: catppuccinLatte },
-  kururu: { name: "vitesse-dark", theme: vitesseDark },
-};
-
-const FALLBACK_SYNTAX = "catppuccin-mocha";
+const SYNTAX: { name: string; theme: ThemeRegistration } = { name: "catppuccin-mocha", theme: catppuccinMocha };
 
 /**
  * The colour a theme paints behind its code, so it can be replaced with nothing.
@@ -134,10 +108,7 @@ let highlighting: Promise<HighlighterCore> | null = null;
 
 function highlighter(): Promise<HighlighterCore> {
   return (highlighting ??= createHighlighterCore({
-    // Every theme, once. They are a few kilobytes each beside a megabyte of
-    // grammars, and loading one lazily would mean rebuilding the highlighter
-    // the first time somebody changed theme with a reader open.
-    themes: Object.values(SYNTAX).map((s) => s.theme),
+    themes: [SYNTAX.theme],
     langs: LANGS,
     /**
      * Oniguruma, and its wasm inlined rather than loaded from beside the bundle.
@@ -190,12 +161,10 @@ export async function renderMarkdown(
   text: string,
   root: string,
   rel: string,
-  /** Which kururu theme is on, so the code matches the pane it lands in. */
-  themeId: string,
 ): Promise<RenderedMarkdown> {
   const shiki = await highlighter();
   const known = new Set(shiki.getLoadedLanguages());
-  const syntax = SYNTAX[themeId] ?? SYNTAX[FALLBACK_SYNTAX]!;
+  const syntax = SYNTAX;
   const bg = backgroundOf(syntax.theme);
 
   const md = MarkdownIt({

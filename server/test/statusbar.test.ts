@@ -67,9 +67,9 @@ describe("the bar in appearance.json", () => {
     expect(adoptAppearance(older).bar).toEqual(DEFAULT_BAR);
   });
 
-  /** A theme change spreads the rest of the appearance; a hidden chip must survive it. */
-  it("survives a theme being changed beside it", () => {
-    const saved = adoptAppearance({ ...DEFAULT_APPEARANCE, bar: { hidden: ["load"] } });
-    expect(adoptAppearance({ ...saved, themeId: "catppuccin-mocha" }).bar).toEqual({ hidden: ["load"] });
+  /** A file from before the one look names a theme and a skin; they are dropped and the rest is kept. */
+  it("drops a theme and a skin an older file names, and keeps the bar", () => {
+    const older = { ...DEFAULT_APPEARANCE, themeId: "dracula", skinId: "soft", bar: { hidden: ["load"] } };
+    expect(adoptAppearance(older)).toEqual({ ...DEFAULT_APPEARANCE, bar: { hidden: ["load"] } });
   });
 });

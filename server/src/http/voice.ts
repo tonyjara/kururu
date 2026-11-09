@@ -22,7 +22,7 @@ export const voiceRoutes: Route[] = [
   /**
    * What there is to be notified *by*: kururu's own sounds and the machine's.
    *
-   * A fetch rather than a snapshot field, on `/api/styles`' split — the snapshot
+   * A fetch rather than a snapshot field, on the update check's split — the snapshot
    * carries what somebody *chose*, and this is what there is to choose from. It
    * is a directory listing of somebody else's files, it changes when they drop a
    * file into `~/Library/Sounds` rather than when kururu does anything, and the
