@@ -215,7 +215,7 @@ async function copyText(text: string): Promise<boolean> {
   return ok;
 }
 
-/** Two sheets, for copying — drawn here rather than named in the skin, as the drawer's own glyphs are. */
+/** Two sheets, for copying — drawn here, as the drawer's own glyphs are. */
 function CopyIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

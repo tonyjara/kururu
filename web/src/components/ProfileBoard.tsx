@@ -764,9 +764,9 @@ export function profileCardMoves(profile: Profile, card: Card, onSent?: (what: s
 /**
  * Who put a card in Needs you, as a word in a pill: **Kuru** in the accent,
  * since that is the one the user did not do themselves and should notice,
- * and **You** in the quiet ink of a count. Words rather than a glyph, for
- * the reason the board's view toggle is text: an icon is a cell every skin's
- * sheet has to draw. One drawing for the card and the drawer's row.
+ * and **You** in the quiet ink of a count. Words rather than a glyph, as
+ * the board's view toggle is text, so it reads at a glance. One drawing for
+ * the card and the drawer's row.
  */
 export function NeedsByMark({ by }: { by: NeedsBy }) {
   const kuru = by === "kuru";

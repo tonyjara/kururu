@@ -190,10 +190,6 @@ export async function editorsHere(): Promise<EditorChoice[]> {
  * (`files-ask`, `doc-ask`). The same functions and so the same refusals and
  * the same bounds — `files.ts` holds a file to 2 MB and a listing to 500
  * entries — with a file's bytes as base64, since the watch carries text.
- *
- * The markup is rendered in the asker's theme when this node has it, so the
- * code in a document matches the Mac's panes; one this node does not know
- * draws its fallback, as an unknown theme here always has.
  */
 export async function readForWatcher(msg: Extract<ClientMessage, { type: "files-ask" | "doc-ask" }>): Promise<unknown> {
   const root = msg.root;

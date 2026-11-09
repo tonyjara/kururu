@@ -200,9 +200,8 @@ const KEYBAR_KEY = "kururu.keybar";
  * `:root[data-narrow]` rather than writing a media query of its own. A
  * breakpoint in both halves is a number held together by nothing, and the half
  * that drifts is invisible until a phone gets a full-screen sidebar that still
- * thinks it is a column — the same argument `theme.test.ts` makes about a token
- * the CSS asks for that no skin answers, except that here one of the two sides
- * also has to *behave* differently and so has to know.
+ * thinks it is a column. Here one of the two sides also has to *behave*
+ * differently, and so has to know.
  */
 const NARROW = "(max-width: 720px)";
 
@@ -1799,7 +1798,7 @@ function storedKeybar(): boolean {
  * with some of each.
  *
  * What comes out is a length on the root element and nothing else — no React
- * state — for the reason `applyTheme` is an effect and not a context: the answer
+ * state — because the answer
  * is consumed by one CSS rule, and re-rendering the window to tell it a number
  * the cascade can carry is paying a render for nothing.
  *

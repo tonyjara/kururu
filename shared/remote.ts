@@ -94,8 +94,8 @@ export function containsQualified(text: string): boolean {
 
 /**
  * The hue a node is drawn in: its band, its chips. One of the board
- * palette's names, so that it reaches the page as a token (`--ws-<name>`)
- * and every theme says what it looks like, and picked off the id so that
+ * palette's names, so that it reaches the page as a token (`--ws-<name>`),
+ * and picked off the id so that
  * every window and every drawer agrees without a field on the wire.
  */
 export function nodeHue(node: string): WorkspaceColor {

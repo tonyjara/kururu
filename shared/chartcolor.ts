@@ -5,31 +5,26 @@
  * A chart is the one thing in the window whose colours have to be distinguished
  * from each other rather than merely read against a ground, and the board's
  * palette, which the plan for the usage page reached for first, cannot do that.
- * It was chosen for a chip a few pixels wide: on the dark themes its colours sit
+ * It was chosen for a chip a few pixels wide: on a dark surface its colours sit
  * at OKLCH lightness 0.71 to 0.92 where a chart's want 0.48 to 0.67, a third of
  * them read as grey at the chroma floor, and its worst neighbours are 1.5 apart
  * under protanopia where 8 is the target. Reordering does not rescue that. So
  * the series here are a table, one column per appearance, stepped for the
- * surface rather than flipped. A theme that wants a different mood for its
- * charts is a question nobody has asked yet.
+ * surface rather than flipped.
  *
- * **Kuru is the exception, and it is why any of this is computed at run time.**
- * Kuru wears the theme's accent everywhere else in the window, so a chart that
+ * **Kuru is the exception, and it is why any of this is computed.**
+ * Kuru wears the accent everywhere else in the window, so a chart that
  * dressed it in anything else would be saying something false about who that
  * is. The accent itself is too light for the same reason the board's colours
- * are, so `kuruInk` keeps its hue and moves its lightness into the band; on
- * Latte, whose accent is already in it, that is no change at all.
+ * are, so `kuruInk` keeps its hue and moves its lightness into the band.
  *
  * The checks at the foot are the ones the data-viz method calls computable, at
  * its thresholds, using its simulation of colour blindness (Machado, Oliveira
  * and Fernandes 2009, severity 1.0, to which those thresholds are calibrated).
  * They live here rather than in the test so that `web/test/usage-palette.test.ts`
- * is about which pairs are asked, not about OKLab. An installed theme goes
- * through the same `kuruInk` and is not checked by anything: its surfaces are
- * not known until somebody installs it, and a poor pair then still has the
- * legend, the gaps and the table view that every chart here carries anyway.
+ * is about which pairs are asked, not about OKLab.
  */
-/** Which way round a theme is, which is the one thing about it the table below is keyed by. */
+/** Which way round the surface is, which is what the table below is keyed by. */
 export type ThemeAppearance = "dark" | "light";
 
 export type Rgb = readonly [number, number, number];
@@ -56,7 +51,7 @@ export const SERIES_SLOTS = 6;
  * The series, in the order that keeps every neighbour in a stack furthest apart,
  * with Kuru's green at the foot and the quiet colour on top: blue, yellow,
  * magenta, violet, aqua, orange. Found by enumerating orderings of the method's
- * validated hues against every built-in theme and both of its surfaces, not by
+ * validated hues against the surfaces a chart sits on, not by
  * eye; the worst neighbours come out at 9.2 under colour blindness and 19.3 under
  * ordinary vision. Red had to go to get there: beside orange it is 7 apart
  * however it is stepped, and nothing on a page about spending should be red for
@@ -89,7 +84,7 @@ function fromLinear(c: number): number {
   return c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
 }
 
-/** `#rrggbb` as linear light, or null for anything else: an installed theme may spell its accent any way CSS allows. */
+/** `#rrggbb` as linear light, or null for anything else, since CSS allows a colour to be spelled many ways. */
 export function linearOf(hex: string): Rgb | null {
   if (!/^#[0-9a-f]{6}$/i.test(hex)) return null;
   return [toLinear(channel(hex, 1)), toLinear(channel(hex, 3)), toLinear(channel(hex, 5))];
@@ -126,7 +121,7 @@ export function lightnessChroma(hex: string): { lightness: number; chroma: numbe
  * puts it in the band and over the floor, with the chroma brought back down
  * only as far as the screen can show. A colour already there comes back as it
  * was written. Null for one this cannot read, which the caller answers with the
- * first series colour rather than a guess at what the theme meant.
+ * first series colour rather than a guess at what was meant.
  */
 export function kuruInk(accent: string, appearance: ThemeAppearance): string | null {
   const rgb = linearOf(accent);
@@ -148,12 +143,11 @@ export function kuruInk(accent: string, appearance: ThemeAppearance): string | n
 
 /**
  * The quiet colour: everything that is not the point of a chart, the agents
- * beside Kuru and Other on top of a stack. `dim` where that will do, since it is
- * already the theme's word for receding. On this theme's own default it would
- * not: Kuru's green moved into the band lands at the same lightness as `dim`, and
- * the one chart the page exists for was two marks 11 apart. So it steps towards
- * `dimmer`, which recedes further, until the two can be told apart by anybody,
- * and takes the first such step so that it stays as visible as it can.
+ * beside Kuru and Other on top of a stack. `dim` where that will do, as it does
+ * on the palette kururu has, since it is already the palette's word for
+ * receding. Where Kuru's ink lands too near `dim` to be told from it, this steps
+ * towards `dimmer`, which recedes further, until the two can be told apart by
+ * anybody, and takes the first such step so that it stays as visible as it can.
  */
 export function restInk(ui: { dim: string; dimmer: string }, kuru: string): string {
   const from = linearOf(ui.dim);

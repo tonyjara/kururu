@@ -131,8 +131,8 @@ function LoadDetail({ view }: { view: SlotsView }) {
 
 /**
  * A dial with its needle past the middle: how hard the machine is working.
- * Drawn here rather than taken from the skin's icon set on `SidebarIcon`'s
- * reasoning in `StatusBar.tsx`.
+ * Drawn here as `SidebarIcon` in `StatusBar.tsx` is: the icon set has no
+ * drawing of it.
  */
 function GaugeMark() {
   return (

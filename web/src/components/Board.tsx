@@ -1370,7 +1370,7 @@ export function Composer({
       />
       {offerDates && (
         <div className="board-composer-dates">
-          {/* The browser's own date field, for `.studio-swatch`'s reason: a
+          {/* The browser's own date field: a
               calendar is a control it draws better than this file could, and
               on a phone it is the wheel a thumb already knows. */}
           <input

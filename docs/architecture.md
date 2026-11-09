@@ -5,7 +5,7 @@ Kururu is **three processes, and the window is the least important of them.**
 | process | holds | restarting it costs |
 |---|---|---|
 | **pty host** (`ptyhostd.ts`) | every pty, every headless emulator, an opaque blob of the arrangement | **every agent the user is running** |
-| **server** (`index.ts`) | the protocol, the layout, discovery, the registry | a reconnect |
+| **server** (`index.ts`) | the protocol, the layout, discovery | a reconnect |
 | **window** (`desktop/main.js`) | a window | a repaint |
 
 The phone is the window's equal: both load the same build from the same server

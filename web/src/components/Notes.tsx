@@ -616,10 +616,8 @@ function keepScroll(box: HTMLElement, kept: KeptScroll): () => void {
 }
 
 /**
- * A speech bubble, for talking to Kuru about the card — drawn here rather
- * than taken from the skin's icon set on the status bar's `SidebarIcon`
- * reasoning: an entry in that set is a cell every skin has to ship, and a
- * bubble says the same thing in any chrome.
+ * A speech bubble, for talking to Kuru about the card — drawn here as the
+ * status bar's `SidebarIcon` is: the icon set has no drawing of it.
  */
 function ReferIcon() {
   return (

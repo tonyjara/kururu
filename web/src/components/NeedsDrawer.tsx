@@ -1116,10 +1116,8 @@ function WorkingRow({ agent, mascot }: { agent: AgentSnapshot; mascot: ReturnTyp
 }
 
 /**
- * An inbox tray, drawn here rather than taken from the skin's icon set on
- * the status bar's `SidebarIcon` reasoning: a fourth entry in that set is a
- * cell every future skin has to ship, and a tray means the same thing in
- * any chrome. Exported for the chip, so the two are one drawing.
+ * An inbox tray, drawn here as the status bar's `SidebarIcon` is: the icon
+ * set has no drawing of it. Exported for the chip, so the two are one drawing.
  */
 export function InboxIcon() {
   return (

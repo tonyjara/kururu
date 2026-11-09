@@ -194,7 +194,7 @@ profile's Claude login. The files that go are named by name, and anything not na
 
 | in the repository | from |
 |---|---|
-| `config/*.json`, `config/styles/`, `config/sheets/` | the named settings files; installed and studio styles; mascot sheets |
+| `config/*.json`, `config/sheets/` | the named settings files; mascot sheets |
 | `boards/<profile>/<workspace>.json` | lanes, cards sorted by number, every run, every event, deleted cards marked |
 | `conversations/<profile>/<session>.jsonl` | the harness conversation, one turn per line, so a diff is the new turns |
 | `memory/<login>/<project>/` | every `projects/*/memory/` under the profiles kururu made |
@@ -360,19 +360,20 @@ bill. A comparison is the same length of time ending the same distance back, so
 today at nine is set beside yesterday by nine.
 
 **Colour.** The plan had the board's palette and `--accent`, and neither can pass:
-those colours are chosen for chips and sit at OKLCH lightness 0.71–0.92 on the dark
-themes where a chart's want 0.48–0.67. So the series are a table per appearance
-in `shared/chartcolor.ts`, and `applyTheme` writes them as `--chart-*`. Kuru keeps
-the accent's hue, moved into the band, and the quiet colour is `dim` stepped until
-it can be told from Kuru: on the default theme the two were 11 apart. A series's
-slot goes by all-time rank (`seriesSlots`), so a filter never repaints a survivor.
-`web/test/usage-palette.test.ts` runs the checks on every built-in theme and both
-surfaces; its arithmetic is held to the figures the method publishes for its own
-palette. An installed theme gets the same `kuruInk` and no check.
+those colours are chosen for chips and sit at OKLCH lightness 0.71–0.92 on a dark
+ground where a chart's want 0.48–0.67. So the series are a table in
+`shared/chartcolor.ts`, and the stylesheet's `:root` carries what `chartTokens`
+works out from it as `--chart-*`. Kuru keeps the accent's hue, moved into the
+band, and the quiet colour is `dim` stepped until it can be told from Kuru. A
+series's slot goes by all-time rank (`seriesSlots`), so a filter never repaints a
+survivor. `web/test/usage-palette.test.ts` reads the stylesheet's `:root`, fails
+if its `--chart-*` values have drifted from `chartTokens`, and runs the checks on
+both surfaces; its arithmetic is held to the figures the method publishes for its
+own palette.
 
 **Marks.** No charting library, in `web/src/charts/`. Bars, columns and segments
 are boxes rather than SVG: a name then wraps and ellipsises by itself, and corners
-come from the skin's radius tokens. Only the lines are SVG. Every chart has a table
+come from the radius tokens. Only the lines are SVG. Every chart has a table
 behind a toggle, which is what makes a tooltip and a colour under 3:1 legal. "What
 kind of token" draws two bars, tokens over dollars, because tokens alone are one
 block at 98 %.

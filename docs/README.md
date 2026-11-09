@@ -8,7 +8,7 @@ The detail that used to be in `CLAUDE.md`. That file is now the operational brie
 | [architecture.md](architecture.md) | The three processes, the socket between them, restart semantics, discovery, access control, and the server's shape |
 | [terminals.md](terminals.md) | The emulator pool, the size policy, the backlog protocol, the cursor. The part that has been wrong the most times |
 | [layout.md](layout.md) | Profiles, workspaces, panes, tabs, dragging, persistence, keys |
-| [styles.md](styles.md) | Themes, skins, parts, the registry, the studio, mascots |
+| [styles.md](styles.md) | The one look: where its values live and the tokens a rule may use, icons, tag colours, sounds, mascots |
 | [notifications.md](notifications.md) | The gate, the delivery, sounds — and the macOS signing saga |
 | [data.md](data.md) | The database boards and conversations live in, the keys that name a profile across cold starts, the history of every move, the search, the one road in from an old `session.json`, and backups to a private repository |
 | [harness.md](harness.md) | The one session per profile that drives the others: kururu's verbs as MCP tools, the user's words typed into a pty and why not the inbox, the status feed |

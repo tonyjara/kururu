@@ -929,7 +929,7 @@ function Pane({
   };
   /**
    * `.tab-new` sticks just clear of `.tab-actions` — but how wide that block is
-   * depends on a skin's button size and, on a solo pane, a "2/3" of varying
+   * depends on the buttons' size and, on a solo pane, a "2/3" of varying
    * width, so a written-down number is a second fact about the same box that
    * only agrees with it by chance. Read instead of guessed: `--actions-w` is
    * the block's own measured width, kept current by the `ResizeObserver` a
@@ -1299,9 +1299,8 @@ function SlotLine({ agentIds }: { agentIds: readonly string[] }) {
  *
  * The `panes` glyph for both, and not a hamburger or an ellipsis: what is behind
  * it is *this pane and its neighbours*, which is a subject rather than a
- * category, and the set already has a drawing that means exactly that. A skin
- * that restyles `panes` restyles the corner on both platforms at once — one
- * icon, one meaning, and nothing new for a future skin to answer for.
+ * category, and the set already has a drawing that means exactly that: one
+ * icon, one meaning, on both platforms.
  *
  * The menu is anchored to the button's *left* edge and allowed to run off the
  * side, because `Popover` already clamps it back inside the window — which at

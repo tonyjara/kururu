@@ -33,13 +33,6 @@ seen is adopted — never the other way round. Profiles and workspaces are
 known by `key`, not by their counter ids. A database that will not open is
 a server that does not start. → [data](data.md)
 
-## Contrast floors
-
-**A token has a floor, and the pairs are read out of the stylesheet.** Right
-tokens and unreadable text is a thing a palette can be; `shared/contrast.ts`
-says what each one is held to as ink and `CONTRAST_KNOWN` records — not
-approves — the eighteen pairs already under it. → [styles](styles.md)
-
 ## Access
 
 **The socket binds loopback and the `Origin` header is checked**, the second

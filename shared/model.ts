@@ -274,15 +274,14 @@ export interface MascotConfig {
    * What it does while the agent is asking, and when its turn has ended — or
    * `null` to wear `idle` like every other stopped state.
    *
-   * These came with a pack that had a picture for each — a pit board for a car
-   * waiting on its crew, a chequered flag for one that finished — and a mascot
-   * that has them is saying which of the two stopped states this is without a
+   * A mascot that has them is saying which of the two stopped states this is
+   * without a
    * tooltip, which is more than the idle clip can. Null is the default and the
    * common case: most sheets have one resting pose, and a frog that sat down
    * differently for each state would be drawing a distinction it does not have
-   * a picture for. Settings does not author them; they arrive from the
-   * registry, and the picker keeps them because every edit goes through
-   * `adoptMascot` with the rest of the config.
+   * a picture for. Settings does not author them; the picker keeps the ones a
+   * saved mascot has, because every edit goes through `adoptMascot` with the
+   * rest of the config.
    */
   blocked: MascotClip | null;
   done: MascotClip | null;
@@ -1042,7 +1041,7 @@ export interface SessionSnapshot {
    */
   keys: KeyOverrides;
   /**
-   * Which theme is on and what the terminals are set in. Server-owned like the
+   * What the terminals are set in and which chips the bar shows. Server-owned like the
    * keyboard and for the same reasons — a phone and a desktop cannot end up
    * looking like two applications, and a reload does not cost you the choice.
    */
@@ -1054,7 +1053,7 @@ export interface SessionSnapshot {
    * notification is the one thing kururu does that reaches you when you are not
    * looking at it, so a phone and a desktop disagreeing about whether it may
    * would be the setting failing in the only case it exists for — and unlike the
-   * theme, nothing on screen would show you which of them was wrong.
+   * font, nothing on screen would show you which of them was wrong.
    *
    * What is *here* is only the choice. The policy is applied on the server, per
    * client, before a notification is sent at all (see `shared/notify.ts`); this

@@ -64,6 +64,17 @@ shows, so it is written once and read in three places — see
   every agent; until then everything works as it did, and Settings → About
   says the host is behind.
 
+### Removed
+
+- **Themes, skins, packs, Explore and the skin studio.** Kururu has one look
+  now: Dracula's colours on the chrome it always had. Settings → Theme is
+  Settings → Terminal and keeps the font, its size and the cursor; your
+  mascots are as they were. Sounds that came from the styles registry are no
+  longer in the sound list (kururu's own and the system's are), and a theme
+  or skin saved in your settings is ignored. Nothing is deleted from
+  `~/.config/kururu/styles`; kururu just no longer reads it, and it is no
+  longer part of a backup.
+
 ### Fixed
 
 - **The reader keeps your place.** Switching to another tab and back no longer

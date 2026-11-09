@@ -250,10 +250,8 @@ export const serverRoutes: Route[] = [
     handle: async (req, res, url) => {
       const check = await checkForUpdate(url.searchParams.has("force"));
       /**
-       * The notes are rendered here rather than in `update.ts` because this is
-       * where the theme is — release notes are code blocks as often as not, and
-       * highlighting them against a palette the window is not wearing is worse
-       * than not highlighting them. A failure falls back to the markdown source,
+       * The notes are rendered here rather than in `update.ts`, which stays a
+       * fetch and a comparison. A failure falls back to the markdown source,
        * which is perfectly readable and is what a changelog is written as anyway.
        */
       let notesHtml: string | null = null;

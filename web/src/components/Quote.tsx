@@ -607,7 +607,7 @@ function SayMark({ phase, toggled, level, onPress }: { phase: "idle" | "listenin
 
 /**
  * A quotation mark, drawn rather than typed, since a font's `“` is a
- * different weight and height in every skin's face. Inline as the drawer's
+ * different weight and height in every face. Inline as the drawer's
  * reply arrow is, in the text's own colour.
  */
 function QuoteMark() {

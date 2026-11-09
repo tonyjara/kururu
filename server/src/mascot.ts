@@ -199,7 +199,7 @@ export function writeMascots(set: MascotSet): void {
   writeConfigFile(FILE, set);
 }
 
-/** In `shared/model.ts` now, because wearing kururu's own pack can add a frog too. */
+/** In `shared/model.ts` now. */
 export { freshMascotId } from "../../shared/model";
 
 // ---------------------------------------------------------------------------

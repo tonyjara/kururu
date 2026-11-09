@@ -152,8 +152,7 @@ function Balance({ reading, stale }: { reading: OpenRouterReading; stale: boolea
 
 /**
  * OpenRouter's mark, the two arrows leaving one line: whose balance it is,
- * drawn here rather than taken from the skin's icon set on `SidebarIcon`'s
- * reasoning — a product's mark is the same drawing in any chrome.
+ * drawn here because a product's mark is not one of the icon set's drawings.
  */
 function OpenRouterMark() {
   return (

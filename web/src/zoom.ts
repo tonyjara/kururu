@@ -10,11 +10,9 @@
  * cell, a cell decides a grid, and a grid is the server's by policy. Nothing
  * downstream of this reaches a pty at all, so nothing here is worth a round trip.
  *
- * What is stored is a **multiplier on the skin's type step**, never a pixel size.
- * `--fs-lg` is what the reader is set in and a skin is entitled to move it —
- * a monospace chrome might set it to 12px where the default sets 13, and a
- * pixel chrome would go further — so a saved px would be a zoom that quietly
- * undid a skin. It is applied as one custom property
+ * What is stored is a **multiplier on the type step**, never a pixel size.
+ * `--fs-lg` is what the reader is set in, so the reader stays on the ramp the
+ * rest of the window is set in. It is applied as one custom property
  * on the root element, which is `--sidebar-w`'s trick: the whole document is laid
  * out in `em` and `ch` off that one size, so the headings, the code blocks, the
  * measure and the image captions all move together and the stylesheet needs to

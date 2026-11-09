@@ -2,7 +2,7 @@
  * Settings → Appearance → Bottom bar: a switch for each chip on the bar.
  *
  * Under Appearance because that is all it is — the list lives in
- * `appearance.json` beside the theme (see `shared/statusbar.ts`), the phone
+ * `appearance.json` beside the terminal's type (see `shared/statusbar.ts`), the phone
  * and the desktop draw the same bar, and switching a chip off stops its
  * drawing and nothing else.
  *

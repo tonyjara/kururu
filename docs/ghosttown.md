@@ -6,8 +6,7 @@ client of it: **kururu's agents and ghosttown's are two separate sets.**
 
 **Never modify `../ghosttown` from this project.** The traffic is one-way. If
 something there needs changing, write it down and raise it with the user; do not
-reach across and edit it. (`../kururu-styles` is different and is ours — see
-[styles](styles.md).)
+reach across and edit it.
 
 ## What was ported, and why it must not drift casually
 

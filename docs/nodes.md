@@ -1041,8 +1041,7 @@ through this server and only ever checked by the node's own `files.ts`.
   answers only a watcher, with the same functions its routes call
   (`readForWatcher`), so the 2 MB file and 500-entry listing bounds are the
   ones that hold. The answer comes back with every root qualified. A
-  document is rendered by the node's Shiki in this window's theme where the
-  node has it, and its image links are pointed at `/api/node/<id>/file-raw`.
+  document is rendered by the node's Shiki, and its image links are pointed at `/api/node/<id>/file-raw`.
   The share token this node holds for the QR code is never used for any of
   this: it would go on a request a later edit could log.
 - **The tree only reads there.** Read and Open in nvim work as here, and
@@ -1180,7 +1179,7 @@ the Later list in the plan.
 | `stale {agentIds}` | parent → page | those remote terminals missed bytes; rebuild as after a reconnect |
 | `remote-said {node, text}` | parent → page | a verb for that node did not go, and why |
 | `GET /api/node/<id>/ls`, `docs`, `markdown`, `file-raw` | page → parent | the node's disk, as the local routes of those names answer; roots bare in the query, qualified in the answer |
-| `files-ask {id, op, root, path?}` / `doc-ask {id, op, root, path, themeId?}` | watch, parent → child | the same reads, answered by `reply` and only to a watcher |
+| `files-ask {id, op, root, path?}` / `doc-ask {id, op, root, path}` | watch, parent → child | the same reads, answered by `reply` and only to a watcher |
 | `node-new-check {nodeId, name, folder}` | page → parent | the node's word on a folder for a new workspace there; a `MoveCheck` |
 | `node-new-workspace {nodeId, name, folder}` | page → parent | make it there; a `NewWorkspaceMade`, then the page shows it |
 | `node-card-done {nodeId, workspaceKey, cardId}` | page → parent | a Needs row's Done, asked of the node |

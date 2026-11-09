@@ -27,7 +27,7 @@
  *   setting it edits; `TextBox` holds the characters being typed, for exactly
  *   as long as they are being typed, and that is the one exception.
  *
- * Nothing in here knows what a theme or a channel is. The pages do, and they
+ * Nothing in here knows what a mascot or a channel is. The pages do, and they
  * say it in these words.
  */
 import {
@@ -117,7 +117,7 @@ export function Dot({ tone, title }: { tone: Tone; title?: string }) {
 
 /**
  * One line the server wants read before anything else on the page — a host
- * that is behind, a bot a stranger found, a registry that did not answer. At
+ * that is behind, a bot a stranger found. At
  * the top of the body and nowhere else, so it is never mistaken for a hint.
  */
 export function Banner({ tone = "warn", children, action }: { tone?: "warn" | "bad"; children: ReactNode; action?: ReactNode }) {
@@ -240,7 +240,7 @@ export function switchesSummary(on: number, total: number): string {
  * tooltip; the switches are the rows of a `Menu`, which stays open while they
  * are flipped and has the keyboard the other menus have, the arrows to walk
  * and Space to flip. A `<select multiple>` would be the native word for this
- * and is a scrolling well that no skin can draw.
+ * and is a scrolling well the stylesheet cannot draw.
  */
 export function SwitchMenu({
   label,

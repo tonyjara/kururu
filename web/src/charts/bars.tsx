@@ -4,8 +4,8 @@
  *
  * Boxes rather than the SVG the columns' lines need, because a bar's name wraps,
  * ellipsises and moves above its bar on a phone by itself, which in SVG would be
- * text measured by hand; and because a box takes its corners from the skin's
- * radius tokens, so a skin with no curves has none here either.
+ * text measured by hand; and because a box takes its corners from the radius
+ * tokens, as the rest of the chrome does.
  */
 import { compact, dollars, percent } from "./format";
 import { inkOf, Legend, useTip } from "./frame";

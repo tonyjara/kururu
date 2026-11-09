@@ -49,7 +49,7 @@ export interface CursorRenderer {
 interface CursorText {
   /** The style actually in force, since `terminals.ts` owns that decision. */
   style(): string;
-  /** The colour to draw the character in — the theme's `cursorAccent`. */
+  /** The colour to draw the character in — the palette's `cursorAccent`. */
   color(): string;
   /** The face the emulator is set in, which is the one the line was drawn in. */
   font(): { size: number; family: string };

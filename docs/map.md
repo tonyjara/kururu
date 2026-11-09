@@ -62,11 +62,8 @@ in this folder.
 | `launchers.ts` | The agents and models the new-tab menu offers. Hand-kept; `/update-models` refreshes it |
 | `lazygit.ts` | LazyGit as a tab: the line here, the line typed on a machine, and the is-it-installed check ahead of both. A clean quit closes the tab |
 | `cursor.ts` | DECSCUSR + OSC 12 in both directions. One parser over one stream |
-| `theme.ts` | Every theme: the chrome's tokens and the emulator's ANSI palette |
+| `theme.ts` | The terminal's palette (`TERMINAL`), which CSS cannot reach, and the `Appearance` a person may still change: the terminal's type and cursor, and the bar. See [styles](styles.md) |
 | `statusbar.ts` | Which of the bottom bar's chips are drawn — Settings → Bottom bar, kept in `appearance.json` as the list switched off |
-| `contrast.ts` | Whether a theme can be read: each token's floor as ink, the pairs read out of the stylesheet, and `CONTRAST_KNOWN`, which records the pairs already under it. See [styles](styles.md) |
-| `skin.ts` | The shape tokens, the icon glyphs, and the twelve paintable parts |
-| `styles.ts` | The registry's format, and every check on a stranger's manifest |
 
 ## `server/` — Node, not Bun (it was Electron's once and the bundles stayed)
 
@@ -96,12 +93,12 @@ in this folder.
 | `src/context.ts` | What every part shares: the subsystems `attach` fills through `provide`, the clients, `send`/`broadcast`, the snapshot and the deltas, and the settings and per-agent state a snapshot is made of |
 | `src/boot.ts` | Listening, the WebSocket upgrade, a client admitted, the host found or started, `attach`, a restart asked for, `shutdown` |
 | `src/ws/dispatch.ts` | A client's message: the shape check, the hands, another node's workspace forwarded, then each area of verbs in `src/ws/` (terminals, panes, workspaces, look, kuru, voice, nodes, machines, services, dbviewer, profiles, board, reader, browser) until one answers. `reply.ts` is how a verb answers |
-| `src/http/router.ts` | An HTTP request: the node join ahead of the gate, the gate, the cookie, then one lookup in the route tables in `src/http/` (server, agents, mcp, nodes, kuru, voice, styles, files), another node's disk, the static app. `respond.ts` holds the body readers and responders |
+| `src/http/router.ts` | An HTTP request: the node join ahead of the gate, the gate, the cookie, then one lookup in the route tables in `src/http/` (server, agents, mcp, nodes, kuru, voice, mascot, files, slots, marks), another node's disk, the static app. `respond.ts` holds the body readers and responders |
 | `src/terminals.ts` | Opening a terminal (here, on a pinned machine, or in a held session) with its launcher's command line; sizes, backlog then output per client, forget and reap; the layout's save |
 | `src/cards.ts` · `src/carddev.ts` | Running and resuming a card and its worktree verbs · a card's dev server |
 | `src/notices.ts` | Status edges and `announce`: notification policy applied per client |
 | `src/madelinks.ts` · `src/conversation.ts` | What an agent made, swept and opened, and files sent on · search, a card's history, turns off reports, Kuru's asides |
-| `src/look.ts` · `src/lending.ts` · `src/thisnode.ts` | Settings saved, styles installed and worn · spawn env, logins, the vault census, lending · this node's summary, address and Telegram lead |
+| `src/look.ts` · `src/lending.ts` · `src/thisnode.ts` | Settings saved and told to every client · spawn env, logins, the vault census, lending · this node's summary, address and Telegram lead |
 | `src/repostatus.ts` · `src/editors.ts` · `src/sweeps.ts` | Workspace dirs, branches and git status · nvim hooks, the census, close and kill · the polls, the web chain, the timers (`startSweeps`/`stopSweeps`) |
 | `src/workspaces.ts` | Profiles, workspaces, focus. The arrangement lives HERE |
 | `src/persist.ts` | The arrangement on disk. Structure only — never respawns. Keys, never boards |
@@ -186,11 +183,10 @@ in this folder.
 | `src/reach.ts` | Which addresses this machine answers to, for the phone's QR |
 | `src/version.ts` | What version this is, stamped in by the bundler |
 | `src/update.ts` | Whether there is a newer kururu. A check, never an install |
-| `src/styles.ts` | Fetching, installing and serving the registry; `measureImage` |
-| `src/studio.ts` | The skins you make — an ordinary installed skin with `local: true` |
-| `src/mascot.ts` | Which sheets, parts and clips; the one endpoint that writes for a client |
+| `src/mascot.ts` | Which sheets and clips, and the import that writes a sheet for a client |
+| `src/http/mascot.ts` | The mascot routes: one sheet (`/api/mascot.png`), the list of them, an import |
 | `src/sounds.ts` | The croak, and the machine's alert sounds — transcoded |
-| `src/appearance.ts` | Theme id and terminal font. Persistence only |
+| `src/appearance.ts` | The terminal's font and cursor, and the bar. Persistence only |
 | `src/keys.ts` | The keymap a user has amended. Persistence only |
 | `src/notify.ts` | When to interrupt somebody, as they left it. Persistence only |
 | `src/launch.ts` | Which agents the new-tab menu leaves out. Persistence only |
@@ -213,10 +209,9 @@ in this folder.
 | `src/App.tsx` | Draws the server's layout; owns the prefix, zen and dialogs |
 | `src/main.tsx` | The root, wrapped in `Crash` |
 | `src/keys.ts` | The prefix, and a `KeyboardEvent` as a lookup string |
-| `src/theme.ts` / `skin.ts` | Tokens onto `<html>`; the other half to the emulators. No React |
 | `src/colors.ts` | A board column's colour as `var(--ws-<name>)` |
 | `src/fonts.ts` | Which fonts *this device* can draw, two ways |
-| `src/icons.ts` | Kururu's own vectors (Lucide, vendored) — see `icons.LICENSE` |
+| `src/icons.ts` | Kururu's icons as vectors (Lucide, vendored — see `icons.LICENSE`), `IconName`, and the write of each onto the root |
 | `src/grid.ts` | Whether a pane was really measured |
 | `src/mouse.ts` | The mouse as the program in the pty sees it |
 | `src/boxdraw.ts` | Box-drawing glyphs painted to the cell |
@@ -250,7 +245,7 @@ in this folder.
 | `src/when.ts` | What a card's dates are called here: month names, and which day a week starts on |
 | `src/cardclick.ts` | A card's click and double-click on one surface: the short wait that keeps a double from opening the card under the editor, and which clicks inside a card are its own. Pure but for the hook, tested. See [layout](layout.md#the-board) |
 | `src/desktop.ts` | The preload bridge, typed. Null in a browser — that's the contract |
-| `src/styles.css` | No hex, no px. See [styles](styles.md) |
+| `src/styles.css` | Every rule, and the look itself: the `:root` block holds the colours and the shape. See [styles](styles.md) |
 
 **Components:**
 
@@ -274,7 +269,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `StatusBar.tsx` (the windo
 keymap, so it cannot document a dead key) · `VoicePill.tsx` (the microphone is
 open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kuru, a tap opens the drawer) ·
 `ReloadNotice.tsx` (who reloaded the window and why, for ten seconds after an agent did) ·
-`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by Kuru's chip in `DrawerChips.tsx`) · `KuruMarkdown.tsx` (a reply's tree drawn for a bubble — headings a step up, a scrolling table, a fence with a copy button — with the words handed back to the drawer) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Web.tsx` the web chain's), and `Secrets.tsx` the lent secrets as four pages draw them: a child's grants under Nodes (kururu's keys, then a project's env files, ssh hosts and GitHub logins, and *Lend a workspace's env files*), what a child holds, the *Held from* line a key's page draws in place of its field, and Agents' *Lend this login to a node*. `Specs.tsx` is each machine's hardware, read and typed, with its history. `Vault.tsx` is the census of all of it on one page, by name, with *Take back* (not from a phone).
+`KuruDrawer.tsx` (the conversation with Kuru: every message's state, every reply's fate, a composer, the Telegram switch; opened by Kuru's chip in `DrawerChips.tsx`) · `KuruMarkdown.tsx` (a reply's tree drawn for a bubble — headings a step up, a scrolling table, a fence with a copy button — with the words handed back to the drawer) · Settings is `web/src/settings/`, not a component: `ui.tsx` is the language every page is written in (a group is a card of rows; a row is a label and one control of a dozen kinds; the in-place danger question; lists, galleries, steps, details), `Settings.tsx` the shell and the list of pages, and one file per page (`Channels.tsx` is the Telegram walkthrough, `Web.tsx` the web chain's, `Terminal.tsx` the terminal's font and cursor), and `Secrets.tsx` the lent secrets as four pages draw them: a child's grants under Nodes (kururu's keys, then a project's env files, ssh hosts and GitHub logins, and *Lend a workspace's env files*), what a child holds, the *Held from* line a key's page draws in place of its field, and Agents' *Lend this login to a node*. `Specs.tsx` is each machine's hardware, read and typed, with its history. `Vault.tsx` is the census of all of it on one page, by name, with *Take back* (not from a phone).
 
 ## `desktop/` — Electron main + preload, and the esbuild step
 
@@ -304,8 +299,6 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
 - `tools/icon.mjs` — the frog as every icon, from one named cell of the sheet.
   Deliberately **not** the user's mascot: an identity that followed a setting is
   not an identity. Run by hand; outputs are committed.
-- `tools/schema.mjs` — publishes the token and part vocabulary to
-  `../kururu-styles`. Bun, because it imports TypeScript.
 - `tools/release-notes.mjs` — one version's section out of `CHANGELOG.md`.
 - `tools/kururu.mjs` — the `kururu` command on a child: `child setup`,
   `doctor`, `update`, `status`, `restart-host`, `share`. Plain node, since it
@@ -319,7 +312,6 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
   `sounds/` holds the croak (`KURURU_SOUNDS` overrides); `spritesheets/` holds the
   frog and `guide.png`.
 - `web/public/` — copied verbatim into `web/dist`. Icons and the manifest; **no
-  fonts** — a skin's face arrives with the skin and is written as an `@font-face`
-  at runtime.
+  fonts**.
 - `.github/workflows/release.yml` — what a tag sets off.
 - `.claude/skills/release/` — how `CHANGELOG.md` is drafted and a version cut.

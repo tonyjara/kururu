@@ -1,9 +1,8 @@
 /**
  * Who is speaking, as a picture: a microphone for you, a speaker for Kuru.
  *
- * Drawn here rather than taken from the skin's icon set on `SidebarIcon`'s
- * reasoning — pictures of physical objects that mean the same thing in any
- * chrome — and kept together because they are used as a pair. The Kuru
+ * Drawn here rather than taken from the icon set, as `SidebarIcon` in
+ * `StatusBar.tsx` is, and kept together because they are used as a pair. The Kuru
  * drawer is one timeline of your messages and Kuru's replies, and which way
  * the words went is the one thing about each line that must not be misread;
  * the status bar's chip wears the same two over its two counts.

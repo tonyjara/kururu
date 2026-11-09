@@ -274,11 +274,8 @@ function WatchedBy() {
  * A window with its left column ruled off: the sidebar, which is the thing
  * this button opens and closes. It was three lines until 2026-10-18, and three
  * lines say "a list of things" — a menu — where this says which part of the
- * window moves. Drawn rather than taken from the skin's icon set for the
- * reason the cog and the QR code in the sidebar are: the set names the glyphs
- * a *skin* is expected to restyle, and a new entry in it would be one more
- * thing every future skin has to answer for to gain nothing — this is the
- * same drawing in any chrome.
+ * window moves. Drawn here rather than taken from the icon set
+ * (`web/src/icons.ts`), which has no drawing of it.
  */
 function SidebarIcon() {
   return (
@@ -296,8 +293,7 @@ function SidebarIcon() {
  * Not a picture of two panes, though that was the first drawing. A pane is what
  * you are *in*, so a diagram of one says "panes" and leaves you to guess the
  * verb — and the verb is the whole button, since the switcher in the pane's own
- * corner is already the noun. Drawn here rather than taken from the skin's icon
- * set on `SidebarIcon`'s reasoning.
+ * corner is already the noun. Drawn here as `SidebarIcon` is.
  */
 function SwapIcon() {
   return (
@@ -310,10 +306,8 @@ function SwapIcon() {
 }
 
 /**
- * A keyboard, drawn here rather than taken from the skin's icon set on
- * `SidebarIcon`'s reasoning: the set names the glyphs a skin is expected to
- * restyle, and this is a picture of a physical object that means the same thing
- * in any chrome.
+ * A keyboard, drawn here as `SidebarIcon` is: the icon set has no drawing of
+ * it.
  */
 function KeysIcon() {
   return (

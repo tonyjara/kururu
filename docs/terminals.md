@@ -245,7 +245,7 @@ cursor did not sit on a character, it replaced one — normal-mode nvim over
 because the missing letter is the one you are looking at. `cursortext.ts` wraps
 `renderCursor` the way `boxdraw.ts` wraps `fillText`, and asks the pane for the
 three things the renderer cannot answer: which style is *really* in force, what
-the theme calls text-under-cursor, and which face the line was drawn in. Only the
+the palette calls text-under-cursor, and which face the line was drawn in. Only the
 block is covered, because only the block covers anything.
 
 **The emulator's offscreen textarea must not draw a caret.** ghostty-web parks
@@ -315,12 +315,13 @@ none of the three reaches a phone's clipboard until the phone is on `https`.
   halves disagreeing types into the program.
 - **`boxdraw.ts`** paints box-drawing and block glyphs to the cell, so a rule is
   unbroken whatever the font does.
-- **Restyle an emulator; never rebuild one to restyle it.** The renderer's theme
-  is set directly (`renderer.setTheme`) rather than through `options.theme`. The
-  palette also went to the WASM terminal at construction and nothing updates it
-  there — but that half only answers colour *queries*, and the renderer's copy is
-  what every cell is drawn from. Rebuilding would cost every visible terminal a
-  backlog and every warm one its scrollback.
+- **Restyle an emulator; never rebuild one to restyle it.** The renderer's
+  colours are set directly (`renderer.setTheme`) rather than through
+  `options.theme`, and that reaches the selection and the cursor only. The
+  palette every cell is drawn from went to the WASM terminal at construction and
+  nothing updates it there, which is why it is a constant — see
+  [styles](styles.md#why-the-terminals-palette-is-a-constant). Rebuilding would
+  cost every visible terminal a backlog and every warm one its scrollback.
 - **The font setting is prepended to the built-in stack, never a replacement.**
   The stack ends in four patched Nerd Font faces so an agent TUI's devicons are
   not tofu, and somebody naming a font has not asked for those to stop working.

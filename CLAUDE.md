@@ -21,9 +21,9 @@ and draws it, exactly as the phone does.
 
 1. **Never modify `../ghosttown`.** Kururu borrows *from* it and the traffic is
    one-way; if something there needs changing, raise it with the user.
-   **`../kururu-styles` is different and is ours** — see
-   [styles](docs/styles.md#the-registry) for the two rules that cross that
-   boundary.
+   **`../kururu-styles` is ours, and kururu no longer reads it**: the theme
+   registry it served was taken out on 2026-11-09, so leave it alone unless
+   the user asks.
 2. **The agents are real, and they are the user's.** Real processes, real ptys,
    real project directories. `input` types into one keystroke for keystroke;
    `kill-agent` signals its whole process group. There is no sandbox and no
@@ -102,7 +102,6 @@ bun run slot status    # the slot queue agents share for builds and simulators; 
 bun run restore <repo> # a new Mac put back from the backup; refuses while a server is up
 bun run typecheck      # root tsconfig + web tsconfig + the JS half (tsconfig.js.json)
 bun test               # pure functions only — see docs/testing.md
-bun run schema         # publish the token and part vocabulary to ../kururu-styles
 bun run build          # web → web/dist, server → desktop/dist/*.mjs, the talk-key hook → desktop/dist/talkkey
 bun run build:talkkey  # just the hook (Swift, through xcrun; skipped with a warning without Xcode)
 bun run dist           # signed, notarized DMG + zip. `dist:unsigned` for testing
@@ -159,13 +158,14 @@ The load-bearing invariants, one line each, with the argument behind the link:
   deletes a card that is there.** Every change goes through `Store.syncProfile`; a
   database that will not open is a server that does not start. →
   [more](docs/invariants.md#boards-in-the-database)
-- **Never write a hex or a px into `styles.css`.** Both axes are tokens and
-  `web/test/theme.test.ts` fails on a drift. → [styles](docs/styles.md)
-- **A token has a floor, and the pairs are read out of the stylesheet**
-  (`shared/contrast.ts`); `CONTRAST_KNOWN` records, not approves, the pairs
-  already under it. → [more](docs/invariants.md#contrast-floors)
-- **Changing a theme must never resize a pty; changing a skin does**, and that is
-  intended. → [styles](docs/styles.md#one-palette-and-a-theme-names-both-halves)
+- **Kururu has one look, and it is the `:root` block of `web/src/styles.css`.**
+  Nothing writes a colour or a shape at run time; the terminal's palette is
+  `TERMINAL` in `shared/theme.ts`, kept in step with `--bg` by hand. Themes,
+  skins, packs, the registry and the studio were removed on 2026-11-09: do
+  not bring a switch back without the user asking. → [styles](docs/styles.md)
+- **A terminal's font change re-measures and nothing else about the look
+  does.** A proposal is a pty resize and a SIGWINCH into every agent. →
+  [terminals](docs/terminals.md#the-size-policy)
 - **`files.ts`: resolve, check, realpath, check again — refuse, never clamp.**
   Roots are never learned from a client. →
   [architecture](docs/architecture.md#the-servers-shape)
@@ -282,8 +282,9 @@ Match ghosttown — the user writes in a distinctive register and kururu follows
 Shipped: the three-process split, tiled terminals with the server owning the
 size, the multiplexer hierarchy and dragging, the markdown reader with
 server-side highlighting and draggable document tabs, the file tree (markdown to the
-reader, everything else to nvim), foreground notifications, the styles registry, the
-skin studio, the plan-usage bar, and a signed self-updating app.
+reader, everything else to nvim), foreground notifications, the plan-usage bar,
+and a signed self-updating app. The styles registry and the skin studio shipped
+and were removed on 2026-11-09, for one look to be started again from.
 
 Open, roughly in order — the argument for each is in `PLAN.md`:
 

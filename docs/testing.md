@@ -13,8 +13,7 @@ against a kururu nobody shared), `update` (which of two versions is newer,
 including the prerelease rule and the one where 0.10 is not smaller than 0.9),
 `sounds` (the catalogue against a temp directory), `cursor` (DECSCUSR and OSC 12
 in both directions, every spelling of a colour, a sequence cut in half by a read
-boundary, and that the two directions round-trip), `styles` (the registry format
-and every check applied to a manifest a stranger wrote — no network, no disk),
+boundary, and that the two directions round-trip),
 `screen` (serialize, rebuild, compare the buffers; and the hidden cursor),
 `layout` (asserting *through* `JSON.stringify`), `days` (that a day no calendar
 has is refused rather than rolled into the next month, and that a change of
@@ -28,11 +27,10 @@ dependency, since Shiki's wasm has to load), and the pane tree in `web/test`,
 including that a number arriving from a client cannot enter the tree unless it is
 one, and `grid`, which holds the clamp-floor refusal.
 
-`web/test/theme.test.ts` holds both style axes in both directions, and then
-whether the result can be *read* — every colour pair the stylesheet states,
-against every theme, ratcheted against the nineteen that are under their floor
-today. `contrast` is the arithmetic under it and the two ways it declines to
-answer. See [styles](styles.md).
+`web/test/usage-palette.test.ts` reads the stylesheet's `:root` and holds the
+chart colours there to what `shared/chartcolor.ts` works out, and to being told
+apart. Nothing else checks the look: the hex and px lint and the contrast floors
+went with the themes on 2026-11-09. See [styles](styles.md).
 
 ## Testing by hand
 
@@ -44,17 +42,16 @@ or `cat` rather than `claude`, and spend no tokens proving that plumbing works.
 
 ## The isolated instance
 
-Anything that writes to config, installs a style, or acts as a second real client
-goes in an isolated instance rather than against the user's server. A second real
-client resizes their live agents; an install writes into their `~/.config/kururu`.
+Anything that writes to config or acts as a second real client goes in an
+isolated instance rather than against the user's server. A second real client
+resizes their live agents; a settings write lands in their `~/.config/kururu`.
 
 ```sh
 KURURU_PORT=7817 \
 KURURU_HOST_SOCK=/tmp/k2/ptyhost.sock \
 KURURU_STATE_DIR=/tmp/k2 \
 KURURU_DATA_DIR=/tmp/k2/data \
-KURURU_CONFIG_DIR=/tmp/k2/config/kururu \
-KURURU_STYLES_URL=http://127.0.0.1:8899
+KURURU_CONFIG_DIR=/tmp/k2/config/kururu
 ```
 
 Kururu's own variables only, and never an XDG one. The host's environment is
@@ -82,11 +79,6 @@ checkout's `run.mjs --watch`, which builds into the same `desktop/dist` the
 real runner uses — identical output, but do not save a server file while both
 are up, or two esbuilds race for one file. Its host lands at
 `/tmp/k2/ptyhost.sock`; `bun run kill-ptyhosts /tmp/k2` clears it up.
-
-Registry testing serves the sibling checkout with
-`python3 -m http.server 8899 --bind 127.0.0.1` from `../kururu-styles`, and a
-scratch copy under `/tmp` is where `build-index.mjs` is run — never in the
-checkout.
 
 **Run it from a copy outside `~/Desktop`, with `node-pty` copied rather than
 linked.** The isolated server starts its host as the real one does, a launchd
@@ -310,14 +302,14 @@ Kept short on purpose; the detail is in git history.
   throwaway servers on real sockets: a nodemon-shaped parent that respawns its
   listener stays down, a server that ignores SIGTERM is gone after the grace,
   and a stale pid is refused.
-- **Styles:** installing a theme, a skin, a mascot and a pack writes and
+- **Styles** (removed 2026-11-09)**:** installing a theme, a skin, a mascot and a pack writes and
   activates; `/api/styles/asset` serves a font and refuses a traversal;
   `/api/styles/preview` proxies a sheet; `1.10.0 > 1.0.0` the right way round;
   removing a style leaves the id in `appearance.json` and falls back at draw time.
   The registry's own rules were exercised in a scratch copy: a changed colour
   under an unchanged version refused, a remote `url()` refused, a mascot clip
   running off its sheet refused.
-- **The studio:** a skin created from nothing was worn at once, a PNG posted to it
+- **The studio** (removed 2026-11-09)**:** a skin created from nothing was worn at once, a PNG posted to it
   came back with its size, forking Handheld copied its pictures and re-pointed the
   manifest, a registry install over a local skin of the same id was refused, and a
   non-PNG, a path and an upload to a registry skin were each refused with a

@@ -1089,9 +1089,8 @@ blob an older server wrote, beside `dev`, so it does not ride along into every
 snapshot. Neither checks what it was — a name, a null or junk all load the same.
 
 The palette itself stayed, because a board column wears one: `WORKSPACE_COLORS`,
-the theme's `workspace` block and its `--ws-*` tokens keep their name, which is
-the styles registry's vocabulary, and the picker is `ColorPicker.tsx`, the
-profile board's now.
+and the `--ws-*` tokens in the stylesheet keep their name, and the picker is
+`ColorPicker.tsx`, the profile board's now.
 
 ## The workspace row
 

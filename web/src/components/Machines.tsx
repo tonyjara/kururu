@@ -178,8 +178,8 @@ function MachineRing({ label, percent, figure }: { label: string; percent: numbe
 
 /**
  * Two units in a rack, a light on each: a server, which is what the chip is
- * about whether the box is a VPS or a PC. Drawn here rather than taken from
- * the skin's icon set on `SidebarIcon`'s reasoning.
+ * about whether the box is a VPS or a PC. Drawn here as `SidebarIcon` is:
+ * the icon set has no drawing of it.
  */
 function ServerIcon() {
   return (

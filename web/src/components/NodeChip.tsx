@@ -9,7 +9,7 @@
  * in what the somewhere is: a machine is an ssh host kururu types into, a
  * node is another kururu doing the work itself. The hue is the node's own
  * (`nodeHue`, off its id), reached as one of the board palette's tokens, so
- * every theme says what it looks like and no hex is written anywhere.
+ * no hex is written here.
  */
 import type { CSSProperties, ReactNode } from "react";
 import { nodeHue } from "../../../shared/remote";

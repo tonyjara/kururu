@@ -115,18 +115,6 @@ in `~/Library/Sounds` is allowed to be called `deep bell`.
 Picking a sound in Settings plays it — a list of words is not a list of noises,
 and it is also where the autoplay unlock happens.
 
-**And a third source, which is the only one anybody chose:** a `sound` entry
-installed from the styles registry, so a pack can bring the noise its window
-makes. It reaches the catalogue through `installedSounds` in
-`server/src/styles.ts` rather than a `readdir`, it sits between kururu's own and
-the machine's so that a registry entry cannot take the `croak` id out from under
-every existing `notify.json`, and it is the one source whose formats are
-restricted to what a browser decodes unaided — there is no `afconvert` on Linux
-and an entry that needed one would be silence on half the machines that installed
-it. Installing a pack with `activate` writes `notify.json`'s `sound` and nothing
-else: `enabled` and `events` are a decision about being interrupted, which is not
-a style's to make. See [styles](styles.md#sounds).
-
 ## macOS delivery, the expensive way
 
 A branded dev shell **must be re-signed**, or macOS silently refuses its

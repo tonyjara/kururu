@@ -13,9 +13,9 @@
  * at midnight.
  *
  * Server-owned rather than per device, which is the one arguable call in the
- * feature and goes the way every other decision in kururu goes — the theme, the
+ * feature and goes the way every other decision in kururu goes — the font, the
  * keymap, the mascot. Picking the croak on the desktop should be picking it on
- * the phone, for the reason a theme picked on one is worn on the other: two
+ * the phone, for the reason a font picked on one is set on the other: two
  * clients of one server are one application. What genuinely *is* per device
  * stays per device and is not in this file at all — whether the browser will
  * show a notification is its own permission, and whether a terminal is on screen

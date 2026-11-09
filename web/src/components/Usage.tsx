@@ -13,8 +13,7 @@
  * A mark rather than the word, because two of these side by side are told
  * apart by whose logo it is faster than by reading, and gray because it names
  * the account and says nothing about it — the rings carry the colour. Drawn
- * here rather than taken from the skin's icon set, on `SidebarIcon`'s
- * reasoning: a product's mark is the same drawing in any chrome.
+ * here because a product's mark is not one of the icon set's drawings.
  *
  * Every measure fills rather than drains, which went the other way first.
  * Every other measure in this window climbs — the context ring on an agent

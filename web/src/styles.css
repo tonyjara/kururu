@@ -470,9 +470,8 @@ kbd {
  * band's left end shortens to them and the strips stay on its row. In the
  * window it starts after the traffic lights, which a 38px band is centred on;
  * the 78px is the inset the profile row wore when it stood up here. The rule
- * is an inset shadow and not a border for the reason the status bar's is: the
- * pane strips this has to be one line with have the skin's border, and one
- * mechanism along the whole band is what keeps it one line.
+ * is an inset shadow and not a border, as the pane strips' and the status
+ * bar's are: one mechanism along the whole band is what keeps it one line.
  */
 .sidebar-top {
   display: flex;
@@ -673,7 +672,7 @@ kbd {
  * whose whole subject had vanished, heading and all. The floor is a fraction of
  * the window rather than a count of rows, in the same idiom and for the same
  * reason as the cap on `.dev-list` below: it is a share of a screen nobody has
- * measured, and it does not drift when a skin changes the size of a row.
+ * measured, and it does not drift when the size of a row changes.
  */
 .side-agents {
   flex: 1;
@@ -747,7 +746,7 @@ kbd {
  * last column.
  *
  * Shifted by half of *itself* rather than by a measured amount, which is the
- * only form of this that survives a skin with a bigger type ramp: the button's
+ * only form of this that survives a bigger type ramp: the button's
  * own width cancels, and what is left is the chip's half-width — 5.5px of an
  * 11px dot — against the gutter the two already share.
  */
@@ -1014,8 +1013,7 @@ kbd {
   font-size: var(--fs-md);
 }
 
-/* The positioned ancestor the selected row's frame is drawn against — see the
-   two selected rows under the skin's parts. */
+/* The positioned ancestor the drop line below is drawn against. */
 .agent-list .agent-item {
   position: relative;
 }
@@ -1307,7 +1305,7 @@ kbd {
 }
 /* Shut, the caret points at the thing it would open rather than down the
    list — the disclosure convention everywhere, and the reason it is a rotation
-   of the one caret rather than a second icon a skin would have to know about. */
+   of the one caret rather than a second icon. */
 .drawer-caret-shut {
   transform: rotate(-90deg);
 }
@@ -1397,8 +1395,8 @@ kbd {
 
    So the sprite is lifted until its floor is the baseline, in `em` — the
    distance from a line box's bottom to its baseline is a property of the type,
-   and the type is the skin's, so a pixel ramp at 8px wants a different number of
-   pixels and the same fraction of an em. The dot keeps the centre it always
+   so a different size of type wants a different number of pixels and the same
+   fraction of an em. The dot keeps the centre it always
    had; it is not standing on anything. */
 .mascot {
   position: absolute;
@@ -1540,16 +1538,15 @@ kbd {
 
    The agent-status tokens were the obvious first choice and are the wrong set,
    which is worth writing down because they will look right to the next person
-   reading this. `idle` is a muted grey-blue in all five themes and reads as "off"
+   reading this. `idle` is a muted grey-blue and reads as "off"
    rather than as "fine"; worse, `blocked` is *yellow*, because for an agent it
    means "waiting for you" and not "running out" — an account about to hit its
    ceiling would have been drawn in the calmest colour on the row.
 
-   So: `accent`, which is the green every theme already uses for its live colour;
-   `working`, orange in all five and the one token whose whole job is "this wants
-   your attention"; and `dangerBg` rather than `danger`, because those two differ
-   on the theme where it matters and `danger` is documented as ink while this is
-   a fill. */
+   So: `accent`, which is the green of everything live; `working`, orange and
+   the one token whose whole job is "this wants your attention"; and `dangerBg`
+   rather than `danger`, because `danger` is documented as ink while this is a
+   fill. */
 .usage-fill {
   display: block;
   height: 100%;
@@ -1573,8 +1570,7 @@ kbd {
    fill that stops between two of them is a figure you can count off, where a
    plain sliver is only "some". Drawn over both the fill and the track so the
    segments line up across the boundary rather than marching out of step with
-   it, and in the chrome colour rather than a dark so they read as gaps on every
-   theme. */
+   it, and in the chrome colour rather than a dark so they read as gaps. */
 .usage-bar::after {
   content: "";
   position: absolute;
@@ -2220,8 +2216,7 @@ a.machine-name:hover {
 
 /* The sidebar's column, on the other side. Same width rule and for the same
    reason — the chosen width is kept and the rendering yields to a small window —
-   and the same flat chrome, without the skin's sidebar picture, which is drawn
-   for a column that sits on the left. */
+   and the same flat chrome. */
 .files {
   position: relative;
   width: min(var(--files-w, 240px), 33vw);
@@ -2237,7 +2232,7 @@ a.machine-name:hover {
    sidebar's top and the pane strips it stands beside, the band's tone, the
    band's rule under it, and everything in it centred on the line the tabs
    are. It was built to a strip's measurements before there was a band — the
-   well's gutters as padding, the skin's strip border borrowed — so that the
+   well's gutters as padding, the strip's border borrowed — so that the
    two would nearly agree; a band one height everywhere needs none of that
    arithmetic. */
 .files-head {
@@ -2517,9 +2512,7 @@ a.button {
    window's edge, with the toggle and the workspace's name at the head of the
    top-left strip (`.strip-lead`) where the sidebar's top had them — the
    sidebar folds into the band rather than dropping a bar over the panes. Zen
-   has no band; a phone's one pane has no gutter to show. A well a skin has
-   painted keeps its picture, which is the point of it, and the strips alone
-   carry the band across. */
+   has no band; a phone's one pane has no gutter to show. */
 .app-band .panes {
   padding-top: 0;
 }
@@ -2663,14 +2656,13 @@ a.button {
   gap: 1px;
   /* The band's height, every strip, wherever its pane is — see `--top-h` —
      with the tabs centred in it: the padding is what is left of the band once
-     a tab (`--tab-row`, its own 3px above and below, the skin's tab frame) and
-     the skin's strip frame are taken out, halved. A floor rather than a
-     height, so a strip holding something taller — a phone's thumb-sized
-     buttons — grows rather than clips. */
+     a tab (`--tab-row`, its own 3px above and below) is taken out, halved. A
+     floor rather than a height, so a strip holding something taller — a
+     phone's thumb-sized buttons — grows rather than clips. */
   min-height: var(--top-h);
   padding: calc((var(--top-h) - var(--tab-row) - 6px) / 2) 4px;
   /* The band's tone — see `--strip` — and the band's rule along its bottom,
-     an inset shadow because the border here is the skin's. */
+     an inset shadow as it is along the whole band (see `.sidebar-top`). */
   background: var(--strip);
   box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
   flex: none;
@@ -2754,7 +2746,7 @@ a.button {
 /* Another node, by name, in its own hue — see `NodeChip.tsx`. The machines'
    chip's shape, because it says the same kind of fact; the hue is the node's
    (`nodeHue`), set as `--node-hue` from one of the board palette's tokens on
-   the chip or on the box it tints, so every theme says what it looks like. */
+   the chip or on the box it tints. */
 .node-chip {
   flex: none;
   display: inline-flex;
@@ -2901,7 +2893,7 @@ a.button {
    nothing to stick to, and it sits exactly where it always has.
 
    `right` is `--actions-w`, `.tab-actions`'s own width, with no fallback of
-   its own: that width is a skin's button size and, on a solo pane, a "2/3" of
+   its own: that width is the buttons' size and, on a solo pane, a "2/3" of
    varying length, so it is read off the box in `Panes.tsx` rather than written
    down a second time here where it could fall out of step. */
 .tab-new {
@@ -3247,7 +3239,7 @@ a.button {
  *
  * It reads exactly like a terminal cursor in the wrong place, which is what
  * made it expensive: it is not one. The terminal's cursor is drawn on the
- * canvas by `renderCursor`, in the theme's colour and the style Settings names
+ * canvas by `renderCursor`, in the palette's colour and the style Settings names
  * — a green block here — and it was measured to be in the right place all
  * along. This is a 1px caret in `caret-color`, which resolves to white because
  * `:root` sets `color-scheme: dark` and a bare textarea then inherits the UA's
@@ -3271,9 +3263,8 @@ a.button {
    * sidebar with it, because the thing that no longer fits is the *viewport*.
    *
    * 16 is a literal here and must stay one. It is not a size the design chose,
-   * it is the threshold Safari checks, so it cannot come from the type ramp —
-   * a skin is entitled to make `--fs-xl` eight pixels, and the pixel skin does
-   * exactly that sort of thing, which would silently put the zoom back. Nothing
+   * it is the threshold Safari checks, so it cannot come from the type ramp,
+   * where a smaller `--fs-xl` would silently put the zoom back. Nothing
    * is ever drawn at it: the box is 1x1, `opacity: 0` and clipped.
    *
    * The other focusable element, `.term` itself, is `contenteditable` and also
@@ -3393,10 +3384,8 @@ a.button {
   /* The frame's tone — this is the bottom edge of the frame the top band is
      the top of, see `--chrome-low` — and the rule along its top, the whole
      width of the window, that says where the panes and the drawers stop and
-     the bar begins. A shadow rather than a border because the skin owns this
-     box's border, as a frame (`--p-statusbar-frame`) and a width, and a
-     theme's line under a skin's picture is the one thing a skin cannot take
-     off. */
+     the bar begins. An inset shadow rather than a border, as the top band's
+     rule is. */
   background: var(--chrome-low);
   box-shadow: inset 0 var(--border) 0 var(--line);
   font-size: var(--fs-base);
@@ -4255,8 +4244,7 @@ html.pill-page #root {
      that existed — and stopped being true the moment the sidebar could cover
      the window, at which point the cog in its own footer opened Settings
      *behind* it. The stack, bottom to top, is: panes and their dividers, the
-     sidebar and the scrim that dismisses it, dialogs, menus, and the skin's
-     effect layer over the lot. */
+     sidebar and the scrim that dismisses it, dialogs, and menus. */
   z-index: 50;
 }
 
@@ -4714,7 +4702,7 @@ html.pill-page #root {
    dragged, but a line of Kuru's across fifteen hundred pixels is one the eye
    loses its way back along, so what is written in it — the list, the live
    line, the composer, the search, the node chips — keeps a measure set in
-   the type's own size (a skin with larger type keeps the same words to a
+   the type's own size (larger type keeps the same words to a
    line), centred, with the drawer's ground either side. `--kuru-gutter` is
    nothing until the drawer is wider than that: the percentage is resolved
    where it is used, against the drawer, since every rule using it is on a
@@ -5187,7 +5175,7 @@ html.pill-page #root {
   display: none;
 }
 /* The words a search found. The line keeps its own ink and only its ground
-   changes, so whoever spoke it, and in every theme, it reads as it did. A word
+   changes, so whoever spoke it, it reads as it did. A word
    found by a typo is underlined instead: lit, but not claiming to be what you
    typed. */
 .kuru-hit {
@@ -5528,8 +5516,8 @@ button.kuru-quote:hover {
 .kuru-md li > * + * {
   margin-top: 0.25em;
 }
-/* A task's box stands where the bullet was; the browser's own box, which every
-   theme's ink reaches through `accent-color`. */
+/* A task's box stands where the bullet was; the browser's own box, which
+   `--accent` reaches through `accent-color`. */
 .kuru-md-task {
   list-style: none;
   margin-left: -1.4em;
@@ -6212,7 +6200,7 @@ a.needs-go {
 /* Who put a card in the profile board's Needs you, on the card and on its
    row here: Kuru in the accent, the one the user did not do and should
    notice, and You in the quiet ink of a count — the two pairs the count
-   pills already wear, so no new pair of inks to hold to a floor. A word in a
+   pills already wear, so no new pair of inks. A word in a
    pill rather than a glyph, so it reads at a glance on a phone too. */
 .needs-by {
   flex: none;
@@ -6346,13 +6334,11 @@ a.needs-go {
 
    Three grounds, in the window's own order: the body is `--bg`, a card is
    `--chrome`, a control is `--chrome-high` or, for a field, back on `--bg`
-   as a well. The dialog's chrome and the list down its side are the skin's
-   dialog paint, like every other dialog.
+   as a well. The dialog's chrome and the list down its side are drawn as
+   every other dialog's are.
 
-   Spacing is four numbers set once on the dialog. They are not skin tokens —
-   `docs/styles.md` says why padding and gap never were — but they are set in
-   one place so that every row, card and gutter in here moves together, and
-   the test knows them by name.
+   Spacing is four numbers set once on the dialog, in one place so that every
+   row, card and gutter in here moves together.
    -------------------------------------------------------------------------- */
 
 .st-dialog {
@@ -6664,9 +6650,8 @@ label.st-row {
   color: var(--danger);
 }
 
-/* The switch. Sized in em so a skin's type ramp scales it; the track takes
-   its corner from the skin, so a pixel skin gets a square one. The same
-   drawing is a menu row's, on a span because a row is already the button. */
+/* The switch. Sized in em so it follows the type. The same drawing is a
+   menu row's, on a span because a row is already the button. */
 .menu-switch {
   position: relative;
   flex: none;
@@ -6676,8 +6661,8 @@ label.st-row {
   background: var(--line);
   transition: background 120ms;
 }
-/* No border on this one: at this size a pixel skin's thick line left the thumb
-   no room, and it hung out of the bottom of the track. */
+/* No border on this one: at this size a thick line left the thumb no room,
+   and it hung out of the bottom of the track. */
 .menu-switch::before {
   content: "";
   position: absolute;
@@ -7923,10 +7908,9 @@ a.st-btn {
   gap: 6px;
 }
 
-/* A word and not an icon, deliberately: the skin's icon set names jobs the
-   chrome does everywhere — close, run, restart, caret — and a glyph for this
-   would be a token added to `shared/skin.ts`, and therefore to the registry's
-   schema, for one button in one dialog. Dim and borderless until it is pointed
+/* A word and not an icon, deliberately: the icon set names jobs the chrome
+   does everywhere — close, run, restart, caret — and a drawing for this would
+   be one added for one button in one dialog. Dim and borderless until it is pointed
    at, so it sits beside the title without competing with it. */
 .reach-toggle {
   padding: 1px 5px;
@@ -8052,10 +8036,9 @@ a.st-btn {
    one place with a measure, a line height meant for prose, and a scrollbar of
    its own. Everything else in a pane is sized by the terminal inside it.
 
-   And the one place with a zoom. It is the skin's step *multiplied*, never a
-   size of its own: a skin is entitled to move `--fs-lg` — a pixel chrome might
-   set it to 12px where the default sets 13 — and a reader that named a px
-   would be a zoom that quietly undid whichever skin was on. `web/src/zoom.ts`
+   And the one place with a zoom. It is the type step `--fs-lg` *multiplied*,
+   never a size of its own, so the reader stays on the ramp the rest of the
+   window is set in. `web/src/zoom.ts`
    writes the multiplier onto the root element and says why it is per device;
    the fallback here is what a window paints with before that module has run.
    Every size below this one is an `em` or a `ch` off it, so the headings, the
@@ -8127,8 +8110,8 @@ a.st-btn {
      picker that leaves you somewhere else when it closes. */
   font-size: var(--fs-xl);
   /* A search field is a shape Safari draws itself unless it is told not to,
-     and a skin that has decided what a corner looks like should not be
-     overruled by the platform's idea of what a search box is. */
+     and the corner drawn here should not be overruled by the platform's idea
+     of what a search box is. */
   appearance: none;
   -webkit-appearance: none;
 }
@@ -8309,10 +8292,10 @@ a.st-btn {
 }
 
 /* Relative rather than `--fs-md`, which is what it was: a fenced block sized
-   off the skin's ramp directly is the one thing in this document that would sit
+   off the ramp directly is the one thing in this document that would sit
    still while the prose around it zoomed, and a README read at 175% with 12px of
    code in the middle of it is worse than either size on its own. The ratio is
-   the default skin's own — 12 over 13 — so nothing moves at 100%. */
+   the ramp's own — 12 over 13 — so nothing moves at 100%. */
 .md pre {
   font-family: var(--mono);
   font-size: 0.92em;
@@ -9663,7 +9646,7 @@ a.st-btn {
 }
 /* The words being commented on, while the field has the keys and the page's
    selection with them: the accent laid thinly over the words, so they stay
-   readable in every theme. */
+   readable. */
 ::highlight(kururu-quote) {
   background-color: color-mix(in srgb, var(--accent) 32%, transparent);
 }
@@ -10802,10 +10785,10 @@ html.note-page #root {
 }
 
 /* Settings → Usage (`settings/Usage.tsx`) and the charts it draws
-   (`charts/`). A chart's colours are written by `applyTheme` from
-   `shared/chartcolor.ts`, so only ink and chrome tokens are named here; the 2px
-   between marks is `--border-thick` because it is the same surface gap a skin's
-   thick rule is, and the axis's gutter is in em so it grows with the type. */
+   (`charts/`). A chart's colours are the `--chart-*` tokens in `:root`, so
+   only ink and chrome tokens are named here; the 2px between marks is
+   `--border-thick` because it is the same surface gap the thick rule is, and
+   the axis's gutter is in em so it grows with the type. */
 .ch-filters {
   display: flex;
   flex-wrap: wrap;

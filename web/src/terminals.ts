@@ -82,10 +82,11 @@ const RESIZE_SETTLE_MS = 60;
  * What the emulator is currently painting with, and what it is set in.
  *
  * Module state rather than an argument, because an emulator is built at the
- * moment a pane first borrows it and that is nowhere near the moment a theme is
+ * moment a pane first borrows it and that is nowhere near the moment a font is
  * chosen: the pool builds terminals all afternoon and every one of them has to
- * come up wearing whatever is on. So the current values live here, `restyle`
- * writes them and walks the pool, and `create` reads them.
+ * come up in whatever is set. So the current values live here,
+ * `applyTerminalAppearance` writes `type` and walks the pool, and `create`
+ * reads them.
  *
  * Colours go to the emulator rather than to the stylesheet because it paints
  * into a canvas and CSS cannot reach any of it. There is one palette,
@@ -814,9 +815,9 @@ interface Pooled {
    */
   shown(on: boolean): void;
   /**
-   * Wear whatever `palette` and `type` now say. A no-op until the emulator
-   * exists, which costs nothing: one built after a theme change reads the same
-   * two module variables in its constructor and comes up already wearing it.
+   * Put on what `type` now says, and the cursor's colour. A no-op until the
+   * emulator exists, which costs nothing: one built later reads the same
+   * module variables in its constructor and comes up already set in them.
    */
   restyle(remeasure: boolean): void;
   /**
@@ -1105,7 +1106,7 @@ function create(agentId: string): Pooled {
        * over and never puts back. The three questions it cannot answer for
        * itself are all decisions this file owns: which style is really in force
        * (the unfocused one draws nothing, and must draw no glyph either), what
-       * the theme calls the colour of text under a cursor, and which face the
+       * the palette calls the colour of text under a cursor, and which face the
        * line it is covering was drawn in.
        */
       installCursorText(em.renderer as unknown as CursorRenderer, {
@@ -1334,13 +1335,13 @@ function create(agentId: string): Pooled {
     };
 
     /**
-     * Wear the theme, with whatever the program has said about its cursor
+     * The palette, with whatever the program has said about its cursor
      * painted over the top of it.
      *
      * `OSC 12` is a colour for one thing in one terminal, and the renderer's
      * palette is the only place that colour can go — there is no per-cursor
-     * override in it, so the theme is handed over with one field replaced. It
-     * outranks the theme for the same reason DECSCUSR outranks the setting, and
+     * override in it, so the palette is handed over with one field replaced. It
+     * outranks the palette for the same reason DECSCUSR outranks the setting, and
      * it is a null beside the palette rather than a value copied into it so
      * that `OSC 112` has something to fall back to.
      */
@@ -1401,21 +1402,18 @@ function create(agentId: string): Pooled {
      * is the selection and the cursor. It does not reach a cell, and no repaint
      * will make it.
      *
-     * It is called anyway, because those two are worth having and cost nothing.
-     * The palette proper moves only when the window is reloaded and the wasm
-     * terminal is built again — see `applyTerminalAppearance`, which is where
-     * that is decided.
+     * That is all that is asked of it: the palette is a constant, settled when
+     * the terminal is built, and the one colour that moves afterwards is the
+     * cursor's, when a program sends `OSC 12`.
      *
      * The repaint afterwards is not optional, and finding that out is what this
      * comment is for. The render loop is self-rescheduling, so it was tempting
-     * to assume the next frame would simply be the new palette — but it renders
+     * to assume the next frame would simply have the new colour — but it renders
      * with `forceAll = false` and the renderer redraws only the rows the buffer
      * reports dirty. An agent redraws differentially and a settled one reports
-     * nothing dirty at all, so a theme change would repaint the line under the
-     * cursor and leave the rest of the screen in the colours it had, for as long
-     * as the agent had nothing to say. `forceAll` is reachable only by calling
-     * the renderer directly, which is why this reaches past `em` for the one
-     * call in kururu that does.
+     * nothing dirty at all, so the old colour would stay for as long as the
+     * agent had nothing to say. `forceAll` is reachable only by calling the
+     * renderer directly, which is why `applyPalette` reaches past `em`.
      *
      * The font is the opposite case and goes through `options` on purpose:
      * assigning `fontSize` or `fontFamily` is what makes the emulator remeasure

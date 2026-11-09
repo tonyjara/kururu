@@ -3,8 +3,8 @@
  *
  * The answer lives on GitHub — the latest release of `tonyjara/kururu`, whose
  * body is the section `/release` stamped into `CHANGELOG.md` — and it is asked
- * for here rather than in the browser, for the three reasons `styles.ts` gives
- * at length and one more that is this file's own. A phone on the tailnet has no
+ * for here rather than in the browser, for three reasons
+ * and one more that is this file's own. A phone on the tailnet has no
  * business reaching GitHub; only the server can act on the answer; CORS would
  * otherwise be a question. And the version being compared is the *server's*,
  * which the browser does not know and should not have to be told twice.
@@ -109,9 +109,8 @@ export async function checkForUpdate(force = false): Promise<UpdateCheck> {
     latest: null,
     newer: false,
     notes: null,
-    // Filled in by the route, which is where the theme that the code blocks are
-    // highlighted against is known. Kept out of here so this file stays what it
-    // says it is: a fetch and a comparison.
+    // Filled in by the route, which renders the markdown. Kept out of here so
+    // this file stays what it says it is: a fetch and a comparison.
     notesHtml: null,
     url: null,
     checkedAt: Date.now(),

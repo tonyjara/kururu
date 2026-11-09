@@ -35,7 +35,7 @@ building. Kururu is the other half.
 - **Organises.** Profiles hold workspaces, workspaces hold panes, panes hold tabs.
 - **Is driven from a prefix**, `C-a` then a key, tmux-style.
 - **Shows status** — idle / working / blocked / done, unread marks, context rings.
-- **Is yours to dress:** themes, skins and mascots, with a registry of each.
+- **Has a mascot:** the badge beside a working agent, cut from a sheet of yours.
 - **Remembers the arrangement**, and brings it back as empty panes. Nothing is
   respawned.
 - **Remembers what agents said.** A pane opened late is handed the history.
@@ -495,8 +495,7 @@ change reaches a second window and the phone without being told.
 
 | | |
 |---|---|
-| **Appearance** | the theme, the skin, and what a terminal is set in |
-| **Styles** | themes, skins and mascots from the registry |
+| **Terminal** | what a terminal is set in: the font, its size and the cursor |
 | **Profiles** | the sessions, and the workspaces in each of them |
 | **Mascot** | what the badge does while an agent is working |
 | **Keys** | what each key does after the prefix |
@@ -504,41 +503,15 @@ change reaches a second window and the phone without being told.
 | **Web** | the web for every agent kururu starts, as an ordered list of providers: a Firecrawl you host yourself (free, first), the agent's own web search and fetch, and cloud Firecrawl on your credits, reached only when an agent says its own tools failed. Each with a switch, its address and key, its health and a test; a page limit, a daily credit budget for the cloud, and the recent calls with who served each. Keys stay in kururu. See `docs/web.md` |
 | **Backups** | a private git repository the boards, conversations, settings and memory go to, every few minutes when something changed — never the secrets |
 
-### Appearance
+### Terminal
 
-A **theme** is the palette — the chrome's tokens and the terminal's sixteen ANSI
-slots in one place, since the emulator paints into a canvas CSS cannot reach. A
-**skin** is the shape: radii, line weights, the type ramp, the icon glyphs.
-Neither mentions the other, so "Catppuccin in a chunkier chrome" is a real thing
-to ask for. Every theme is drawn in itself, so the list is the preview; kururu's
-own green ships, and is the default, beside four Catppuccin flavours.
+Kururu has one look, and it is not a setting. What is yours is the terminal's
+own **font and cursor**. The list is built on the device that draws, because
+over Tailscale the face has to exist on the phone. What you name is prepended to
+a stack ending in four patched Nerd Font faces, so devicons keep working.
 
-A **pack** is a theme, a skin, a mascot, a sound and a font chosen to go
-together, put on in one press from Settings → Theme → Packs. **Kururu** is one
-of them and is built in — its own theme, the Soft skin, the frog, the croak and
-kururu's font stack — so the way back from any pack you install is always there,
-with no network.
-
-Below that, the terminal's own **font and cursor**. The list is built on the device
-that draws, because over Tailscale the face has to exist on the phone. What you
-name is prepended to a stack ending in four patched Nerd Font faces, so devicons
-keep working.
-
-Changing the theme never resizes a pty. Changing the skin or the font does — they
-move the cell, and a moved cell is a SIGWINCH into every agent watching.
-
-### Styles
-
-Appearance is what you are wearing; Styles is the shop. It lists what
-[`kururu-styles`](https://github.com/tonyjara/kururu-styles) offers — five IDE
-themes, three skins, five mascots cut from CC0 art, and packs that wear all three
-— with what you have and what has a newer version.
-
-**Picking is installing**, and an installed style is a **copy with its version
-pinned**, never a link: kururu has to come up with no network, and *check for
-updates* means nothing without a version to compare against. The server fetches
-the registry, never the browser; a font a skin names ships with it and is served
-from kururu's own origin.
+Changing the font or its size moves the cell, and a moved cell is a SIGWINCH
+into every agent watching.
 
 ### Profiles
 
@@ -713,10 +686,10 @@ window      finds a server and draws it — exactly as the phone does
 
 ```
 shared/     protocol types: the model, the split tree, the wire, the keymap,
-            the themes and the skins. No runtime deps; imported by everything
+            the terminal's palette. No runtime deps; imported by everything
 server/     Node. The pty host and its daemon, the arrangement and its snapshot,
-            markdown and highlighting, the styles registry, the plan-usage
-            reading, dev-server discovery, the preview proxy, the file API
+            markdown and highlighting, the plan-usage reading, dev-server
+            discovery, the preview proxy, the file API
 web/        React + Vite. Draws the server's layout; owns no state worth keeping
 desktop/    Electron main + preload, the address picker, the esbuild step for
             the server, and the branding stamped into the dev shell
@@ -732,6 +705,5 @@ See [PLAN.md](./PLAN.md) for why it is arranged this way, and
 [Apache 2.0](LICENSE). Use it, fork it, ship it — the patent grant and the
 requirement to say what you changed are the whole of what it asks in return.
 
-The sprite sheets under `assets/spritesheets` and the mascots in the styles
-registry are cut from CC0 artwork and carry their own attribution; a skin that
-ships a typeface ships its licence beside it.
+The sprite sheets under `assets/spritesheets` are cut from CC0 artwork and carry
+their own attribution.

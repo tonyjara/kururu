@@ -17,12 +17,9 @@
  * pays nothing, and the first diagram of a session pays once.
  *
  * **The palette is read out of the page, never written down here.** Kururu has
- * one palette and `web/src/theme.ts` has already put it on `<html>` as custom
- * properties by the time anything is drawn, so `getComputedStyle` is the same
- * source the stylesheet is reading and there is no second copy to fall out of
- * step — the thing `web/test/theme.test.ts` exists to prevent. A diagram is
- * therefore themed at the moment it is drawn and re-themed the next time the
- * document renders, which is exactly what a Shiki block already does.
+ * one palette and it is the custom properties on `:root` in `styles.css`, so
+ * `getComputedStyle` is the same source the stylesheet is reading and there is
+ * no second copy to fall out of step.
  */
 import type { MermaidConfig } from "mermaid";
 

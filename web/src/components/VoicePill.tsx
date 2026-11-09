@@ -63,7 +63,7 @@ const BARS = [0.35, 0.6, 0.85, 1, 0.85, 0.6, 0.35];
 
 /**
  * The pens as the ink is drawn with them (`LOOKS` in `desktop/ink.html`):
- * the ink's own colours and not the theme's, since a swatch that does not
+ * the ink's own colours and not the palette's, since a swatch that does not
  * match its ink is a lie about it.
  */
 const SWATCHES = [

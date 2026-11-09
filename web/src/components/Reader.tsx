@@ -178,7 +178,7 @@ export function ReaderView({
    * in this pane the server did not render — `web/src/mermaid.ts` says why. It
    * runs after the commit that put the markup in, because the layout engine
    * measures the text it is about to draw and can only do that once the nodes
-   * are in a document with the theme's font on it.
+   * are in a document with the page's font on it.
    *
    * Keyed on `doc` rather than on `path`, so a save redraws: the fetch hands
    * back a new object every time and the markup under this node has just been

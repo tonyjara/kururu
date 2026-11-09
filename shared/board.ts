@@ -105,8 +105,7 @@ export function laneFixed(laneId: string): boolean {
 
 /**
  * What the columns a profile's board starts with are coloured. Amber and
- * green are what kururu already means by working and by finished, in every
- * theme; blue is the one that is neither, and coral the warm one that is
+ * green are what kururu already means by working and by finished; blue is the one that is neither, and coral the warm one that is
  * none of them, for the column that is waiting on you.
  */
 const LANE_COLORS: Record<string, WorkspaceColor> = { todo: "blue", doing: "amber", [NEEDS_COLUMN]: "coral", done: "green" };

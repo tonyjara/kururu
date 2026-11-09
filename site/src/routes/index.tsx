@@ -444,7 +444,7 @@ function Extras() {
     ["The web for agents", "Search and scrape tools for every agent kururu starts, through a chain of providers you set."],
     ["Plan usage", "How much of your Claude plan is left, in the sidebar, for whichever account the profile uses."],
     ["Logins per profile", "Keep work and personal Claude and Codex accounts apart, one switch per profile."],
-    ["Themes and skins", "Palette and shape chosen separately, plus mascots, from a registry of styles."],
+    ["Mascots", "A sprite per workspace that moves while its agent works: the ones that ship, or a sheet of your own."],
     ["Backups", "Boards, conversations and settings to a private git repository of yours. Never a secret."],
   ];
   return (
