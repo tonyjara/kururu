@@ -212,6 +212,7 @@ describe("whose a cell is", () => {
   it("says a model as a person does, and leaves other companies' alone", () => {
     expect(modelName("claude-opus-5-5")).toBe("Opus 5.5");
     expect(modelName("claude-fable-5-1")).toBe("Fable 5.1");
+    expect(modelName("claude-fable-5-2")).toBe("Fable 5.2");
     expect(modelName("claude-sonnet-4-20250514")).toBe("Sonnet 4");
     expect(modelName("claude-opus-4-8[1m]")).toBe("Opus 4.8");
     expect(modelName("gpt-5.5")).toBe("gpt-5.5");

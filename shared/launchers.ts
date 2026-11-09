@@ -82,6 +82,7 @@ export interface Launcher {
  */
 export const LAUNCHERS: readonly Launcher[] = [
   { id: "claude", cli: "claude", label: "Claude" },
+  { id: "claude:claude-fable-5-2", cli: "claude", model: "claude-fable-5-2", label: "Claude Fable 5.2" },
   { id: "claude:claude-fable-5-1", cli: "claude", model: "claude-fable-5-1", label: "Claude Fable 5.1" },
   { id: "claude:claude-opus-5-5", cli: "claude", model: "claude-opus-5-5", label: "Claude Opus 5.5" },
   { id: "claude:claude-sonnet-5", cli: "claude", model: "claude-sonnet-5", label: "Claude Sonnet 5" },

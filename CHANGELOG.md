@@ -15,6 +15,9 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Claude Fable 5.2** in the + menu's models, beside Fable 5.1, which
+  stays. Its tokens are priced on the Usage page at Anthropic's list price
+  ($8 in, $40 out per million, less than 5.1).
 - **A queue for builds and simulators.** Agents building and testing mobile
   apps on one Mac take turns instead of running six builds at once: `slot run
   build -- xcodebuild …`, `slot sim <project>` for a booted simulator and a

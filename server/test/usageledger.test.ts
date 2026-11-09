@@ -70,6 +70,9 @@ describe("prices", () => {
     // Sonnet 5.5's read is half Sonnet 5's, which is a thing a guess would miss.
     expect(costOf("claude-sonnet-5-5", at, { ...million, input: 0, write5m: 0, write1h: 0, output: 0 })).toBeCloseTo(0.1, 6);
     expect(costOf("claude-sonnet-5", at, { ...million, input: 0, write5m: 0, write1h: 0, output: 0 })).toBeCloseTo(0.2, 6);
+    // Fable 5.2 is cheaper than the 5.1 before it: 8 + 10 + 16 + 0.20 + 40.
+    expect(costOf("claude-fable-5-2", at, million)).toBeCloseTo(74.2, 6);
+    expect(costOf("claude-fable-5-1", at, million)).toBeCloseTo(92.75, 6);
   });
 
   it("gives Haiku 5.5's long prompt the higher prices, cache included, on its own request only", () => {
@@ -89,6 +92,7 @@ describe("prices", () => {
   it("charges fast mode only on the models that have it, and US-only inference on all", () => {
     const tokens = { input: 1e6, write5m: 0, write1h: 0, read: 0, output: 0 };
     expect(costOf("claude-opus-5-5", at, tokens, { fast: true })).toBeCloseTo(8, 6);
+    expect(costOf("claude-fable-5-2", at, tokens, { fast: true })).toBeCloseTo(16, 6);
     expect(costOf("claude-sonnet-5", at, tokens, { fast: true })).toBeCloseTo(2, 6);
     expect(costOf("claude-sonnet-5", at, tokens, { usOnly: true })).toBeCloseTo(2.2, 6);
   });

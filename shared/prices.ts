@@ -22,9 +22,11 @@
  * file is stale. The `update-models` skill keeps it, beside `LAUNCHERS`.
  *
  * Read from <https://platform.claude.com/docs/en/about-claude/pricing> on
- * 2026-10-31. Dollars per million tokens. Not here: a web search's $10 per
- * thousand, because a billed message's row has no column for it and none of
- * the transcripts of this Mac carry one; Claude Code's own figure does.
+ * 2026-10-31, and the Fable 5.2 and Mythos 5.2 rows on 2026-11-09 (fast mode
+ * there is $16 and $80 against $8 and $40, so 2). Dollars per million tokens.
+ * Not here: a web search's $10 per thousand, because a billed message's row
+ * has no column for it and none of the transcripts of this Mac carry one;
+ * Claude Code's own figure does.
  */
 
 export interface ModelPrice {
@@ -54,6 +56,8 @@ function p(input: number, write5m: number, write1h: number, read: number, output
 const READ_ON = "2026-01-01";
 
 export const PRICES: readonly PriceEntry[] = [
+  { model: "claude-fable-5-2", from: READ_ON, price: p(8, 10, 16, 0.2, 40), fast: 2 },
+  { model: "claude-mythos-5-2", from: READ_ON, price: p(8, 10, 16, 0.2, 40), fast: 2 },
   { model: "claude-fable-5-1", from: READ_ON, price: p(10, 12.5, 20, 0.25, 50) },
   { model: "claude-mythos-5-1", from: READ_ON, price: p(10, 12.5, 20, 0.25, 50) },
   { model: "claude-fable-5", from: READ_ON, price: p(10, 12.5, 20, 1, 50) },
