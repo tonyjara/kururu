@@ -21,6 +21,7 @@
  * the other end, so they are still there when the socket comes back, and every
  * terminal somebody can see asks for its history again and catches up.
  */
+import type { RunView } from "../../shared/automation";
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
 import type { AgentPlacement } from "../../shared/agentpane";
@@ -1125,6 +1126,39 @@ export function stopCardDev(workspaceId: string, cardId: string): Promise<unknow
  */
 export function stopDevServer(port: number, pid: number): Promise<unknown> {
   return request((id) => ({ type: "stop-dev-server", id, port, pid }));
+}
+
+// --- automations --------------------------------------------------------------
+// The things kururu does on a schedule (`server/src/automations.ts`). Each is a
+// request: a definition the parser refuses, or a run that is already going,
+// comes back as the error the sheet shows.
+
+export function saveAutomation(key: string | null, workspaceId: string, text: string): Promise<{ key: string }> {
+  return request((id) => ({ type: "automation-save", id, key, workspaceId, text })) as Promise<{ key: string }>;
+}
+
+export function pauseAutomation(key: string, on: boolean): Promise<unknown> {
+  return request((id) => ({ type: "automation-pause", id, key, on }));
+}
+
+export function pauseAllAutomations(): Promise<unknown> {
+  return request((id) => ({ type: "automation-pause-all", id }));
+}
+
+export function runAutomation(key: string): Promise<{ runId: number; agentId: string | null }> {
+  return request((id) => ({ type: "automation-run", id, key })) as Promise<{ runId: number; agentId: string | null }>;
+}
+
+export function deleteAutomation(key: string): Promise<unknown> {
+  return request((id) => ({ type: "automation-delete", id, key }));
+}
+
+export function automationRuns(key: string): Promise<(RunView & { kept: string | null })[]> {
+  return request((id) => ({ type: "automation-runs", id, key })) as Promise<(RunView & { kept: string | null })[]>;
+}
+
+export function openAutomationRun(key: string, runId: number): Promise<unknown> {
+  return request((id) => ({ type: "automation-open", id, key, runId }));
 }
 
 /** Stop following the editor, or start again. */

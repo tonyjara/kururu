@@ -1085,6 +1085,26 @@ export type ClientMessage =
    */
   | { type: "stop-dev-server"; id: number; port: number; pid: number }
 
+  // --- automations ---------------------------------------------------------
+  /**
+   * The things kururu does on a schedule (`server/src/automations.ts`), all
+   * of the active profile's, each replied to with what it did or why not.
+   * `automation-save` sends the definition's whole text — the form writes it
+   * with `automationText` — and a workspace by id, which the server turns
+   * into the key it keeps; a null key makes a new one. Nothing here names a
+   * folder or a command line: the folder is the workspace's, and the text is
+   * read by the same parser a file would be.
+   */
+  | { type: "automation-save"; id: number; key: string | null; workspaceId: string; text: string }
+  | { type: "automation-pause"; id: number; key: string; on: boolean }
+  | { type: "automation-pause-all"; id: number }
+  | { type: "automation-run"; id: number; key: string }
+  | { type: "automation-delete"; id: number; key: string }
+  /** The last twenty runs, newest first. */
+  | { type: "automation-runs"; id: number; key: string }
+  /** A run's terminal shown, or its conversation picked back up. */
+  | { type: "automation-open"; id: number; key: string; runId: number }
+
   // --- the reader ----------------------------------------------------------
   /**
    * Split a reader off the pane a terminal is in, and point it at that

@@ -53,6 +53,7 @@ import type { Grid } from "./sizing";
 import { Sleeper } from "./sleep";
 import type { Slots } from "./slots";
 import type { Vault } from "./vaultstore";
+import type { Automations } from "./automations";
 import { Store } from "./store";
 import { Launches } from "./usage/attribute";
 import { NodeUsage } from "./usage/remote";
@@ -205,6 +206,8 @@ export let screens!: OnScreen;
 export let sleeper!: Sleeper;
 /** The build and simulator queue agents share. See `slots.ts`. */
 export let slots!: Slots;
+/** The things this kururu does on a schedule, and the clock that fires them. See `automations.ts`. */
+export let automations: Automations | null = null;
 /** The database: boards, conversations and the voice's lists. Opened in `attach()`, before anything is served. See `store.ts`. */
 export let store!: Store;
 /** The usage ledger's reader, or null when its file would not open. See `usage/sweep.ts`. */
@@ -628,6 +631,7 @@ export function snapshot(): SessionSnapshot {
     projectSettings: projects,
     appearance,
     remote: watches?.view() ?? null,
+    automations: automations?.view(profile.key) ?? [],
   };
 }
 
@@ -812,6 +816,7 @@ export function overlay(agent: AgentSnapshot): AgentSnapshot {
  * are spelled out, since `typeof` here would be narrowed to that null.
  */
 interface Provided {
+  automations: Automations;
   host: typeof host;
   workspaces: typeof workspaces;
   harness: typeof harness;
@@ -876,6 +881,9 @@ const assigners: { [K in keyof Provided]: (value: Provided[K]) => void } = {
   },
   slots: (value) => {
     slots = value;
+  },
+  automations: (value) => {
+    automations = value;
   },
   store: (value) => {
     store = value;

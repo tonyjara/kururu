@@ -3,9 +3,13 @@
 A plan, written 2026-11-10 from a read of the tree at `6e83494`, of
 `docs/harness.md`, `nodes.md`, `machines.md`, `layout.md`, `data.md` and
 `invariants.md`, and of what other tools do
-([the research notes](automations-research.md)). **Nothing is built.** It is
-written so that an agent can take one phase, read the files it names, and
-know what "done" is.
+([the research notes](automations-research.md)). It is written so that an
+agent can take one phase, read the files it names, and know what "done" is.
+
+**Where it is:** phase 1 is built (2026-11-10, KUR-260): automations on this
+Mac and the sidebar's section. What it does differently from the text below
+is said under [phase 1](#phase-1-automations-on-this-mac-and-the-section).
+Phases 2 to 5 are not started.
 
 **The ask, in the owner's words:** "an Automations section in the left
 drawer, where we have workspaces and agents, and a Kururu primitive for
@@ -39,6 +43,15 @@ Deck). Only its home ever fires it.
   in a project and moved to another host.
 
 ## What the owner needs to decide
+
+**Decided 2026-11-10: all five as recommended.** The database is the truth
+and the file is how an automation travels, each host self-contained;
+installing on a machine only from the dialog that lists the files, with no
+credentials (phase 5); Kuru creates, pauses, runs and reschedules alone and
+what changes what one may do or spend waits for one press (phase 3); every
+automation names its launcher, 60 minutes and about $5 a run by default; the
+Pasapy review on the Mac, every 2 weeks on Monday at 09:00 Asunción from
+2026-11-23.
 
 1. **What decides what runs: the database or the file?** Recommended: the
    database is what runs, and the file is how an automation travels. A file
@@ -769,6 +782,49 @@ Useful alone, and enough for the Pasapy review on 2026-11-23.
   tests for the two shared files pass.
 - **Out:** the Dashboard tab, cost limits, the file in a project, Kuru's
   tools, other hosts, the `card` task.
+
+**Built 2026-11-10.** `shared/schedule.ts`, `shared/automation.ts`, the two
+tables in `server/src/store.ts`, `server/src/automations.ts` and its verbs
+in `server/src/ws/automations.ts`, the section and the sheet in
+`web/src/components/Automations.tsx`; tested in
+`server/test/{schedule,automation,automationstore,automations}.test.ts` and
+in an isolated instance (`docs/testing.md`). Where the code went its own way:
+
+- **A workspace is required.** A profile-level automation, with its own
+  folder under `~/.local/share/kururu/automations/<key>/`, is left for a
+  later phase: a run's terminal has to go in some workspace's agents' pane.
+  The sidebar lists the active profile's automations, as it lists its
+  workspaces.
+- **Its folder is the workspace's main checkout**: the one the branch walk
+  found, or the main checkout of wherever the workspace's agents start
+  (`mainRoot`), never a subfolder or worktree a tab is in. `dir` is resolved
+  under it and checked again through the real path.
+- **Read and kept, not acted on yet:** `needs`, `max-usd` and `month-usd`
+  (phase 2). `tell: never` silences a failure; every other value tells on a
+  failed, missed, skipped or interrupted run, and findings are phase 2. The
+  sheet says so.
+- **Refused at save:** `run: card` and `permissions: auto`. `permissions:
+  ask` is honoured: the bypass flag is dropped for that run.
+- **The launcher is looked up as named** (`findLauncher`), not through
+  `launcherFor`, which would put Claude launchers on the harness CLI when
+  the profile switched it: an automation never runs on another model
+  silently.
+- **A run is found again by its tag** — `kururu-run-<id>-<nonce>`, in the
+  unattended prompt and so in the terminal's command line, and in a shell
+  run's status line — rather than by its session id alone, since Codex runs
+  have none and ids are given out again after a host restart.
+- **A shell run's terminal is kept from the reap** (`reapExited` asks
+  `automations.holds`) until its status line has been read off the screen,
+  which is then ended; the host's `text` reads it, as the plan says.
+- **Its agent is closed by `Sleeper.whyAwake`**, the idle-card checks with
+  the Settings switch not asked. A server restart starts the sleeper's quiet
+  clock again, so a run that ended just before one closes two minutes after
+  it.
+- **A notification** is the gate's `blocked` event, aimed at the run's
+  terminal when there is one; there is no automation event in
+  `NotifySettings` yet.
+- **Home** is `nodes.name()`, which is `mac` on this Mac.
+- `/api/health` and `bun run status` are phase 2's, as listed there.
 
 ### Phase 2: the detail, the results, the limits
 

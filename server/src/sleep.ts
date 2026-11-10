@@ -224,7 +224,7 @@ export class Sleeper {
       }
       const facts = { screen, busy: tree?.busy ?? null, agent: tree?.agent ?? null };
       const early = stillWanted({ ...facts, conversation: { reply: null } });
-      const conversation = early ? null : await this.conversationOf(at, agent, remote);
+      const conversation = early ? null : await this.conversationOf(at.profileId, at.card.run, agent, remote);
       const why = early ?? stillWanted({ ...facts, conversation });
       // The world may have moved while the files were read: ask the cheap
       // half again, of the terminal as it is now.
@@ -246,6 +246,32 @@ export class Sleeper {
     }
   }
 
+  /**
+   * Why an agent that is not a card's should stay open, by the same checks a
+   * card's gets, or null for "end it" — an automation's agent, once its run
+   * has ended (`server/src/automations.ts`). The switch in Settings is not
+   * asked: it is about cards left idle, and an automation's run ending is its
+   * own reason. `afterMs` is how long it must have been quiet.
+   */
+  async whyAwake(profileId: string, agentId: string, run: CardRun, afterMs: number, now = Date.now()): Promise<string | null> {
+    const agent = this.deps.host.find(agentId);
+    if (!agent || agent.exited) return "it has gone";
+    const early = notIdle(
+      { run: run.state, status: agent.status, quietSince: this.quietSince(agentId, run), holding: this.deps.holding(agentId), draft: this.drafts.get(agentId) ?? 0 },
+      now,
+      afterMs,
+    );
+    if (early) return early;
+    if (!run.sessionId || !SESSION_ID.test(run.sessionId)) return "it has no conversation id to resume";
+    const remote = remoteOf(agent);
+    const screen = await this.screenOf(agent);
+    const tree = remote === null && screen === "quiet" ? readUnder(agent.pid, await readFootTable()) : null;
+    const facts = { screen, busy: tree?.busy ?? null, agent: tree?.agent ?? null };
+    const shallow = stillWanted({ ...facts, conversation: { reply: null } });
+    if (shallow) return shallow;
+    return stillWanted({ ...facts, conversation: await this.conversationOf(profileId, run, agent, remote) });
+  }
+
   /** The latest of everything that restarts the clock. */
   private quietSince(agentId: string, run: CardRun): number {
     return Math.max(this.started, run.endedAt ?? 0, this.edges.get(agentId) ?? 0, this.keys.get(agentId) ?? 0);
@@ -261,8 +287,7 @@ export class Sleeper {
    * The run's conversation, found where its CLI keeps it — and its last reply.
    * Null when it is not there, or the machine it is on could not be asked.
    */
-  private async conversationOf(at: CardAt, agent: AgentSnapshot, remote: string | null): Promise<{ reply: string | null } | null> {
-    const run = at.card.run;
+  private async conversationOf(profileId: string, run: CardRun, agent: AgentSnapshot, remote: string | null): Promise<{ reply: string | null } | null> {
     const id = run.sessionId!;
     const cli = cliOf(run);
     const lastReply = (tail: string) => (cli === "claude" ? claudeLastReply(tail) : cli === "agy" ? agyLastReply(tail) : codexLastReply(tail));
@@ -273,10 +298,10 @@ export class Sleeper {
     }
     const path =
       cli === "claude"
-        ? await claudeTranscriptPath(this.deps.claudeDir(at.profileId), id, run.cwd, this.deps.transcript(agent.id))
+        ? await claudeTranscriptPath(this.deps.claudeDir(profileId), id, run.cwd, this.deps.transcript(agent.id))
         : cli === "agy"
           ? await firstFile(agyTranscriptPaths(homedir(), id))
-          : await codexRolloutPath(this.deps.codexHome(at.profileId), id, run.startedAt);
+          : await codexRolloutPath(this.deps.codexHome(profileId), id, run.startedAt);
     const tail = path ? await readTail(path) : null;
     if (tail === null) return null;
     return { reply: lastReply(tail) };

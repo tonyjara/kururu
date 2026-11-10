@@ -49,6 +49,7 @@ import { FileTree, MARKDOWN } from "./components/FileTree";
 import { showProfileCardNext } from "./components/ProfileBoard";
 import { dashboardTabLabel, PROFILE_BOARD_TAB } from "../../shared/dashboard";
 import { Databases } from "./components/Databases";
+import { AutomationSheet } from "./components/Automations";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Keybar } from "./components/Keybar";
 import { Menu, type MenuAt } from "./components/Menu";
@@ -319,6 +320,9 @@ export function App() {
   const [help, setHelp] = useState(false);
   /** The database sheet, over the window, and whose workspace it is showing. Null is closed. */
   const [databasesFor, setDatabasesFor] = useState<string | null>(null);
+  /** The automation sheet: one automation's key, or null inside for a new one. See `Automations.tsx`. */
+  const [automationSheet, setAutomationSheet] = useState<{ key: string | null } | null>(null);
+  const closeAutomationSheet = useCallback(() => setAutomationSheet(null), []);
   /**
    * Settings: which page of it is open, or null for closed. A view state like the
    * help overlay rather than anything the server knows about — what it *edits* is
@@ -1191,6 +1195,17 @@ export function App() {
         return;
       }
 
+      // The automation sheet, the same way: a form, so a field takes the
+      // first escape and the sheet the second.
+      if (automationSheet) {
+        if (keyName(event) === "escape") {
+          take();
+          if (event.target instanceof HTMLElement && event.target.closest(".auto-sheet input, .auto-sheet textarea, .auto-sheet select")) event.target.blur();
+          else setAutomationSheet(null);
+        }
+        return;
+      }
+
       if (help) {
         if (isPrefix(event) || keyName(event) === "escape" || keyName(event) === "?") {
           take();
@@ -1312,7 +1327,7 @@ export function App() {
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, databasesFor, kuruDrawer.open, needsOpen, workspace, onScreen, keymap, run, arm, disarm]);
+  }, [prefixArmed, resizeMode, dialog, editing, help, settings, reach, profileMenu, databasesFor, automationSheet, kuruDrawer.open, needsOpen, workspace, onScreen, keymap, run, arm, disarm]);
 
   useFileDropGuard();
 
@@ -1425,6 +1440,10 @@ export function App() {
           }}
           onDatabases={(workspaceId) => {
             setDatabasesFor(workspaceId);
+            if (narrow) setSidebarOpen(false);
+          }}
+          onAutomation={(key) => {
+            setAutomationSheet({ key });
             if (narrow) setSidebarOpen(false);
           }}
           /* Whether it is a column or a screen, and how to get rid of it. The
@@ -1683,6 +1702,9 @@ export function App() {
           workspaceName={profile.workspaces.find((w) => w.id === databasesFor)?.name ?? "Workspace"}
           onClose={() => setDatabasesFor(null)}
         />
+      )}
+      {automationSheet && (
+        <AutomationSheet automationKey={automationSheet.key} onClose={closeAutomationSheet} onPrompt={setDialog} />
       )}
       {settings && (
         <Settings

@@ -18,17 +18,18 @@ import { type WebSocket, WebSocketServer } from "ws";
 import { cardCode, cardPrompt } from "../../shared/board";
 import { remoteShellOf } from "../../shared/machines";
 import { countsAsAgent, type Profile } from "../../shared/model";
-import { parseRolloutListing } from "../../shared/sessions";
+import { claudeLastReply, parseRolloutListing } from "../../shared/sessions";
 import { bindProblem, fromLoopback, isShared, learnTailnetName, listenAddresses, loopbackTokenRequired, token, verdict } from "./access";
 import { Backup } from "./backup";
 import { stopDev } from "./carddev";
-import { cardDoneFor, cardRunPrompt, runCardAt } from "./cards";
+import { cardDoneFor, cardRunPrompt, isDirectory, runCardAt } from "./cards";
 import { Channels } from "./channels";
 import { codexUsageSnapshot } from "./codexusage";
 import { agyUsageSnapshot } from "./agy";
 import { configDir } from "./config";
 import {
   activity,
+  automations,
   backup,
   broadcast,
   channels,
@@ -97,7 +98,7 @@ import { NodeNotices } from "./nodenotice";
 import { NodeHost, nodeRequestRefusal } from "./nodes";
 import { NodeWatches } from "./nodewatch";
 import { noticeStatuses } from "./notices";
-import { OnScreen } from "./onscreen";
+import { OnScreen, screenRows } from "./onscreen";
 import { openRouterSnapshot } from "./openrouter";
 import { Outbox } from "./outbox";
 import { PeerKurus } from "./peerkuru";
@@ -107,6 +108,11 @@ import { closeAllPreviews } from "./proxy";
 import { databasesOfWorkspace, workspaceDirs } from "./repostatus";
 import { Secrets } from "./secrets";
 import { Sleeper } from "./sleep";
+import { Automations } from "./automations";
+import { END_AFTER_MS } from "../../shared/automation";
+import { notifyGate } from "../../shared/notify";
+import { resumeCommand } from "../../shared/launchers";
+import { claudeTranscriptPath, readTail as readSessionTail } from "./sessions";
 import { Slots, writeSlotCommand } from "./slots";
 import { machineStore } from "./keychain";
 import { Vault } from "./vaultstore";
@@ -124,6 +130,7 @@ import {
   endTerminal,
   fillPane,
   harnessFeatures,
+  hooksFor,
   keepNow,
   keepTimer,
   killAll,
@@ -137,6 +144,7 @@ import {
   reapExited,
   saveTimer,
   sessionShell,
+  workspaceRepo,
 } from "./terminals";
 import { leadEligibility, nodeAddress, nodeSummary, nodeUnreachable, refreshClaudeReady, secretLanded, STARTED_AT } from "./thisnode";
 import { usageSnapshot } from "./usage";
@@ -147,7 +155,7 @@ import { programs } from "./programs";
 import { VERSION } from "./version";
 import { Voice } from "./voice";
 import { Workspaces } from "./workspaces";
-import { worktreePresent } from "./worktree";
+import { mainRoot, worktreePresent } from "./worktree";
 import { handleMessage } from "./ws/dispatch";
 
 // ---------------------------------------------------------------------------
@@ -415,6 +423,8 @@ export async function attach(port: Port): Promise<void> {
     // same argument again, and runs after the notice so that a terminal which
     // said something on its way out has still been heard.
     noticeStatuses();
+    // Before the reap, so a shell run that has just exited is still there to read.
+    automations?.onAgents();
     reapExited();
     // A lease taken in a terminal that has gone ends now, not at a poll.
     slots?.onAgents();
@@ -645,6 +655,76 @@ export async function attach(port: Port): Promise<void> {
     changed: (asks) => broadcast({ type: "vault-asks", asks }),
   }));
   writeVaultCommand();
+  provide("automations", new Automations({
+    store,
+    // Off in an isolated instance unless asked for: a scratch server on a
+    // copy of the real database would otherwise start the owner's agents.
+    clock: !process.env.KURURU_DATA_DIR || process.env.KURURU_AUTOMATIONS === "1",
+    home: () => nodes?.name() ?? "this Mac",
+    find: (agentId) => host.find(agentId),
+    profileIdOf: (key) => workspaces.profileIdOf(key),
+    workspaceOf: (profileId, key) => {
+      const workspace = workspaces.profile(profileId)?.workspaces.find((w) => w.key === key);
+      return workspace ? { id: workspace.id, name: workspace.name } : null;
+    },
+    folderOf: async (profileId, workspaceId) => {
+      // The main checkout the walk found, as the row's git verbs use; else
+      // the main checkout of wherever the workspace's agents start, as a
+      // card's run starts — the repository's top, not a subfolder or a
+      // worktree a tab happens to be in. A folder in no repository is itself.
+      const repo = profileId === workspaces.active.id ? workspaceRepo(workspaceId) : undefined;
+      if (repo && isDirectory(repo)) return repo;
+      const pane = workspaces.cwdPaneIn(profileId, workspaceId);
+      const cwd = pane ? await cwdForPaneIn(profileId, workspaceId, pane) : undefined;
+      return cwd && isDirectory(cwd) ? mainRoot(cwd) : null;
+    },
+    agentLine: (launcher, profileId, sessionId, ask) =>
+      agentCommandFor(launcher, profileId, sessionId, ask ? { ...launch, bypassClis: launch.bypassClis.filter((cli) => cli !== launcher.cli) } : launch),
+    open: async (profileId, workspaceId, options) => {
+      const target = workspaces.agentPaneIn(profileId, workspaceId);
+      if (!target) throw new Error("there is nowhere in the workspace to put it");
+      return openTerminalAt(profileId, workspaceId, target, options);
+    },
+    launched: (agent, profileId, workspaceId, note, name) => {
+      if (note) noteLaunch(agent.id, profileId, workspaceId, { program: note.program, sessionId: note.sessionId, cwd: agent.cwd });
+      host.rename(agent.id, name.slice(0, 80));
+    },
+    lastReply: async (agentId, profileId, run) => {
+      const said = harness.lastReply(agentId);
+      if (said) return said;
+      // A server restarted since the turn ended has not heard its Stop hook:
+      // the transcript says the same thing.
+      if (!run.sessionId || !run.launcher?.startsWith("claude")) return null;
+      const path = await claudeTranscriptPath(claudeDirOf(profileId), run.sessionId, run.cwd, harness.transcriptOf(agentId));
+      const tail = path ? await readSessionTail(path) : null;
+      return tail ? claudeLastReply(tail) : null;
+    },
+    screen: (agentId) => screenRows(host, agentId, { ...ownedGrid(agentId), rows: 200 }),
+    whyAwake: (profileId, agentId, run) => sleeper.whyAwake(profileId, agentId, run, END_AFTER_MS),
+    end: (agentId) => endTerminal(agentId),
+    activity: (agentId) => activity.get(agentId),
+    tell: (profileId, line) => harness.announce(profileId, line),
+    notify: (title, body, agentId) => {
+      const notification = { agentId: agentId ?? "", event: "blocked" as const, title, body };
+      for (const [ws, st] of clients) {
+        if (st.watcher) continue;
+        if (!notifyGate({ event: "blocked", visible: false, isAgent: true, isHarness: false }, notify).pass) continue;
+        send(ws, { type: "notify", notification });
+      }
+    },
+    changed: () => pushSnapshot(),
+    resume: async (profileId, workspaceId, run, launcher) => {
+      const command = resumeCommand(launcher, launch, run.sessionId, false);
+      if (!command) throw new Error("That run has no conversation kururu can open.");
+      const target = workspaces.agentPaneIn(profileId, workspaceId);
+      if (!target) throw new Error("there is nowhere in the workspace to put it");
+      const cwd = run.cwd && isDirectory(run.cwd) ? run.cwd : undefined;
+      const agent = await openTerminalAt(profileId, workspaceId, target, { cwd, command: command + hooksFor(launcher, profileId), kind: "agent" });
+      noteLaunch(agent.id, profileId, workspaceId, { program: launcher.cli === "agy" ? "agy" : launcher.cli, sessionId: run.sessionId, cwd: agent.cwd });
+      return agent;
+    },
+    reveal: (agentId) => workspaces.reveal(agentId),
+  }));
   provide("voice", new Voice({
     broadcast,
     index: { load: () => store.loadMissed(), save: (list) => store.saveMissed(list) },
@@ -938,6 +1018,8 @@ export async function attach(port: Port): Promise<void> {
     // Sets of marks past their thirty days, now and daily (`marks.ts`): after
     // the start's own line, so the log reads in the order it happened.
     startMarkSweep();
+    // The clock, once there is a node name to be home to and a port to serve the runs it starts.
+    void automations?.start();
     /**
      * Minted now on a server that will ask for it, rather than when somebody
      * first asks: a child has no Share dialog to ask, and a box whose tools

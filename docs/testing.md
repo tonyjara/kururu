@@ -142,6 +142,22 @@ Kept short on purpose; the detail is in git history.
   since only a real card run sets the mark. Never against real simulators, a
   real build or a real card run.
 
+- **Automations, phase 1** (2026-11-10), in an isolated instance on :7817
+  from a scratch copy with `KURURU_AUTOMATIONS=1`, `HOME` and `SHELL=/bin/sh`
+  scratch ones and a stand-in `claude` (a script that reports `working`, then
+  `done` with a `RESULT:` line, then sits as a compiled sleeper named
+  `claude`): a shell automation running `true` every five minutes fired on
+  the tick after 17:00 and 17:05 UTC and wrote `ok`; Run now on an agent
+  automation read its result line as a finding; a 40-second shell run went
+  on across a kill and restart of the server and ended `ok` with its output;
+  the agent's terminal was ended under the sleeper's checks once its
+  conversation was where Claude Code files one, and Open conversation
+  resumed it; a failing shell run notified a connected client with its
+  status; the section and the sheet at 1440x900 and 390x844 in headless
+  Chrome. The fake clock — on time and never early, catch-up and missed
+  around the window, skipped while running, two servers on one file, a
+  restart finding a run again or writing it interrupted, the time limit —
+  is `server/test/automations.test.ts`, on a real database file.
 - **The snapshot as deltas** (2026-11-02), in isolated instances on :7817 from
   scratch copies of origin/main and the change, on a copy of the real
   `kururu.db` (23 boards, 1.34 MB snapshot) under 4 hook reports a second and

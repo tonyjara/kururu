@@ -51,6 +51,7 @@ import { join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { adoptBoard, adoptProfileBoard, emptyBoard, isNeedsBy, NEEDS_COLUMN, type Board, type BoardLane, type Card, type CardRun } from "../../shared/board";
 import { adoptMade } from "../../shared/made";
+import type { RunState } from "../../shared/automation";
 import type { MoveDone } from "../../shared/move";
 import type { AttributionFacts, ConversationFact, RunFact } from "../../shared/usage";
 import { promptCarries, type StoredMissed, type StoredOutboxEntry, type VoiceLang } from "../../shared/voice";
@@ -265,6 +266,13 @@ const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, 
  *   written once. A turn is never deleted, so a pin never names nothing. In
  *   the export as the turn's `pinnedAt`, since a restore gives every turn a
  *   new id and a pin by id would come back pinning some other line.
+ * - `automations` and `automation_runs`: the things kururu does on a schedule
+ *   (`server/src/automations.ts`) and every slot each came to. Here for
+ *   `sim_pool`'s reason, so an app from before them opens the database as it
+ *   always did. A run's row is unique by its automation and its slot, and is
+ *   written before anything is started: a second server on this file, or one
+ *   restarted in the same second, is refused the insert and starts nothing.
+ *   Not in the export yet; the backup carries them from a later phase.
  */
 const SIM_POOL = `create table if not exists sim_pool (
   udid text primary key, project text not null, name text not null, runtime text not null,
@@ -280,10 +288,28 @@ end`;
 
 const TURN_PINS = "create table if not exists turn_pins (turn_id integer primary key, pinned_at integer not null)";
 
+const AUTOMATIONS = `create table if not exists automations (
+  key text primary key, profile_key text not null, workspace_key text,
+  text text not null, home text not null,
+  enabled integer not null, why_off text, anchor text not null, next_slot integer,
+  created_at integer not null, updated_at integer not null, deleted_at integer
+)`;
+
+const AUTOMATION_RUNS = `create table if not exists automation_runs (
+  id integer primary key, automation_key text not null, slot text not null, slot_at integer not null,
+  why text not null, by text, state text not null, words text, output text,
+  started_at integer, ended_at integer, agent_id text, tag text, session_id text, launcher text, cwd text,
+  closed_at integer, seen_at integer,
+  unique (automation_key, slot)
+)`;
+
 function keepShape(db: DatabaseSync): void {
   db.exec("create index if not exists turns_at on turns(at, id)");
   db.exec(SIM_POOL);
   db.exec(TURN_PINS);
+  db.exec(AUTOMATIONS);
+  db.exec(AUTOMATION_RUNS);
+  db.exec("create index if not exists automation_runs_by on automation_runs(automation_key, slot_at)");
   const trigger = db.prepare("select sql from sqlite_master where type = 'trigger' and name = 'cards_au'").get() as { sql?: string } | undefined;
   if (trigger?.sql && /\bwhen\b/i.test(trigger.sql)) return;
   db.exec("drop trigger if exists cards_au");
@@ -426,6 +452,92 @@ function runOf(row: RunRow): CardRun {
     endedAt: row.ended_at,
     sessionId: row.session_id,
     cwd: row.cwd,
+  };
+}
+
+/** One automation as the database keeps it. See `server/src/automations.ts`. */
+export interface AutomationRow {
+  key: string;
+  profileKey: string;
+  workspaceKey: string | null;
+  /** The definition as approved, whole: what runs. */
+  text: string;
+  /** The node it fires on, by name. */
+  home: string;
+  enabled: boolean;
+  whyOff: string | null;
+  /** The day its schedule counts from when the line has no `from`, stored so an edit never flips the weeks. */
+  anchor: string;
+  nextSlot: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AutomationRunRow {
+  id: number;
+  automationKey: string;
+  slot: string;
+  slotAt: number;
+  why: "schedule" | "catch-up" | "now";
+  /** Who pressed Run now; null for the clock. */
+  by: string | null;
+  state: RunState;
+  words: string | null;
+  output: string | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  agentId: string | null;
+  /** The run's mark, which its terminal's command line carries. */
+  tag: string | null;
+  sessionId: string | null;
+  launcher: string | null;
+  cwd: string | null;
+  /** When its terminal was ended or found gone; null while it is open. */
+  closedAt: number | null;
+  seenAt: number | null;
+}
+
+export type NewAutomationRun = Pick<AutomationRunRow, "automationKey" | "slot" | "slotAt" | "why" | "by" | "state" | "words" | "startedAt" | "endedAt">;
+
+function automationOf(r: Row): AutomationRow {
+  return {
+    key: String(r.key),
+    profileKey: String(r.profile_key),
+    workspaceKey: typeof r.workspace_key === "string" ? r.workspace_key : null,
+    text: String(r.text),
+    home: String(r.home),
+    enabled: r.enabled === 1,
+    whyOff: typeof r.why_off === "string" ? r.why_off : null,
+    anchor: String(r.anchor),
+    nextSlot: typeof r.next_slot === "number" ? r.next_slot : null,
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+  };
+}
+
+function runRowOf(r: Row): AutomationRunRow {
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
+  const num = (value: unknown) => (typeof value === "number" ? value : null);
+  const why = String(r.why);
+  return {
+    id: Number(r.id),
+    automationKey: String(r.automation_key),
+    slot: String(r.slot),
+    slotAt: Number(r.slot_at),
+    why: why === "catch-up" || why === "now" ? why : "schedule",
+    by: text(r.by),
+    state: String(r.state) as RunState,
+    words: text(r.words),
+    output: text(r.output),
+    startedAt: num(r.started_at),
+    endedAt: num(r.ended_at),
+    agentId: text(r.agent_id),
+    tag: text(r.tag),
+    sessionId: text(r.session_id),
+    launcher: text(r.launcher),
+    cwd: text(r.cwd),
+    closedAt: num(r.closed_at),
+    seenAt: num(r.seen_at),
   };
 }
 
@@ -617,6 +729,128 @@ export class Store {
 
   dropSim(udid: string): void {
     this.stmt("delete from sim_pool where udid = ?").run(udid);
+  }
+
+  // -------------------------------------------------------------------------
+  // Automations
+  // -------------------------------------------------------------------------
+
+  /** Every automation not deleted, oldest first. See `server/src/automations.ts`. */
+  automations(): AutomationRow[] {
+    const rows = this.stmt("select * from automations where deleted_at is null order by created_at, key").all() as Row[];
+    return rows.map(automationOf);
+  }
+
+  /** Made or replaced whole: the clock keeps the rest of the row to itself through the two below. */
+  putAutomation(row: AutomationRow, at = Date.now()): void {
+    this.tx(() =>
+      this.stmt(
+        `insert into automations (key, profile_key, workspace_key, text, home, enabled, why_off, anchor, next_slot, created_at, updated_at, deleted_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
+         on conflict(key) do update set profile_key = excluded.profile_key, workspace_key = excluded.workspace_key, text = excluded.text,
+           home = excluded.home, enabled = excluded.enabled, why_off = excluded.why_off, anchor = excluded.anchor,
+           next_slot = excluded.next_slot, updated_at = excluded.updated_at`,
+      ).run(row.key, row.profileKey, row.workspaceKey, row.text, row.home, row.enabled ? 1 : 0, row.whyOff, row.anchor, row.nextSlot, row.createdAt, at),
+    );
+  }
+
+  setAutomationNext(key: string, nextSlot: number | null): void {
+    this.tx(() => this.stmt("update automations set next_slot = ? where key = ?").run(nextSlot, key));
+  }
+
+  setAutomationEnabled(key: string, enabled: boolean, whyOff: string | null, nextSlot: number | null, at = Date.now()): void {
+    this.tx(() =>
+      this.stmt("update automations set enabled = ?, why_off = ?, next_slot = ?, updated_at = ? where key = ?").run(enabled ? 1 : 0, whyOff, nextSlot, at, key),
+    );
+  }
+
+  /** Marked gone, its history kept, as a deleted card is. */
+  deleteAutomation(key: string, at = Date.now()): void {
+    this.tx(() => this.stmt("update automations set deleted_at = ?, enabled = 0, next_slot = null where key = ?").run(at, key));
+  }
+
+  /**
+   * A slot claimed for a run: the row written before anything starts. Null
+   * when the pair is already there, which is a slot some server has already
+   * claimed, and so a run that must not start.
+   */
+  claimRun(run: NewAutomationRun): number | null {
+    try {
+      return this.tx(() => {
+        const result = this.stmt(
+          `insert into automation_runs (automation_key, slot, slot_at, why, by, state, words, started_at, ended_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(run.automationKey, run.slot, run.slotAt, run.why, run.by, run.state, run.words, run.startedAt, run.endedAt);
+        return Number(result.lastInsertRowid);
+      });
+    } catch (err) {
+      if (err instanceof Error && /UNIQUE constraint/i.test(err.message)) return null;
+      throw err;
+    }
+  }
+
+  /** Some of a run's fields, as it moves on. Only the ones given are written. */
+  updateRun(id: number, fields: Partial<Omit<AutomationRunRow, "id" | "automationKey" | "slot" | "slotAt" | "why" | "by">>): void {
+    const columns: Record<string, string> = {
+      state: "state",
+      words: "words",
+      output: "output",
+      startedAt: "started_at",
+      endedAt: "ended_at",
+      agentId: "agent_id",
+      tag: "tag",
+      sessionId: "session_id",
+      launcher: "launcher",
+      cwd: "cwd",
+      closedAt: "closed_at",
+      seenAt: "seen_at",
+    };
+    const sets: string[] = [];
+    const values: (string | number | null)[] = [];
+    for (const [field, value] of Object.entries(fields)) {
+      const column = columns[field];
+      if (!column || value === undefined) continue;
+      sets.push(`${column} = ?`);
+      values.push(value as string | number | null);
+    }
+    if (!sets.length) return;
+    this.tx(() => this.stmt(`update automation_runs set ${sets.join(", ")} where id = ?`).run(...values, id));
+  }
+
+  automationRun(id: number): AutomationRunRow | null {
+    const row = this.stmt("select * from automation_runs where id = ?").get(id) as Row | undefined;
+    return row ? runRowOf(row) : null;
+  }
+
+  /** An automation's runs, newest slot first. */
+  automationRuns(key: string, limit = 20): AutomationRunRow[] {
+    const rows = this.stmt("select * from automation_runs where automation_key = ? order by slot_at desc, id desc limit ?").all(key, limit) as Row[];
+    return rows.map(runRowOf);
+  }
+
+  /** Every run still going, or ended with its agent not yet closed: what the clock watches. */
+  openRuns(): AutomationRunRow[] {
+    const rows = this.stmt(
+      "select * from automation_runs where state in ('running', 'asking') or (agent_id is not null and closed_at is null) order by id",
+    ).all() as Row[];
+    return rows.map(runRowOf);
+  }
+
+  /** The newest live run and the newest ended one of each automation, for the list. */
+  runHeads(): { live: Map<string, AutomationRunRow>; last: Map<string, AutomationRunRow> } {
+    const live = new Map<string, AutomationRunRow>();
+    const last = new Map<string, AutomationRunRow>();
+    const rows = this.stmt(
+      `select r.* from automation_runs r join automations a on a.key = r.automation_key
+       where a.deleted_at is null and r.id in (
+         select max(id) from automation_runs where state in ('running', 'asking') group by automation_key
+         union
+         select id from (select id, automation_key, row_number() over (partition by automation_key order by coalesce(ended_at, slot_at) desc, id desc) as n
+           from automation_runs where state not in ('running', 'asking')) where n = 1
+       )`,
+    ).all() as Row[];
+    for (const row of rows.map(runRowOf)) (row.state === "running" || row.state === "asking" ? live : last).set(row.automationKey, row);
+    return { live, last };
   }
 
   bytes(): number {

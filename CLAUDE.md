@@ -269,6 +269,14 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **While the talk key is hooked system-wide, the floating pill is the only voice
   client on this Mac** — a listen-only tap, and a key both saw fires once. →
   [more](docs/invariants.md#the-talk-key-everywhere)
+- **An automation lives in the database and fires on one host, once a slot** —
+  a file never switches one on; the run's row, unique by automation and slot,
+  is written before anything starts (`server/src/automations.ts`). →
+  [more](docs/invariants.md#automations)
+- **The clock is the server's, never the pty host's, and an isolated instance
+  has none** (`KURURU_DATA_DIR` without `KURURU_AUTOMATIONS=1`); an automation
+  never widens what an agent may do, and a quiet run tells nobody. →
+  [more](docs/invariants.md#automations)
 
 ## Code style
 

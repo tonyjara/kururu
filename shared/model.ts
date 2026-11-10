@@ -26,6 +26,7 @@
  * — and the agents in the profile you are not looking at are still running.
  */
 import type { RemoteView } from "./remote";
+import type { AutomationView } from "./automation";
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
 import type { Board } from "./board";
@@ -1091,6 +1092,12 @@ export interface SessionSnapshot {
    * the window shows a local workspace.
    */
   remote?: RemoteView | null;
+  /**
+   * The active profile's automations (`server/src/automations.ts`): each with
+   * its next slot, the run going and the last that ended. Optional, so a
+   * client of a server from before them draws no section.
+   */
+  automations?: AutomationView[];
 }
 
 /** What an agent (or a Claude Code hook) may tell kururu about itself. */

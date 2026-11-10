@@ -498,6 +498,21 @@ export class Harness {
     }
   }
 
+  /** What an agent last said, as its Stop hook reported it: an automation's run reads its result line here. */
+  lastReply(agentId: string): string | null {
+    return this.replies.get(agentId) ?? null;
+  }
+
+  /**
+   * A line of kururu's own for a profile's Kuru, sent at once with anything
+   * batched — an automation that failed or was missed
+   * (`server/src/automations.ts`), which has no agent of its own to be a
+   * notice about.
+   */
+  announce(profileId: string, line: string): void {
+    this.flush(profileId, line);
+  }
+
   forget(agentId: string): void {
     for (const message of this.held.get(agentId) ?? []) message.events?.dropped();
     const hadInbox = this.inboxes.delete(agentId);

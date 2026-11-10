@@ -75,6 +75,7 @@ import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
+import { AutomationsSection } from "./Automations";
 import { NameField } from "./NameField";
 import { Mascot, Status } from "./Status";
 import { hueStyle } from "./NodeChip";
@@ -136,6 +137,8 @@ interface Props {
    * goes over the window, and on a phone the sidebar is put away first.
    */
   onDatabases: (workspaceId: string) => void;
+  /** An automation's sheet, or a new one's for null. See `Automations.tsx`. */
+  onAutomation: (key: string | null) => void;
   /**
    * Say when a name is being typed in here, because the prefix has to stand
    * down for it: ctrl+a is select-all in a text field, and an armed prefix would
@@ -203,6 +206,7 @@ export function Sidebar({
   profileRef,
   onDeleteWorkspace,
   onDatabases,
+  onAutomation,
   onEditing,
   onPrompt,
   onBoard,
@@ -1358,6 +1362,8 @@ export function Sidebar({
           and the OpenRouter balance were sections here too and are the
           bottom bar's since 2026-10-18 (`Usage.tsx`, `Machines.tsx`,
           `OpenRouter.tsx`). */}
+      {/* Under the agents, since a run is one; the plan's place for it. */}
+      <AutomationsSection onOpen={onAutomation} onPrompt={onPrompt} />
       <Nodes mascots={mascots} remoteOn={remoteOn} onNavigated={navigated} onPrompt={onPrompt} />
       <DevServers workspaces={profile.workspaces} />
 

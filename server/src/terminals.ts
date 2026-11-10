@@ -34,6 +34,7 @@ import { isDirectory } from "./cards";
 import { codexUsageSnapshot } from "./codexusage";
 import {
   activity,
+  automations,
   channels,
   clients,
   type ClientState,
@@ -451,19 +452,24 @@ export function agentCommand(launcher: Launcher): Promise<string> {
   return agentCommandFor(launcher, workspaces.active.id);
 }
 
-/** The same, for a profile that need not be on screen: its own hooks, if it has its own directory. */
-export async function agentCommandFor(launcher: Launcher, profileId: string, sessionId?: string | null): Promise<string> {
+/**
+ * The same, for a profile that need not be on screen: its own hooks, if it
+ * has its own directory. `settings` is the launch settings to build it from,
+ * the profile's own unless a caller narrows them — an automation with
+ * `permissions: ask` drops the bypass flag, and nothing ever adds one.
+ */
+export async function agentCommandFor(launcher: Launcher, profileId: string, sessionId?: string | null, settings = launch): Promise<string> {
   if (launcher.cli === "opencode") {
     const id = sessionId && sessionId.startsWith("ses_") ? sessionId : mintOpencodeSession();
     const found = await findOpencode();
-    const config = prepareOpencodeAgent(id, { port: PORT, withToken: tokenInPtys(), model: launcher.model ?? launch.opencodeModel, web: web.active() });
-    return opencodeAgentCommand(found.path, config, id, launch.bypassClis.includes("opencode") || launch.bypassClis.includes("claude"));
+    const config = prepareOpencodeAgent(id, { port: PORT, withToken: tokenInPtys(), model: launcher.model ?? settings.opencodeModel, web: web.active() });
+    return opencodeAgentCommand(found.path, config, id, settings.bypassClis.includes("opencode") || settings.bypassClis.includes("claude"));
   }
   // Antigravity takes no hooks, MCP servers or web tools per launch — only
   // the session settings that make kururu's reporter its title command.
   // See `shared/agy.ts`.
-  if (launcher.cli === "agy") return launcherCommand(launcher, launch) + agyAgentFlags();
-  return launcherCommand(launcher, launch) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli) + kururuMcpOnly(launcher, profileId);
+  if (launcher.cli === "agy") return launcherCommand(launcher, settings) + agyAgentFlags();
+  return launcherCommand(launcher, settings) + hooksFor(launcher, profileId) + web.launchFlags(launcher.cli) + kururuMcpOnly(launcher, profileId);
 }
 
 /**
@@ -718,6 +724,9 @@ export function reapExited(): void {
      * and the card's ↻ or ■ is what takes the tab away.
      */
     if (workspaces.isCardDev(agent.id)) continue;
+    // An automation's shell run, whose status is printed on its screen as it
+    // exits: the clock reads it, then ends the terminal itself.
+    if (automations?.holds(agent.id)) continue;
     // A Kuru that died starting, for the same reason: the tab is the only
     // record of why, and the next start is what takes it away.
     if (harness.diedStarting(agent.id)) continue;

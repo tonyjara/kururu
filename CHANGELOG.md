@@ -23,6 +23,18 @@ shows, so it is written once and read in three places — see
   paste and press Save; the agent is told "saved" and never sees the value.
   Agents ask with `vault ask`, Kuru with `ask_secret`; `vault list` and
   `list_secrets` name what is kept. See `docs/vault.md`.
+- **Automations: things kururu does on a schedule, on this Mac.** A section
+  in the sidebar under the agents lists each with a dot for its state and
+  its next run; its sheet has the form, the next five runs and the last
+  twenty. A schedule is one line in words with its time zone — `every 2
+  weeks on mon at 09:00 America/Asuncion from 2026-11-23`, `cron … <zone>`,
+  `once …`, `manual` — and the task is an agent given a prompt (a slash
+  command works) or a shell command, in the workspace's folder, in its
+  agents' pane. A run that finds the Mac asleep runs once when it wakes, if
+  it is within the catch-up window; runs never stack; every skip and miss is
+  in the history with its reason. A failure notifies you and tells Kuru.
+  The agent is closed two minutes after its turn, and Open conversation
+  brings it back. See `docs/plans/automations.md`.
 - **Claude Fable 5.2** in the + menu's models, beside Fable 5.1, which
   stays. Its tokens are priced on the Usage page at Anthropic's list price
   ($8 in, $40 out per million, less than 5.1).

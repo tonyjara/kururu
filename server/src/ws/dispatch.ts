@@ -17,6 +17,7 @@ import { dbViewerVerbs } from "./dbviewer";
 import { boardVerbs } from "./board";
 import { readerVerbs } from "./reader";
 import { vaultVerbs } from "./vault";
+import { automationVerbs } from "./automations";
 
 /**
  * One frame off a client's socket. Everything past the gate is trusted to be
@@ -81,4 +82,5 @@ const VERBS: ReadonlyArray<(ws: WebSocket, st: ClientState, msg: ClientMessage) 
   boardVerbs,
   readerVerbs,
   vaultVerbs,
+  automationVerbs,
 ];

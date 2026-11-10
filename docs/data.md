@@ -72,9 +72,10 @@ search still finds their cards.
 | `cards_fts`, `turns_fts` | FTS5 over titles, bodies and turns, accents folded |
 | `meta` | the file's own facts; nothing reads it today |
 | `sim_pool` | each project's simulators for the slot queue: what `simctl` cannot say — booted since, the fingerprint installed, the lease, when last used. Never exported: a udid means nothing on another Mac. See [slots](slots.md#simulators) |
+| `automations`, `automation_runs` | the things kururu does on a schedule: each definition's text as approved, its home, on or off and why, its anchor day and next slot; and one row per slot it came to — run, skipped, missed or interrupted, with why, the result line, a shell run's last lines, the session id. A run's row is unique by automation and slot and written before anything starts. Not in the export yet (the plan's phase 3). See [the plan](plans/automations.md) |
 | `turn_pins` | the lines pinned in Kuru's drawer: a turn id and when it was pinned. In the export as the turn's `pinnedAt`, since a restore mints new turn ids. See [voice](voice.md#the-drawer) |
 
-`turns_at`, the `cards_au` trigger's `when`, `sim_pool` and `turn_pins` are kept by
+`turns_at`, the `cards_au` trigger's `when`, `sim_pool`, `turn_pins` and the two automation tables are kept by
 `keepShape` on every open rather than by a numbered migration, so the version
 does not move and the installed app's older server still opens the file.
 

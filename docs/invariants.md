@@ -537,3 +537,42 @@ a lane. The rule is `shared/slots.ts`, the script's lanes and gates unchanged.
 only once a pool exists, never on a lent simulator or a checkout a build
 names. Nothing of it is the pty host's. → [slots](slots.md)
 
+## Automations
+
+**An automation lives in the database, and a file never switches one on.**
+What runs is the definition's text as saved (`automations.text`), read by
+`parseAutomation` (`shared/automation.ts`) every time; a file in a project
+is offered or shown as a difference, from the plan's phase 3, and never
+runs by being there.
+
+**An automation fires on one host, the one its record names, and a slot
+fires once.** `server/src/automations.ts` fires only rows whose `home` is
+this node's name, and writes the run's row — unique by automation and slot —
+before anything starts: a second server on the file, or one restarted in the
+same second, is refused the insert and starts nothing. A row left `running`
+whose terminal is gone at start (found by id *and* by the run's tag in the
+terminal's command line, since ids are given out again after a host restart)
+is written `interrupted`, so nothing holds the schedule up for good.
+
+**An automation never widens what an agent may do.** Its agent starts on the
+profile's own launcher line, hooks and bypass flag as a card's run has them;
+`permissions: ask` drops the flag, and nothing adds one. The launcher is the
+one named, never another CLI's substituted for it: one that is retired makes
+the run a skip that asks for an edit.
+
+**The clock is the server's, never the pty host's, and an isolated instance
+has none.** With `KURURU_DATA_DIR` set the tick stays off unless
+`KURURU_AUTOMATIONS=1`, so a scratch server on a copy of the real database
+cannot start the owner's agents. A restart never fires anything by itself: a
+slot is due by the clock and the rows, or it is not.
+
+**A quiet run tells nobody.** A failed, missed, skipped or interrupted run
+raises one notification through the server's gate and one `[kururu]` line to
+the profile's Kuru, unless the definition says `tell: never`; an `ok` or a
+finding says nothing new (a finished agent's ordinary notice still reaches
+Kuru) until the plan's phase 2.
+
+**`sleep.ts`'s rule widens by one case:** an automation's own agent, two
+minutes after its run ended, under the same checks (`Sleeper.whyAwake`) —
+nothing under it, no question on its screen, its conversation found on disk.
+→ [the plan](plans/automations.md)

@@ -2051,6 +2051,289 @@ a.machine-name:hover {
   color: var(--danger);
 }
 
+/* --------------------------------------------------------------------------
+   Automations (`Automations.tsx`): a row each under the agents — a dot for
+   the state, the name, and the one fact on the right — and the sheet with
+   the form and the last twenty runs. The dot's colours are the agent states'
+   own, so "running" and "asking" read the same here as on an agent's row;
+   a failure is the palette's danger and a finding the done blue.
+   -------------------------------------------------------------------------- */
+.side-auto {
+  flex: none;
+}
+.auto-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px;
+  overflow-y: auto;
+  max-height: 25vh;
+}
+.auto-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-lg);
+}
+.auto-item:hover {
+  background: var(--chrome-high);
+}
+.auto-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.auto-row:hover,
+.auto-row:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+.auto-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--idle);
+}
+.auto-dot-quiet {
+  background: var(--accent);
+}
+.auto-dot-running {
+  background: var(--working);
+}
+.auto-dot-asking {
+  background: var(--blocked);
+}
+.auto-dot-finding {
+  background: var(--done);
+}
+.auto-dot-failed,
+.auto-dot-broken {
+  background: var(--danger);
+}
+.auto-dot-paused {
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--border) var(--dimmer);
+}
+.auto-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+}
+.auto-home {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+.auto-when {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+.auto-when-bad {
+  color: var(--danger);
+}
+.auto-more {
+  flex: none;
+  display: inline-flex;
+  margin-right: 2px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  opacity: 0;
+}
+.auto-item:hover .auto-more,
+.auto-more:focus-visible {
+  opacity: 1;
+}
+:root[data-narrow] .auto-more {
+  opacity: 1;
+}
+.auto-more:hover {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+
+.auto-sheet {
+  width: min(1000px, 100%);
+}
+.auto-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.auto-form {
+  flex: 1 1 55%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+.auto-history {
+  flex: 1 1 45%;
+  min-width: 0;
+  padding: 12px 14px;
+  overflow-y: auto;
+  border-left: var(--border) solid var(--line);
+}
+.auto-history h3 {
+  margin: 0 0 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+}
+.auto-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.auto-field > span {
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.auto-field small,
+.auto-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+.auto-bad,
+.auto-note.auto-bad {
+  color: var(--danger);
+}
+.auto-body-text {
+  resize: vertical;
+  min-height: 48px;
+}
+.auto-row2 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.auto-five {
+  margin-top: -4px;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.auto-five-head {
+  color: var(--dimmer);
+}
+.auto-five ol {
+  margin: 2px 0 0;
+  padding-left: 20px;
+  font-family: var(--mono);
+}
+.auto-seg {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.auto-seg .button {
+  padding: 5px 10px;
+}
+.auto-seg .auto-seg-on {
+  color: var(--text);
+  background: var(--chrome-high);
+  box-shadow: inset 0 0 0 var(--border) var(--line-high);
+}
+.auto-actions {
+  flex-wrap: wrap;
+}
+.auto-runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auto-run {
+  padding: 6px 8px;
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.auto-run-quiet {
+  opacity: 0.7;
+}
+.auto-run-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+}
+.auto-run-when {
+  font-family: var(--mono);
+  color: var(--dim);
+}
+.auto-run-state {
+  color: var(--text);
+}
+.auto-run-len {
+  color: var(--dimmer);
+}
+/* Two classes, to win over `.button`'s own flex further down the file. */
+.auto-run .auto-run-open {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: var(--fs-sm);
+}
+.auto-run .auto-run-open + .auto-run-open {
+  margin-left: 0;
+}
+.auto-run-words {
+  margin-top: 3px;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.auto-run-output {
+  margin: 4px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--chrome);
+  font: var(--fs-sm) var(--mono);
+  white-space: pre-wrap;
+}
+/* A phone: the form and the history one above the other, the sheet scrolling as one. */
+:root[data-narrow] .auto-body {
+  flex-direction: column;
+  overflow-y: auto;
+}
+:root[data-narrow] .auto-form,
+:root[data-narrow] .auto-history {
+  flex: none;
+  overflow: visible;
+}
+:root[data-narrow] .auto-history {
+  border-left: none;
+  border-top: var(--border) solid var(--line);
+}
+:root[data-narrow] .auto-row2 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* What pushes the cog and the QR code to the header's far end. A spacer
    rather than an auto margin on the first of them, so the profile's name —
    which shrinks with an ellipsis — is what gives way, and so the close button
