@@ -109,6 +109,47 @@ vault ask --title "Bancard staging keys for Pylink" --reason "PYL-14's local che
   is kept in the Keychain and refused for the file;
 - written `0600` beside itself and renamed in.
 
+## Using a secret: `vault run`
+
+```sh
+vault run --secret pylink/bancard-staging-private=BANCARD_PRIVATE_KEY -- bun run smoke
+vault run --askpass deck/sudo -- sudo -A systemctl restart thing
+```
+
+`server/src/vaultrun.ts`, through `POST /api/vault/run` (loopback only).
+
+- **The server runs the command**, not the CLI, so there is no endpoint that
+  hands a caller a value. The CLI sends its argv, folder and environment;
+  the server checks every item exists, asks for approval when an item says
+  so, reads the values, adds them to that environment and starts the
+  command in a process group of its own with stdin closed (`detached`,
+  `stdio: ignore`). A CLI that hangs up — Ctrl-C, its agent ended — ends the
+  group, `SIGTERM` then `SIGKILL` after three seconds. The command is argv,
+  not a shell line: `sh -c '…'` when it needs one.
+- **The output** comes back as JSON lines — stdout and stderr as base64 of
+  the masked bytes, kururu's own words as `note`, then `exit` — and the CLI
+  exits with the command's code: 2 for an item not kept, 77 for not allowed,
+  127 for a command not found.
+- **Masking** (`shared/mask.ts`) replaces each value, its base64 and its
+  URL-encoding with `[vault:<name>]`, on bytes, across chunk boundaries,
+  holding back only a tail that could still begin a value. Values shorter
+  than four characters are not masked: they would mask every such letter.
+  What it misses is anything the command transforms first.
+- **`--askpass`** puts no value in the environment. `SUDO_ASKPASS` points at
+  `~/.local/state/kururu/bin/vault-askpass`, and `KURURU_VAULT_TICKET` holds
+  a ticket the askpass trades with `POST /api/vault/askpass` for the value,
+  which it prints to sudo — three times at most, while the run lives. sudo
+  on another machine runs its own askpass, so the Steam Deck's is not this
+  (see the plan's "The Steam Deck, later").
+- **Every run is a line** in `~/.local/share/kururu/vault-uses.jsonl`
+  (`0600`, off the backup): when, who (an agent by its card's code or title
+  with its id, Kuru, or "a shell"), the items, the command as written —
+  masked too, in case a value was typed into it — the folder, `free`,
+  `owner`, `lasting` or `denied`, the exit code and how long. Who is read
+  off `KURURU_AGENT_ID` and believed only for an agent the server has; a
+  process that sets another agent's id is believed, which matters as much
+  as the threat model says the Keychain does.
+
 ## `list_secrets` and `vault list`
 
 Every item by name and label, its rule, the env files it was written to and

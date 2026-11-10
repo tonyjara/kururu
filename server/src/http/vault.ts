@@ -1,6 +1,7 @@
 /**
- * The vault for programs on this Mac: `vault ask` and `vault list` today,
- * `vault run` once the broker is built (`server/src/vault-cli.ts`).
+ * The vault for programs on this Mac: `vault ask`, `vault list`, `vault
+ * run` and the askpass `vault run --askpass` points sudo at
+ * (`server/src/vault-cli.ts`).
  *
  * Programs on this Mac only — loopback, no `Origin`, nothing a proxy added
  * (`localCaller`, as `/mcp/web` is) — and behind the gate as well, which on a
@@ -10,11 +11,18 @@
  * An ask is a request held open until the owner answers, up to the fifteen
  * minutes the dialog stays up; a caller that hangs up — Ctrl-C, its agent
  * stopped — closes the dialog as cancelled, since nobody is left to hear it.
+ * A run is a response streamed as JSON lines while the command runs; a
+ * caller that hangs up ends the command's process group.
+ *
+ * The askpass's trade is the one answer here that carries a value, to the
+ * askpass sudo started, for a ticket only that run's environment holds. It is
+ * no wider than the run itself: the command could read its own environment.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { cardCode } from "../../../shared/board";
 import { adoptAskRequest, itemLine, outcomeLines } from "../../../shared/vaultitems";
-import { host, vault, workspaces } from "../context";
+import { harness, host, vault, vaultRuns, workspaces } from "../context";
+import { adoptRunRequest, type RunEvent } from "../vaultrun";
 import { localCaller } from "../web/chain";
 import { json, readJsonBody } from "./respond";
 import type { Route } from "./router";
@@ -23,6 +31,7 @@ import type { Route } from "./router";
 export function callerName(agentId: string | null): { name: string; agentId: string | null } {
   const agent = agentId ? host.find(agentId) : undefined;
   if (!agent || !agentId) return { name: "a shell", agentId: null };
+  if (harness.isHarness(agentId)) return { name: "Kuru", agentId };
   const profileId = workspaces.profileOf(agentId);
   const profile = profileId ? workspaces.profile(profileId) : undefined;
   for (const w of profile?.workspaces ?? []) {
@@ -86,6 +95,55 @@ export const vaultRoutes: Route[] = [
       if (hangup.signal.aborted) return;
       const labels = new Map(ask.fields.map((f, i) => [String(i), f.label]));
       json(res, { id: opened.id, outcomes, text: outcomeLines(outcomes, labels) });
+    },
+  },
+
+  {
+    path: "/api/vault/run",
+    method: "POST",
+    handle: async (req, res) => {
+      if (refuseRemote(req, res)) return;
+      let body: Record<string, unknown>;
+      try {
+        const raw = await readJsonBody(req, 512 * 1024);
+        body = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+      } catch {
+        json(res, { error: "that was not JSON" }, 400);
+        return;
+      }
+      const run = adoptRunRequest(body);
+      if ("error" in run) {
+        json(res, { error: run.error }, 400);
+        return;
+      }
+      const hangup = new AbortController();
+      res.on("close", () => {
+        if (!res.writableFinished) hangup.abort();
+      });
+      res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
+      const emit = (ev: RunEvent) => {
+        if (!res.writableEnded && !hangup.signal.aborted) res.write(`${JSON.stringify(ev)}\n`);
+      };
+      await vaultRuns.run(run, callerName(agentOf(body)), emit, hangup.signal);
+      if (!res.writableEnded) res.end();
+    },
+  },
+
+  {
+    path: "/api/vault/askpass",
+    method: "POST",
+    handle: async (req, res) => {
+      if (refuseRemote(req, res)) return;
+      let ticket = "";
+      try {
+        const raw = (await readJsonBody(req, 1024)) as { ticket?: unknown } | null;
+        ticket = typeof raw?.ticket === "string" && /^[0-9a-f]{48}$/.test(raw.ticket) ? raw.ticket : "";
+      } catch {
+        // No ticket, then.
+      }
+      const value = ticket ? await vaultRuns.askpass(ticket) : null;
+      if (value === null) json(res, { error: "that ticket is spent or its run has ended" }, 403);
+      else json(res, { value });
     },
   },
 ];

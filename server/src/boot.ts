@@ -116,7 +116,8 @@ import { claudeTranscriptPath, readTail as readSessionTail } from "./sessions";
 import { Slots, writeSlotCommand } from "./slots";
 import { machineStore } from "./keychain";
 import { Vault } from "./vaultstore";
-import { writeVaultCommand } from "./vaultbin";
+import { vaultAskpassPath, writeVaultCommand } from "./vaultbin";
+import { usesPath, VaultRuns } from "./vaultrun";
 import { specsSnapshot } from "./specs";
 import { dataDir, dbPath, Store } from "./store";
 import { pollAccountUsage, pollOpenRouterAccount, pollServers, stopSweeps, wakeProcesses, web } from "./sweeps";
@@ -653,6 +654,21 @@ export async function attach(port: Port): Promise<void> {
     // The login Keychain on a Mac; 0600 files on a node with none. See `keychain.ts`.
     store: machineStore("kururu-vault", join(configDir(), "vault")),
     changed: (asks) => broadcast({ type: "vault-asks", asks }),
+  }));
+  provide("vaultRuns", new VaultRuns({
+    item: (name) => vault.item(name),
+    valueOf: (name) => vault.valueOf(name),
+    used: (names, by) => vault.used(names, by),
+    approve: async ({ items }, note) => {
+      // Approval is step 4 of the plan; until it is built, an item that asks is refused rather than used unasked.
+      const asking = items.filter((i) => i.use === "ask").map((i) => i.name);
+      if (!asking.length) return "free";
+      note(`${asking.join(", ")} asks the owner before each use, and this kururu cannot ask yet`);
+      return "denied";
+    },
+    askpassPath: vaultAskpassPath,
+    port: PORT,
+    logPath: () => usesPath(dataDir()),
   }));
   writeVaultCommand();
   provide("automations", new Automations({

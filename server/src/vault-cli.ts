@@ -3,9 +3,14 @@
  *
  * An agent never holds a vault value, and so this process never holds one
  * either: `ask` opens the owner's dialog and waits for a word per field,
- * `list` prints names. The server does everything that touches a value. A
- * CLI that fetched a value and handed it to a command would make a fetch the
- * interface, and anything that can run this can run a fetch and print it.
+ * `list` prints names, and `run` sends the command to the server, which runs
+ * it with the items in its environment and streams its output back masked.
+ * A CLI that fetched a value and handed it to a command would make a fetch
+ * the interface, and anything that can run this can run a fetch and print it.
+ *
+ * The one exception is `askpass`, which is not for agents: it is what
+ * `SUDO_ASKPASS` points at during a `run --askpass`, and it prints the value
+ * to sudo, which reads it, for a ticket only that run's environment holds.
  *
  * It knows which agent it is the way `slot` does — `KURURU_AGENT_ID` in the
  * pty's environment — and the server believes that only of an agent it has.
@@ -45,14 +50,25 @@ const HELP = `vault — keep secrets out of transcripts.
       The same ask as JSON on stdin: {"title", "reason", "fields": [{"label",
       "name", "env": {"file", "variable"}, "use"}]}.
 
+  vault run --secret ITEM=VAR [--secret …] [--askpass ITEM] -- COMMAND [ARGS…]
+      Run one command with each item in its environment as VAR. The server
+      runs it, in this folder with this environment, stdin closed; its
+      output comes back with every value (and its base64 and URL-encoding)
+      replaced by [vault:ITEM]. Exits with the command's code. An item set
+      to ask makes this wait for the owner to allow it (exit 77 if they do
+      not). --askpass gives ITEM to \`sudo -A\` instead of the environment:
+      vault run --askpass deck/sudo -- sudo -A systemctl restart thing
+      Every run is logged: who, which items, the command, where, when.
+
   vault list
       The vault's items: name, label, whether a use asks the owner first, the
       env files each was written to. Never a value.
 
 Never print, echo or cat a secret, read it from the Keychain yourself, or
-ask the owner to paste one into a chat: ask with this, and use it with
-\`vault run\` once that exists. Exit codes: 0 done, 1 not everything was
-saved, 2 a usage error or a refusal, 6 no kururu server.
+ask the owner to paste one into a chat: ask with \`vault ask\`, use it with
+\`vault run\`. Exit codes: 0 done, 1 not everything was saved, 2 a usage
+error or a refusal, 6 no kururu server, 77 not allowed; a run otherwise
+exits with its command's code.
 `;
 
 function call(path: string, body: unknown | null): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -154,6 +170,105 @@ async function askCommand(args: string[]): Promise<void> {
   process.exit(outcomes.length && outcomes.every((o) => o.outcome === "saved") ? 0 : 1);
 }
 
+/** `--secret ITEM=VAR` and `--askpass ITEM` up to `--`, the command after it. */
+async function runCommand(args: string[]): Promise<void> {
+  const secrets: { name: string; variable: string }[] = [];
+  let askpass: string | null = null;
+  let i = 0;
+  for (; i < args.length; i += 1) {
+    const flag = args[i]!;
+    if (flag === "--") break;
+    const value = args[i + 1];
+    if (value === undefined) die(`${flag} needs a value`);
+    i += 1;
+    if (flag === "--secret") {
+      const at = value.lastIndexOf("=");
+      if (at <= 0) die("--secret is ITEM=VARIABLE, such as pylink/bancard-staging-private=BANCARD_PRIVATE_KEY");
+      secrets.push({ name: value.slice(0, at), variable: value.slice(at + 1) });
+    } else if (flag === "--askpass") askpass = value;
+    else die(`unknown flag ${flag}; see vault --help`);
+  }
+  const argv = args.slice(i + 1);
+  if (args[i] !== "--" || !argv.length) die("put the command after --: vault run --secret ITEM=VAR -- command args");
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") env[k] = v;
+  const payload = JSON.stringify({ argv, cwd: process.cwd(), env, secrets, askpass, agentId });
+  await new Promise<void>((resolve) => {
+    const req = request(
+      { host: "127.0.0.1", port, path: "/api/vault/run", method: "POST", headers: { ...tokenHeaders(), "content-type": "application/json", "content-length": Buffer.byteLength(payload) } },
+      (res) => {
+        if ((res.statusCode ?? 0) >= 400) {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("end", () => {
+            let why = Buffer.concat(chunks).toString("utf8");
+            try {
+              why = String((JSON.parse(why) as { error?: unknown }).error ?? why);
+            } catch {
+              // As it came.
+            }
+            die(why.trim() || `the server said ${res.statusCode}`);
+          });
+          return;
+        }
+        let buffered = "";
+        let exited = false;
+        const line = (text: string) => {
+          if (!text) return;
+          let ev: Record<string, unknown>;
+          try {
+            ev = JSON.parse(text) as Record<string, unknown>;
+          } catch {
+            return;
+          }
+          if (typeof ev.o === "string") process.stdout.write(Buffer.from(ev.o, "base64"));
+          else if (typeof ev.e === "string") process.stderr.write(Buffer.from(ev.e, "base64"));
+          else if (typeof ev.note === "string") say(ev.note);
+          else if ("exit" in ev) {
+            exited = true;
+            const code = typeof ev.exit === "number" ? ev.exit : ev.signal ? 128 + 15 : 1;
+            process.stdout.write("", () => process.exit(code));
+          }
+        };
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => {
+          buffered += c;
+          let nl = buffered.indexOf("\n");
+          while (nl >= 0) {
+            line(buffered.slice(0, nl));
+            buffered = buffered.slice(nl + 1);
+            nl = buffered.indexOf("\n");
+          }
+        });
+        res.on("end", () => {
+          line(buffered);
+          if (!exited) die("the kururu server went away while the command ran; it was ended with it", 6);
+          resolve();
+        });
+      },
+    );
+    req.on("error", (err) => die(`no kururu server answered on :${port} (${err.message})`, 6));
+    // Ctrl-C here ends the command there: the server ends its process group when this hangs up.
+    for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+      process.on(sig, () => {
+        req.destroy();
+        process.exit(130);
+      });
+    }
+    req.end(payload);
+  });
+}
+
+/** sudo's askpass during a `run --askpass`: the value to sudo, for the run's ticket. Not for agents. */
+async function askpassCommand(): Promise<void> {
+  const ticket = process.env.KURURU_VAULT_TICKET;
+  if (!ticket) die("askpass is for sudo during a vault run --askpass, not to be run by hand");
+  const answer = await call("/api/vault/askpass", { ticket }).catch(() => null);
+  const value = answer && answer.status === 200 ? answer.body.value : null;
+  if (typeof value !== "string") die("the vault has no password for this run any more");
+  process.stdout.write(`${value}\n`);
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === "--help" || command === "-h" || command === "help") {
@@ -161,6 +276,8 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "ask") return askCommand(rest);
+  if (command === "run") return runCommand(rest);
+  if (command === "askpass") return askpassCommand();
   if (command === "list") {
     const answer = await ask("/api/vault/list", null);
     process.stdout.write(`${String(answer.text ?? "")}\n`);

@@ -23,6 +23,11 @@ shows, so it is written once and read in three places — see
   paste and press Save; the agent is told "saved" and never sees the value.
   Agents ask with `vault ask`, Kuru with `ask_secret`; `vault list` and
   `list_secrets` name what is kept. See `docs/vault.md`.
+- **Run a command with a key it never shows.** `vault run --secret
+  NAME=VAR -- command` runs the command with the key in its environment and
+  gives the agent its output with the key masked, and `--askpass` hands a
+  password to `sudo -A` instead. Every use is written down: who, which key,
+  what command, where and when.
 - **Automations: things kururu does on a schedule, on this Mac.** A section
   in the sidebar under the agents lists each with a dot for its state and
   its next run; its sheet has the form, the next five runs and the last

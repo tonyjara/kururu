@@ -54,6 +54,7 @@ import { Sleeper } from "./sleep";
 import type { Slots } from "./slots";
 import type { Vault } from "./vaultstore";
 import type { Automations } from "./automations";
+import type { VaultRuns } from "./vaultrun";
 import { Store } from "./store";
 import { Launches } from "./usage/attribute";
 import { NodeUsage } from "./usage/remote";
@@ -241,6 +242,8 @@ export function kuruKey(): string | null {
 export let secrets!: Secrets;
 /** The vault's own items and the dialogs that fill them. See `vaultstore.ts`. */
 export let vault!: Vault;
+/** The broker: commands run with vault items in their environment. See `vaultrun.ts`. */
+export let vaultRuns!: VaultRuns;
 /** Which node polls Telegram for the others, and the chat's words crossing the links. Null until the links exist. See `lead.ts`. */
 export let lead: TelegramLead | null = null;
 
@@ -839,6 +842,7 @@ interface Provided {
   peerKurus: PeerKurus | null;
   secrets: typeof secrets;
   vault: typeof vault;
+  vaultRuns: typeof vaultRuns;
   lead: TelegramLead | null;
   hostInfo: typeof hostInfo;
   hostProtocol: typeof hostProtocol;
@@ -920,6 +924,9 @@ const assigners: { [K in keyof Provided]: (value: Provided[K]) => void } = {
   },
   vault: (value) => {
     vault = value;
+  },
+  vaultRuns: (value) => {
+    vaultRuns = value;
   },
   lead: (value) => {
     lead = value;

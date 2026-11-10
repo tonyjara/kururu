@@ -12,12 +12,12 @@
 import type { WebSocket } from "ws";
 import { adoptUses, adoptValues, validItemName, type VaultPage } from "../../../shared/vaultitems";
 import type { ClientMessage } from "../../../shared/wire";
-import { type ClientState, vault } from "../context";
+import { type ClientState, vault, vaultRuns } from "../context";
 import { reply, replyAsync } from "./reply";
 
 /** What Settings → Vault draws above the census. */
 export function vaultPage(): VaultPage {
-  return { store: vault.storeKind, items: vault.list(), uses: [] };
+  return { store: vault.storeKind, items: vault.list(), uses: vaultRuns.uses() };
 }
 
 export function vaultVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): boolean {
@@ -73,7 +73,10 @@ export function vaultVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): 
       });
       return true;
     case "vault-clear-uses":
-      reply(ws, msg.id, vaultPage);
+      reply(ws, msg.id, () => {
+        vaultRuns.clearUses();
+        return vaultPage();
+      });
       return true;
   }
   return false;

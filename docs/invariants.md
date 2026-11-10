@@ -148,7 +148,11 @@ broadcasts or returns a value; `vault.json` holds names and rules only, is
 never lent and is off the backup; `server/test/vaultitems.test.ts` greps
 everything that leaves for the values. The limit is stated, not hidden: an
 item made by `/usr/bin/security` is readable by any process running as the
-owner. → [vault](vault.md)
+owner. A command uses one through `vault run` (`server/src/vaultrun.ts`):
+the server runs it, the value in its environment or given to sudo by an
+askpass ticket, its output masked (`shared/mask.ts`), every use a line in
+`vault-uses.jsonl`; no route hands a caller a value but the askpass's, for a
+ticket only that run's environment holds. → [vault](vault.md)
 
 ## The usage bar
 
