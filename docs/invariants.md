@@ -216,6 +216,17 @@ management key, pasted once in Settings, kept 0600 in
 A client is sent its `hint` and dollars, never the key. →
 `shared/openrouter.ts`
 
+**On a Mac the keys themselves are in the Keychain** — OpenRouter's,
+Telegram's, Firecrawl's, the web providers', the Claude tokens for lending —
+and the file keeps a marker where each was (`server/src/configkeys.ts`).
+`readConfigFile` puts the key back and `writeConfigFile` takes it out, so
+no reader and not the lending knows; the server turns it on at start and
+moves any key still in the clear, read back and compared, the file put back
+as it was when the Keychain does not keep it. Off for tests and CLIs, on
+Linux, with `KURURU_KEYCHAIN_CONFIG=0`; `vault to-files` reverses it for a
+downgrade. `access.json` and the node keys stay files. →
+[vault](vault.md#the-macs-own-keys)
+
 ## The web for agents
 
 **The web is lent to agents through a chain, never a key.** Every agent

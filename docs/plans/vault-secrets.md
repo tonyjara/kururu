@@ -7,6 +7,17 @@ the stored-credential modules, the harness's MCP endpoint and the `slot`
 CLI — and from trying `/usr/bin/security` against a throwaway keychain. It
 is built in the same session, in the order at the end, one commit each.
 
+**As built (2026-11-10, five commits):** all five steps, and the reference
+is now [`docs/vault.md`](../vault.md). Where the build moved from this
+plan: the config keys' marker carries a random nonce, not a digest of the
+key, so the file says nothing about the value; the downgrade is `vault
+to-files`, which refuses while a server answers; `bin/vault-askpass` is its
+own script beside `bin/vault`, because sudo runs a program and not a command
+line; values under four characters are not masked; the config keys move
+only when the server turns it on, never in a test or a CLI. Not built: the
+Steam Deck's sudo over ssh (below), and the signed helper that would close
+the gap around the broker.
+
 **The ask, in the owner's words (2026-11-10):** "I have two keys, a public
 and a private one. Show me the dialogue and place the keys, and then you
 underneath put them wherever they need to be without actually reading them.

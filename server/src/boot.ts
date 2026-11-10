@@ -8,7 +8,7 @@
  * entry point reads as the sequence it is.
  */
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -26,7 +26,9 @@ import { cardDoneFor, cardRunPrompt, isDirectory, runCardAt } from "./cards";
 import { Channels } from "./channels";
 import { codexUsageSnapshot } from "./codexusage";
 import { agyUsageSnapshot } from "./agy";
-import { configDir } from "./config";
+import { configDir, configPath, readConfigFile, readConfigFileRaw, sealConfigSecrets, writeConfigFile } from "./config";
+import { keychainSealer, moveConfigSecrets, OWNER_ONLY, sealableFiles, sealsConfig } from "./configkeys";
+import { writeAtomic } from "./fsutil";
 import {
   activity,
   automations,
@@ -412,6 +414,28 @@ function slotWhoOf(agentId: string): string | null {
  * which is what stops a stale blob from showing tabs that are not there.
  */
 export async function attach(port: Port): Promise<void> {
+  // Before any module reads a key: on a Mac, the keys in kururu's config
+  // files live in the Keychain from here on, and any still in a file move
+  // there now. See `configkeys.ts`; KURURU_KEYCHAIN_CONFIG=0 keeps them in
+  // their files, and `vault to-files` puts them back.
+  if (sealsConfig()) {
+    sealConfigSecrets(keychainSealer(process.env.KURURU_VAULT_KEYCHAIN || undefined));
+    moveConfigSecrets({
+      files: () => {
+        try {
+          return sealableFiles(readdirSync(configDir()));
+        } catch {
+          return [];
+        }
+      },
+      readRaw: readConfigFileRaw,
+      read: readConfigFile,
+      // Each of these files is a kind or never shared already (`shared/secrets.ts`), and stays owner-only.
+      write: (name, value) => writeConfigFile(name, value, OWNER_ONLY),
+      restore: (name, raw) => writeAtomic(configPath(name), `${JSON.stringify(raw, null, 2)}\n`, { mode: OWNER_ONLY }),
+      log: (line) => console.log(`kururu: ${line}`),
+    });
+  }
   provide("host", new HostLink(port));
   host.onAgents = () => {
     // Before anybody reads it: the programs an older host cannot name, filled

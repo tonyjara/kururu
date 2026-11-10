@@ -181,10 +181,49 @@ the log, with Clear. On a phone the page is for looking, as the census is.
 Every item by name and label, its rule, the env files it was written to and
 its last use. Never a value.
 
+## The Mac's own keys
+
+The keys kururu kept in `0600` JSON files in `~/.config/kururu` — OpenRouter's
+management key (`openrouter.json`), the Telegram bot's token
+(`telegram.json`), the cloud Firecrawl key (`firecrawl.json`), the web
+providers' keys (`web-<id>.json`), the Claude tokens made for lending
+(`claude-lend.json`), a lent Claude token (`claude-token.json`) — are kept in
+the Keychain on a Mac, service `kururu-config`, account `<file>:<field>`
+(`server/src/configkeys.ts`).
+
+- **Behind `config.ts`.** `writeConfigFile` puts each key in the Keychain
+  and writes `"kururu-keychain:<nonce>"` in its place; `readConfigFile` puts
+  the key back. Every module, the lending's `readSource` and the Vault page's
+  hints read what they always did, and the settings beside each key stay in
+  the file. A key a file no longer has, or a file removed, takes its item
+  with it.
+- **Read once per write.** `readConfigFile` is synchronous, so `security` is
+  a `spawnSync`, and each key is remembered by its marker's nonce, which
+  every write changes: a poller costs one call per process.
+- **Moved at start.** `attach` turns it on before any module reads a key and
+  moves every key still in the clear, reading each file back and comparing;
+  a file that does not read back the same is written back as it was. A
+  refusal on a later write keeps that key in its file and says so by name.
+- **Off** for tests and every CLI (the server turns it on), on Linux, for an
+  isolated instance with `KURURU_VAULT_STORE=file`, and with
+  `KURURU_KEYCHAIN_CONFIG=0`. `KURURU_VAULT_KEYCHAIN` points it at another
+  keychain file, as it does the items.
+- **Not moved:** `access.json`, read by the hooks and CLIs in other processes
+  and on a child with no Keychain; `node.json` and `nodes.json`, because a
+  locked Keychain at boot would be a node that cannot link.
+- **Going back** to a kururu from before this: quit kururu, run `vault
+  to-files` (it refuses while a server answers), and start the older one —
+  or this one with `KURURU_KEYCHAIN_CONFIG=0`. An older kururu that reads a
+  moved file sees a marker where the key was and acts as if none were set.
+- **On a child** nothing changes: lent keys land as the files they always
+  were, written with nothing to seal them.
+
 ## Tests
 
 `server/test/vaultitems.test.ts` drives an ask from open to answer with a
 store in memory and a scratch home, and greps everything that left the vault
 — what pages were sent, the log, `vault.json`, the caller's answer — for the
 values. `server/test/keychain.test.ts` makes a throwaway keychain in a
-scratch folder and deletes it after, and never touches the login keychain.
+scratch folder and deletes it after, and never touches the login keychain;
+`server/test/configkeys.test.ts` does the same for the config keys, with a
+scratch config folder, and puts the sealer and the environment back after.

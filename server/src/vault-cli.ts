@@ -21,7 +21,11 @@
  * an ask is held open for up to fifteen minutes and `fetch` gives up at five.
  */
 import { request } from "node:http";
+import { readdirSync } from "node:fs";
 import { tokenHeaders } from "../localtoken.mjs";
+import { configDir, configPath, readConfigFileRaw } from "./config";
+import { keychainSealer, OWNER_ONLY, sealableFiles, unsealConfigSecrets } from "./configkeys";
+import { writeAtomic } from "./fsutil";
 
 const NAME = "vault";
 const port = Number(process.env.KURURU_PORT || 7717);
@@ -63,6 +67,12 @@ const HELP = `vault — keep secrets out of transcripts.
   vault list
       The vault's items: name, label, whether a use asks the owner first, the
       env files each was written to. Never a value.
+
+  vault to-files
+      For going back to a kururu from before 2026-11-10 only: every key the
+      server moved from ~/.config/kururu into the Keychain goes back into
+      its file, and its Keychain item is removed. Stop kururu first, and
+      start it again with KURURU_KEYCHAIN_CONFIG=0, or it moves them back.
 
 Never print, echo or cat a secret, read it from the Keychain yourself, or
 ask the owner to paste one into a chat: ask with \`vault ask\`, use it with
@@ -269,6 +279,31 @@ async function askpassCommand(): Promise<void> {
   process.stdout.write(`${value}\n`);
 }
 
+/** The config files' keys back from the Keychain into the files: by file name, never a value. Not with a server running, which would move them back. */
+async function toFilesCommand(): Promise<void> {
+  if (process.platform !== "darwin") die("only a Mac keeps them in the Keychain; nothing to do here", 0);
+  const up = await call("/api/health", null).then(
+    () => true,
+    () => false,
+  );
+  if (up) die(`a kururu server is running on :${port}; quit it first (the tray's Quit), or it moves the keys back the next time it writes one`);
+  let names: string[] = [];
+  try {
+    names = sealableFiles(readdirSync(configDir()));
+  } catch {
+    // No config folder: nothing to do.
+  }
+  const back = unsealConfigSecrets({
+    files: () => names,
+    readRaw: readConfigFileRaw,
+    sealer: keychainSealer(process.env.KURURU_VAULT_KEYCHAIN || undefined),
+    writePlain: (name, value) => writeAtomic(configPath(name), `${JSON.stringify(value, null, 2)}\n`, { mode: OWNER_ONLY }),
+    restore: () => {},
+    log: () => {},
+  });
+  process.stdout.write(back.length ? `back in their files: ${back.join(", ")}\nStart kururu with KURURU_KEYCHAIN_CONFIG=0 to keep them there.\n` : "nothing in the Keychain to put back\n");
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === "--help" || command === "-h" || command === "help") {
@@ -278,6 +313,7 @@ async function main(): Promise<void> {
   if (command === "ask") return askCommand(rest);
   if (command === "run") return runCommand(rest);
   if (command === "askpass") return askpassCommand();
+  if (command === "to-files") return toFilesCommand();
   if (command === "list") {
     const answer = await ask("/api/vault/list", null);
     process.stdout.write(`${String(answer.text ?? "")}\n`);

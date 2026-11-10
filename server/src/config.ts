@@ -18,10 +18,17 @@
  * exactly that case and a settings file is never the reason to fail to start. A
  * write that fails is not worth failing anything over either: the setting is
  * live in this session, and the next start is the one that forgets it.
+ *
+ * On a Mac the server turns on one more thing at start (`sealConfigSecrets`):
+ * the keys among these files — OpenRouter's, Telegram's, Firecrawl's, the
+ * Claude tokens for lending — go to the Keychain on write and come back on
+ * read, a marker in the file where each was. `configkeys.ts` says how and
+ * why here. Off for everything else that imports this, tests included.
  */
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ConfigSealer } from "./configkeys";
 import { writeAtomic } from "./fsutil";
 
 /**
@@ -38,12 +45,30 @@ export function configPath(name: string): string {
   return join(configDir(), name);
 }
 
-/** Whatever is in there, or null. The caller adopts it; nothing here inspects it. */
-export function readConfigFile(name: string): unknown {
+let sealer: ConfigSealer | null = null;
+
+/** The server's, at start, on a Mac: from here on the keys in these files live in the Keychain. See `configkeys.ts`. */
+export function sealConfigSecrets(with_: ConfigSealer | null): void {
+  sealer = with_;
+}
+
+/** The file as it is on disk, markers and all: for moving keys, never for a reader. */
+export function readConfigFileRaw(name: string): unknown {
   try {
     return JSON.parse(readFileSync(configPath(name), "utf8"));
   } catch {
     return null;
+  }
+}
+
+/** Whatever is in there, or null, with any key kept in the Keychain put back. The caller adopts it; nothing here inspects it. */
+export function readConfigFile(name: string): unknown {
+  const raw = readConfigFileRaw(name);
+  if (!sealer || raw === null) return raw;
+  try {
+    return sealer.open(name, raw);
+  } catch {
+    return raw;
   }
 }
 
@@ -57,6 +82,15 @@ export function readConfigFile(name: string): unknown {
  */
 export function writeConfigFile(name: string, value: unknown, mode?: number): boolean {
   const path = configPath(name);
+  if (sealer) {
+    // The keys to the Keychain first; a refusal writes the file as it would
+    // have been without this, and says so by name — never by value.
+    try {
+      value = sealer.seal(name, value, readConfigFileRaw(name));
+    } catch (err) {
+      console.error(`kururu: ${name}'s key stays in the file: the Keychain refused it (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
   try {
     mkdirSync(configDir(), { recursive: true });
     writeAtomic(path, `${JSON.stringify(value, null, 2)}\n`, { mode });
@@ -73,6 +107,13 @@ export function writeConfigFile(name: string, value: unknown, mode?: number): bo
 
 /** Gone from the disk, rather than written as empty — for a secret, the difference matters. */
 export function removeConfigFile(name: string): void {
+  if (sealer) {
+    try {
+      sealer.forget(name, readConfigFileRaw(name));
+    } catch {
+      // The file goes anyway; an item left behind holds a key nobody reads.
+    }
+  }
   try {
     rmSync(configPath(name), { force: true });
   } catch {

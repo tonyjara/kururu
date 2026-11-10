@@ -212,7 +212,8 @@ The load-bearing invariants, one line each, with the argument behind the link:
   open. → [more](docs/invariants.md#the-usage-ledger)
 - **The OpenRouter key, a channel's bot token and the web providers' keys are the
   credentials kururu stores** — 0600, read per request, a client sent its hint,
-  out only sealed to a node. → [more](docs/invariants.md#stored-credentials)
+  out only sealed to a node; on a Mac the key itself in the Keychain behind
+  `readConfigFile` (`configkeys.ts`). → [more](docs/invariants.md#stored-credentials)
 - **The web is lent to agents through a chain, never a key** — four MCP tools at
   `POST /mcp/web` for agents on this Mac, the hand-back to their own tools first.
   → [more](docs/invariants.md#the-web-for-agents)

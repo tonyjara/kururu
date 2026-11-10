@@ -75,6 +75,12 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **Kururu's keys live in the Mac's Keychain.** The OpenRouter key, the
+  Telegram bot's token, the Firecrawl keys and the Claude tokens kept for
+  lending move out of their files in `~/.config/kururu` into the Keychain
+  the first time this version starts; the files keep their other settings.
+  Nothing to do, and nothing changes on a Linux node. Going back to an older
+  version: quit kururu and run `vault to-files` first.
 - **⌘+ and ⌘− zoom the document in a reader, and ⌘0 puts it back.** With a
   reader pane focused they resize its text rather than the whole window — the
   sidebar, the strips and every terminal stay as they were — from 50% to 250%
