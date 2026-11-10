@@ -38,7 +38,7 @@ import { AgentsPage } from "./Agents";
 import { BackupsPage } from "./Backups";
 import { BarPage } from "./Bar";
 import { ChannelsPage } from "./Channels";
-import { InterfacePage } from "./Interface";
+import { FontsPage } from "./Fonts";
 import { KeyboardPage } from "./Keyboard";
 import { MachinesPage } from "./Machines";
 import { NodesPage } from "./Nodes";
@@ -48,7 +48,6 @@ import { OpenRouterPage } from "./OpenRouter";
 import { ProcessesPage } from "./Processes";
 import { ProfilesPage } from "./Profiles";
 import { SpecsPage } from "./Specs";
-import { TerminalPage } from "./Terminal";
 import { UsagePage } from "./Usage";
 import { EditingScope, type Tone } from "./ui";
 import { VaultPage } from "./Vault";
@@ -57,8 +56,7 @@ import { WebPage } from "./Web";
 import { WorkspacesPage } from "./Workspaces";
 
 export type Tab =
-  | "terminal"
-  | "interface"
+  | "fonts"
   | "mascot"
   | "bar"
   | "profiles"
@@ -89,8 +87,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
   {
     label: "Appearance",
     pages: [
-      ["terminal", "Terminal", "The type and the cursor every terminal is set in."],
-      ["interface", "Interface", "The face and the size kururu's own text is set in."],
+      ["fonts", "Fonts", "The type every terminal is set in, and kururu's own text."],
       ["mascot", "Mascot", "What moves in the sidebar while an agent works."],
       ["bar", "Bottom bar", "Which chips the bar along the bottom shows."],
     ],
@@ -138,7 +135,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
 export const TAB_NAMES: readonly Tab[] = GROUPS.flatMap((group) => group.pages.map(([name]) => name));
 
 /** The cog's page, which on a phone means the list. */
-export const FIRST_TAB: Tab = "terminal";
+export const FIRST_TAB: Tab = "fonts";
 
 function pageOf(tab: Tab): readonly [Tab, string, string] {
   for (const group of GROUPS) for (const page of group.pages) if (page[0] === tab) return page;
@@ -325,10 +322,8 @@ type PageProps = {
 
 function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
   switch (tab) {
-    case "terminal":
-      return <TerminalPage appearance={p.appearance} />;
-    case "interface":
-      return <InterfacePage appearance={p.appearance} />;
+    case "fonts":
+      return <FontsPage appearance={p.appearance} />;
     case "mascot":
       return <MascotPage mascots={p.mascots} />;
     case "bar":

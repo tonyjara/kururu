@@ -23,11 +23,12 @@ shows, so it is written once and read in three places — see
   screen has room; click again and it goes. Drag its far edge to make it
   short enough to show only the last few messages. While it is on, the talk
   key's pill is replaced by a waveform beside the logo. Off by default.
-- **A font and a size for kururu itself.** Settings → Interface sets the
-  face and the size of everything that is not a terminal: the sidebar, the
-  boards, Kuru's drawer, the reader, Settings. Labels, tabs and icons keep
-  their proportions to the size you pick, and it lands on the phone too. The
-  terminal's own font and size are still on the Terminal page.
+- **A font and a size for kururu itself.** Settings → Fonts has an
+  Interface section under the terminal's, for the face and the size of
+  everything that is not a terminal: the sidebar, the boards, Kuru's drawer,
+  the reader, Settings. Labels, tabs and icons keep their proportions to the
+  size you pick, and it lands on the phone too. The page was called
+  Terminal.
 - **Paste keys into a dialog, not a chat.** When Kuru or an agent needs a
   key, it opens a dialog on your screen — the window and the phone alike —
   with a masked field per key and where each one goes: the Mac's Keychain,
@@ -144,7 +145,7 @@ shows, so it is written once and read in three places — see
 
 - **Themes, skins, packs, Explore and the skin studio.** Kururu has one look
   now: Dracula's colours on the chrome it always had. Settings → Theme is
-  Settings → Terminal and keeps the font, its size and the cursor; your
+  Settings → Fonts and keeps the font, its size and the cursor; your
   mascots are as they were. Sounds that came from the styles registry are no
   longer in the sound list (kururu's own and the system's are), and a theme
   or skin saved in your settings is ignored. Nothing is deleted from

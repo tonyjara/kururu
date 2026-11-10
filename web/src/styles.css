@@ -90,7 +90,7 @@
   --chart-6-ink: #ffffff;
 
   /* The interface's face and size, which are the two things about the look a
-     person sets: Settings → Interface writes `--ui-font` and `--ui-scale`
+     person sets: Settings → Fonts writes `--ui-font` and `--ui-scale`
      onto the root (`applyInterface` in `web/src/fonts.ts`), and every rule
      reaches them through `--ui` and the type ramp below, so there is one
      place a size is decided. The ramp is written at the size kururu ships at
@@ -3646,7 +3646,7 @@ a.button {
    *
    * It costs pinch-to-zoom over a pane, which is the honest trade and a small
    * one: the thing somebody pinching a terminal actually wants is bigger text,
-   * and that is a setting — Settings → Appearance — that changes the grid rather
+   * and that is a setting — Settings → Fonts — that changes the grid rather
    * than magnifying a bitmap of it.
    */
   touch-action: none;

@@ -161,7 +161,7 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **Kururu has one look, and it is the `:root` block of `web/src/styles.css`.**
   Nothing writes a colour or a shape at run time; the interface's face and
   size are the two properties that are written (`--ui-font`, `--ui-scale`,
-  Settings → Interface), and the terminal's palette is `TERMINAL` in
+  Settings → Fonts), and the terminal's palette is `TERMINAL` in
   `shared/theme.ts`, kept in step with `--bg` by hand. Themes, skins, packs,
   the registry and the studio were removed on 2026-11-09: do not bring a
   switch back without the user asking. → [styles](docs/styles.md)

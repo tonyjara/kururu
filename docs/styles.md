@@ -129,8 +129,9 @@ The terminal's type and cursor, the interface's face and size, and the bottom
 bar's chips: preferences, not a look. They are the `Appearance` in
 `shared/theme.ts`, `{ terminal: { fontFamily, fontSize, cursorStyle,
 cursorBlink }, ui: { fontFamily, fontSize }, bar }`, saved in
-`~/.config/kururu/appearance.json` and edited in Settings → Terminal,
-Settings → Interface and Settings → Bottom bar.
+`~/.config/kururu/appearance.json` and edited in Settings → Fonts (the
+terminal's group and then the interface's, on one page) and Settings → Bottom
+bar.
 
 **The interface's type is two custom properties.** `applyInterface` in
 `web/src/fonts.ts` writes `--ui-font` (the chosen face, quoted, in front of

@@ -58,7 +58,7 @@ import { Panes } from "./components/Panes";
 import { hueStyle } from "./components/NodeChip";
 import { RemoteBand, RemoteWaiting, useRemoteSaid } from "./components/RemoteBand";
 import { Reach } from "./components/Reach";
-import { Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from "./settings/Settings";
+import { FIRST_TAB as SETTINGS_FIRST, Settings, TAB_NAMES as SETTINGS_TABS, type Tab as SettingsTab } from "./settings/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar, WorkspaceToggle } from "./components/StatusBar";
 import { DrawerChips } from "./components/DrawerChips";
@@ -236,8 +236,8 @@ function askedSettings(): SettingsTab | null {
   } catch {
     // An address that cannot be rewritten opens Settings again on a reload; harmless.
   }
-  const page = match[1] ?? "terminal";
-  return (SETTINGS_TABS as readonly string[]).includes(page) ? (page as SettingsTab) : "terminal";
+  const page = match[1] ?? SETTINGS_FIRST;
+  return (SETTINGS_TABS as readonly string[]).includes(page) ? (page as SettingsTab) : SETTINGS_FIRST;
 }
 
 export function App() {
@@ -839,7 +839,7 @@ export function App() {
           if (narrow) setSidebarOpen(false);
           return setFilesOpen((open) => !open);
         case "settings":
-          return setSettings("terminal");
+          return setSettings(SETTINGS_FIRST);
         case "zen-mode":
           return setZen((on) => !on);
         case "resize-mode":
@@ -1436,7 +1436,7 @@ export function App() {
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
           onPrompt={setDialog}
-          onSettings={() => setSettings("terminal")}
+          onSettings={() => setSettings(SETTINGS_FIRST)}
           onReach={() => setReach(true)}
           onBoard={() => {
             openProfileBoard();
