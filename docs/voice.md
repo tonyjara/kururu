@@ -876,6 +876,59 @@ settle passes after a display event were driven in an isolated Electron
 against a stub page, on one display; no second display has been plugged in
 or pulled. `pill.log` is how the next try is read.
 
+## The floating Kuru
+
+Settings → Voice → **Floating Kuru**, or the same switch in the tray. Kuru's
+logo floats over every application, like the chat bubble on a web page: drag it
+anywhere and it stays there; click it and the conversation opens against it;
+click again and it goes. Off by default — a logo over every app is not
+something an update should put on a screen unasked.
+
+| piece | where | what |
+|---|---|---|
+| The windows | `desktop/float.js` | Two panels, both on every space and over full-screen apps. **The logo** is 64×64, clear, and can never take the focus, so pressing or dragging it takes no keys from the app in front. **The chat** is a second panel that can take them — it has a box to type in — without bringing the application forward, as a note window does. Two windows and not one that grows: a window that grew would have to move its origin and redraw the logo in the same frame, and a frame late is a logo that jumps. The chat's page is made with the logo's and kept hidden, so the first click is not a page load. |
+| The sums | `desktop/floatshape.js` | Where everything goes, as arithmetic with tests (`desktop/test/floatshape.test.js`). The logo's place is a share of a display, on the pill's reasoning. The chat is never remembered anywhere: it is put against the logo each time, **above or below, whichever side has more room**, its outer edge on the logo's, extending towards the middle of the display — so in any corner it opens into the screen. Only its height is kept. |
+| The logo | `Float.tsx` `FloatLogo` (`/?float=logo`) | The profile's mascot on a disc of the chrome. It hops while Kuru thinks, wears a ring in the ink of what is happening (the accent while the chat is open, orange thinking or speaking, yellow asking, red while the microphone is open), and carries the count of what needs you on its corner. Not a draggable region, because that swallows the click with the drag: the page takes the press, tells a click from a drag by 4 px of travel, and the main process moves the window, reading the pointer from `screen`. A right-click offers the conversation, the window, and hiding it. |
+| The chat | `Float.tsx` `FloatPanel` (`/?float=panel`) | **`KuruDrawer` and `NeedsDrawer` themselves**, mounted as `App` mounts them, with the two chips in their header as the way between them — the conversation, the box with its references, files, quotes and dictation, the search, the pins and the Needs list are the window's, to the component. What differs is what a door does: a card, a terminal, a workspace or a file a reply named is said to the server as the window would say it, and then the window is brought up to show it (`kururu:float-go`). The lit chip, a drawer's ✕ and Escape put the chat away. |
+| The handle | `Float.tsx`, `FloatKuru.grip` | The chat's edge away from the logo, dragged: that edge follows the pointer and the logo's side stays. From 260 px up to whatever the side has. A conversation read at its newest line stays there while it is dragged, which is the point of making it short. |
+| The waveform | `Float.tsx` `FloatWave`, in the pill's page | While this is on, **the pill is not shown**. The pill's window is docked to the logo's row (`TalkKey.dock`) and its page draws a waveform there instead: the microphone's level running towards the logo while it listens, Kuru's voice as a swell while a reply is said, and words only for what would go unnoticed — a clip the server is not taking, words that were not heard. Its ✕ is the pill's. With the chat shut it is 132 px beside the logo; with the chat open it runs the rest of the chat's width, so the bar and the logo together are the chat's edge. |
+
+**The pill is still the voice client.** Nothing about the microphone, the
+player or what is reported changes: the same page holds them, in the same
+window, and only where that window is put and what is drawn in it differ. So
+the level is the microphone's own and nothing is relayed or drawn twice, and
+switching this off is the pill exactly as it was, at its own place. The chat's
+page is never a voice client: it takes no clip for Kuru and plays no reply, its
+gestures (Escape while Kuru speaks, a reply's Stop) go to the pill across the
+bridge as the window's do, and only the box's own mic dictates in it.
+
+**The drawers are mounted only while the chat is open.** A reply stops being
+unheard once it has been in view in an open drawer, and a drawer left mounted
+in a hidden window would read every reply as it arrived with nobody looking.
+
+**Neither page is hot-updated; each reloads instead**, for the pill page's
+reason: the logo at once, the chat as soon as it is shut. A split page showed
+here as a conversation opened at its top instead of at its newest line.
+
+Edges, said plainly:
+
+- **The waveform needs the pill, and the pill needs the hook or ⌥Space.** With
+  neither on there is no pill page, the talk key only exists in kururu's own
+  window, and the pill drawn in that window is as it was.
+- **The screen pen's tools** are still the pill's draw-only form, now in the
+  logo's row beside the waveform, and cannot be dragged while docked. The
+  pencil in the chat's box is hidden: a pen with no voice starts from the
+  window, whose box its marks land in.
+- **The logo and the chat are in the pen's stills**, where the pill is left
+  out of them.
+- **Like a note window, the chat never activates the app**, so a ⌘ shortcut it
+  does not take itself goes to the application in front.
+
+Verified 2026-11-10 in a hidden, isolated copy of the app (`docs/testing.md`).
+Unpressed for real: a mouse on the logo over another application, the chat
+taking the keys when it opens, the windows over a full-screen app, and a
+display plugged in or pulled.
+
 ## What it is not
 
 - **Not a realtime model.** OpenAI Realtime or Gemini Live up front would

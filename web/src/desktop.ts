@@ -85,6 +85,52 @@ export interface DesktopBridge {
    * before it have no pen, and draw no pencil.
    */
   ink?: DesktopInk;
+  /**
+   * The floating Kuru (`desktop/float.js`): Kuru's logo over every
+   * application, and the conversation behind a click on it. Optional — a
+   * browser and the phone have no desktop to float over, and a window from
+   * before it has no switch to show.
+   */
+  float?: DesktopFloat;
+}
+
+/**
+ * The floating Kuru as the main process holds it, told to every page of
+ * ours: the logo and the chat draw from it, the pill's page draws the voice
+ * as a waveform beside the logo while it is on, and Settings shows `on`.
+ */
+export interface FloatState {
+  on: boolean;
+  /** The chat is open against the logo. */
+  open: boolean;
+  /** Where the chat is from the logo — which is also which edge of it is dragged. */
+  side: "above" | "below";
+  /** Which way the chat and the waveform extend from the logo along its row: towards the middle of its display. */
+  reach: "left" | "right";
+  /** How wide the waveform is drawn, in CSS pixels: its own width beside a shut chat, the rest of the chat's along an open one. */
+  wave: number;
+  /** Which of the floating Kuru's two pages asked, when one of them did (`state()` only). */
+  role?: "logo" | "panel" | null;
+}
+
+export interface DesktopFloat {
+  state(): Promise<FloatState>;
+  /** Told on every change. Returns the unsubscribe. */
+  onState(listener: (state: FloatState) => void): () => void;
+  /** Switch it on or off, from the window's Settings. */
+  set(on: boolean): void;
+  /** The logo's page only: it was clicked. */
+  press(): void;
+  /** The logo's page only: a drag of it began, moved or ended — the main process reads where the pointer is. */
+  drag(phase: "start" | "move" | "end"): void;
+  /** The logo's page only: it was right-clicked. */
+  menu(): void;
+  /** The chat's page only: its far edge is being dragged. */
+  grip(phase: "start" | "move" | "end"): void;
+  /** The chat's page only: put it away. */
+  close(): void;
+  /** The chat's page only: bring the window up, at a card on its board when one is named. */
+  go(cardId?: string | null): void;
 }
 
 /** The screen pen's session as main holds it. */

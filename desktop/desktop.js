@@ -6,8 +6,9 @@
  * exception for the same reason: it is about *this Mac* and this app, and a
  * page served from a box in a cupboard has no business deciding it. Where the
  * server runs from. Whether a key hook is listening to every application on
- * this machine. Where a floating window was last left on this screen, and
- * which cards are popped out as windows over it.
+ * this machine. Where a floating window was last left on this screen,
+ * which cards are popped out as windows over it, and whether Kuru's logo
+ * floats there too.
  *
  * Beside `servers.json`, in XDG's config directory and for its reason: these
  * are decisions, and a decision wiped between versions is somebody's checkout
@@ -18,6 +19,7 @@ const { mkdirSync, readFileSync, renameSync, writeFileSync } = require("node:fs"
 const { homedir } = require("node:os");
 const path = require("node:path");
 const { adoptNotes } = require("./notelist");
+const { adoptFloat } = require("./floatshape");
 
 const FILE = "desktop.json";
 
@@ -51,6 +53,14 @@ const DEFAULTS = {
    * where a note sits is a fact about one screen.
    */
   notes: [],
+  /**
+   * The floating Kuru (`float.js`): whether its logo is over the desktop,
+   * where it was left as a share of a display, and how tall its chat was
+   * dragged. Off until switched on, from the menu bar or Settings → Voice:
+   * a logo over every application is not something an update should put
+   * on somebody's screen unasked.
+   */
+  float: adoptFloat(null),
 };
 
 function configDir() {
@@ -88,6 +98,7 @@ function adopt(raw) {
     pill,
     talkKey: typeof r.talkKey === "string" && /^[A-Za-z0-9]{1,32}$/.test(r.talkKey) ? r.talkKey : DEFAULTS.talkKey,
     notes: adoptNotes(r.notes),
+    float: adoptFloat(r.float),
     inkWithVoice: r.inkWithVoice !== false,
     inkDeny: Array.isArray(r.inkDeny) ? [...new Set(r.inkDeny.filter((b) => typeof b === "string" && /^[A-Za-z0-9.-]{1,200}$/.test(b)))].slice(0, 200) : null,
   };

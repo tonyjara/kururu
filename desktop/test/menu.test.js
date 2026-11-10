@@ -110,6 +110,14 @@ describe("the tray menu", () => {
     expect(byId(base, "log-pill").label).toContain("pill.log");
   });
 
+  it("ticks the floating Kuru while it is on, and offers its reset only then", () => {
+    expect(byId(base, "float-toggle").checked).toBe(false);
+    expect(byId(base, "float-reset")).toBeUndefined();
+    const on = { ...base, float: { on: true } };
+    expect(byId(on, "float-toggle").checked).toBe(true);
+    expect(byId(on, "float-reset").label).toContain("Reset Floating Kuru Position");
+  });
+
   it("offers the window the right way round, and login only to the installed app", () => {
     expect(byId(base, "close-window")).toBeDefined();
     expect(byId(base, "open-window")).toBeUndefined();

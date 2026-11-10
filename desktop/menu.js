@@ -56,6 +56,7 @@ function undelivered(count) {
 /**
  * @param view  the runner's `view()` plus the app's own facts:
  *   `appVersion`, `packaged`, `windowOpen`, `talk` ({ on, status, altSpace }),
+ *   `float` ({ on }),
  *   `nodes` ([{ id, name, why }], `why` null when it can be opened),
  *   `notes` — see `notesSection`,
  *   `openAtLogin` ({ on, available, status })
@@ -189,6 +190,13 @@ function menuTemplate(view) {
   items.push({ id: "talk-altspace", label: "⌥Space toggles the microphone", type: "checkbox", checked: talk.altSpace });
   // There is no pill to put anywhere while neither of the two things that float one is on.
   items.push({ id: "reset-pill", label: "Reset Pill Position", enabled: talk.on || talk.altSpace });
+  // The floating Kuru (`float.js`): Kuru's logo over every app, the
+  // conversation behind a click on it, and the voice's waveform beside it
+  // in place of the pill. Its reset is only there while there is a logo to
+  // put somewhere.
+  const float = view.float ?? { on: false };
+  items.push({ id: "float-toggle", label: "Floating Kuru", type: "checkbox", checked: float.on === true });
+  if (float.on) items.push({ id: "float-reset", label: "    Reset Floating Kuru Position" });
   // The screen pen with the voice, as ⌃⌥⌘D starts it: it needs a page to hold the microphone, the pill's or the window's.
   items.push({ id: "annotate", label: "Draw on the Screen and Talk", accelerator: "Control+Alt+Command+D", registerAccelerator: false, enabled: talk.on || talk.altSpace || view.windowOpen });
   items.push({ type: "separator" });

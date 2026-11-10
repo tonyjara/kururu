@@ -277,6 +277,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **While the talk key is hooked system-wide, the floating pill is the only voice
   client on this Mac** — a listen-only tap, and a key both saw fires once. →
   [more](docs/invariants.md#the-talk-key-everywhere)
+- **The floating Kuru's chat is the drawers themselves, mounted only while it
+  is open, and never a voice client** — the pill's page still holds the
+  microphone; its window is docked to the logo and draws a waveform
+  (`desktop/float.js`). → [voice](docs/voice.md#the-floating-kuru)
 - **An automation lives in the database and fires on one host, once a slot** —
   a file never switches one on; the run's row, unique by automation and slot,
   is written before anything starts (`server/src/automations.ts`). →

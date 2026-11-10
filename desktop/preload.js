@@ -270,6 +270,32 @@ if (isPicker) {
       cancel: (id) => ipcRenderer.send("kururu:ink-cancel", String(id)),
       onEvent: (listener) => relayOn("kururu:ink", (event) => listener(event && typeof event === "object" ? event : {})),
     },
+    /**
+     * The floating Kuru (`desktop/float.js`): Kuru's logo over every
+     * application and the conversation behind a click on it.
+     *
+     * Four kinds of page use this. Any of them may ask what it is and be
+     * told when that changes — the pill's page draws the voice as a waveform
+     * beside the logo while it is on. The window switches it, from Settings.
+     * The logo's page (`?float=logo`) says it was pressed, dragged or
+     * right-clicked; the chat's (`?float=panel`) drags its own far edge,
+     * closes itself, and asks for the window to be brought up for what only
+     * the window can show. `main.js` checks the sender of each, so the most
+     * a served page in the window can do is flip the switch its Settings
+     * already has.
+     */
+    float: {
+      state: () => ipcRenderer.invoke("kururu:float-state"),
+      onState: (listener) => relayOn("kururu:float", (state) => listener(state && typeof state === "object" ? state : {})),
+      set: (on) => ipcRenderer.send("kururu:float-set", on === true),
+      press: () => ipcRenderer.send("kururu:float-press"),
+      drag: (phase) => ipcRenderer.send("kururu:float-drag", String(phase)),
+      menu: () => ipcRenderer.send("kururu:float-menu"),
+      grip: (phase) => ipcRenderer.send("kururu:float-grip", String(phase)),
+      close: () => ipcRenderer.send("kururu:float-close"),
+      /** The window, brought up — at a card on its board when one is named. */
+      go: (cardId) => ipcRenderer.send("kururu:float-go", typeof cardId === "string" ? cardId : null),
+    },
     notes: {
       popOut: (ask) => ipcRenderer.invoke("kururu:note-pop", ask && typeof ask === "object" ? ask : {}),
       list: () => ipcRenderer.invoke("kururu:note-list"),

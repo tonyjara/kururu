@@ -28,7 +28,8 @@
  * The other thing only this process can do is hear a key with the window
  * unfocused, and show something over another application. `talkkey.js` is
  * that: the native hook and the floating pill. `notes.js` is the other thing
- * shown over everything: cards popped out as windows of their own. Anything
+ * shown over everything: cards popped out as windows of their own; and
+ * `float.js` the third, Kuru's logo with the conversation behind it. Anything
  * that knows what an agent is still belongs on the other side of the HTTP
  * boundary, because that side is also what the phone talks to.
  */
@@ -43,6 +44,7 @@ const { boxOnScreen } = require("./notelist");
 const { NoteWindows } = require("./notes");
 const { fetchNodes, nodeChoices, whyNot } = require("./nodes");
 const { TalkKey } = require("./talkkey");
+const { FloatKuru } = require("./float");
 const { Ink, DENY_DEFAULT } = require("./ink");
 const { windowNumberOf } = require("./inkshape");
 const { createTray } = require("./tray");
@@ -254,6 +256,21 @@ const notes = new NoteWindows({
 });
 
 /**
+ * The floating Kuru: Kuru's logo over every application, the conversation
+ * behind a click on it, and — while it is on — the pill's window docked to
+ * its row, where the pill's page draws the voice as a waveform. Its pages
+ * come from where the pill's does; what is kept of it is `desktop.json`'s.
+ */
+const float = new FloatKuru({
+  preloadPath: PRELOAD,
+  debug: !PACKAGED,
+  saved: readDesktop().float,
+  save: (kept) => writeDesktop({ float: kept }),
+  redock: () => talk.redock(),
+});
+talk.dock = (size) => float.dock(size);
+
+/**
  * The checkout whose web app is shown for a server, or null for the server's
  * own page.
  *
@@ -307,6 +324,7 @@ function pointPill() {
   if (!base) {
     talk.setPage(null);
     notes.setPage(null);
+    float.setPage(null);
     return;
   }
   const checkout = uiCheckout(base);
@@ -315,6 +333,7 @@ function pointPill() {
   if (page) {
     talk.setPage(page);
     notes.setPage(page);
+    float.setPage(page);
   }
 }
 
@@ -699,6 +718,7 @@ function buildMenu() {
           click: () => {
             (BrowserWindow.getFocusedWindow() ?? win)?.webContents.reload();
             talk.reloadPanel();
+            float.reloadAll();
           },
         },
         {
@@ -707,6 +727,7 @@ function buildMenu() {
           click: () => {
             (BrowserWindow.getFocusedWindow() ?? win)?.webContents.reloadIgnoringCache();
             talk.reloadPanel();
+            float.reloadAll();
           },
         },
         { type: "separator" },
@@ -1232,6 +1253,55 @@ notes.on("change", (list) => {
 });
 
 /**
+ * The floating Kuru, across the bridge. Every page of ours may ask what it
+ * is — the pill's page changes its shape with it, and Settings shows the
+ * switch — and only the main window may switch it. The logo's verbs are
+ * taken from the logo's page and the chat's from the chat's, and no other:
+ * a served page in the window cannot drag the logo about or open a chat
+ * over somebody's screen.
+ *
+ * `kururu:float-go` is the chat asking for something only the window can
+ * show — a card on its board, a terminal, a file a reply named. The chat's
+ * page has already said what over its own socket, or says which card here;
+ * what is left to this process is bringing the window up to show it.
+ */
+ipcMain.handle("kururu:float-state", (event) => ({ ...float.state(), role: float.isLogo(event.sender) ? "logo" : float.isPanel(event.sender) ? "panel" : null }));
+ipcMain.on("kururu:float-set", (event, on) => {
+  if (win && !win.isDestroyed() && event.sender.id === win.webContents.id) float.setEnabled(on === true);
+});
+ipcMain.on("kururu:float-press", (event) => {
+  if (float.isLogo(event.sender)) float.toggle();
+});
+ipcMain.on("kururu:float-drag", (event, phase) => {
+  if (float.isLogo(event.sender) && ["start", "move", "end"].includes(phase)) float.drag(phase);
+});
+ipcMain.on("kururu:float-menu", (event) => {
+  if (!float.isLogo(event.sender) || !float.logo) return;
+  Menu.buildFromTemplate([
+    { label: float.open ? "Close the Conversation" : "Open the Conversation", click: () => float.toggle() },
+    { label: "Open Kururu's Window", click: () => openWindow() },
+    { type: "separator" },
+    { label: "Hide the Floating Kuru", click: () => float.setEnabled(false) },
+  ]).popup({ window: float.logo });
+});
+ipcMain.on("kururu:float-grip", (event, phase) => {
+  if (float.isPanel(event.sender) && ["start", "move", "end"].includes(phase)) float.grip(phase);
+});
+ipcMain.on("kururu:float-close", (event) => {
+  if (float.isPanel(event.sender)) float.closePanel();
+});
+ipcMain.on("kururu:float-go", (event, cardId) => {
+  if (!float.isPanel(event.sender)) return;
+  if (typeof cardId === "string" && cardId) showCard(cardId);
+  else openWindow();
+});
+float.on("change", (state) => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send("kururu:float", state);
+  }
+});
+
+/**
  * Whether this launch should open a window at all.
  *
  * Opened at login, the app is the tray and nothing else: the Mac just came
@@ -1276,6 +1346,7 @@ app.whenReady().then(async () => {
     version: app.getVersion(),
     packaged: PACKAGED,
     notes,
+    float,
     actions: {
       openWindow,
       closeWindow,
@@ -1300,6 +1371,7 @@ app.whenReady().then(async () => {
       webRebuilt: () => {
         if (talk.page === LOCAL) talk.reloadPanel();
         if (notes.page === LOCAL) notes.reloadAll();
+        if (float.page === LOCAL) float.reloadAll();
       },
     },
   });
@@ -1415,6 +1487,7 @@ function finishQuit(alsoAgents) {
   ink.dispose();
   talk.dispose();
   notes.dispose();
+  float.dispose();
   tray?.destroy();
   tray = null;
   if (alsoAgents) endAgents();
@@ -1425,6 +1498,7 @@ app.on("will-quit", () => {
   ink.dispose();
   talk.dispose();
   notes.dispose();
+  float.dispose();
 });
 
 // ---------------------------------------------------------------------------
@@ -1561,6 +1635,7 @@ function installUpdate() {
   ink.dispose();
   talk.dispose();
   notes.dispose();
+  float.dispose();
   tray?.destroy();
   tray = null;
   void runner.stop("the app is restarting into an update").finally(() => loadUpdater().quitAndInstall());
@@ -1582,6 +1657,7 @@ function stopOnSignals() {
     ink.dispose();
     talk.dispose();
     notes.dispose();
+    float.dispose();
     void runner.stop(`the app was stopped by ${signal}`).finally(() => app.quit());
   });
 }

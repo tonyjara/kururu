@@ -249,6 +249,7 @@ in this folder.
 | `src/zoom.ts` | How big the reader's type is, per device |
 | `src/readerplace.ts` | Where you were in each document, per device: a block and how far into it, found again by heading when the file changed. Pure geometry, tested |
 | `src/place.ts` | Where the voice pill was dragged to, as a share of the window rather than pixels. Pure |
+| `src/float.ts` · `src/float.css` | The floating Kuru as a page sees it: on or off, whether its chat is open and which way it faces, as the main process last said. And its sheet, imported by `Float.tsx` rather than a section of `styles.css`, since only its own windows draw it |
 | `src/when.ts` | What a card's dates are called here: month names, and which day a week starts on |
 | `src/cardclick.ts` | A card's click and double-click on one surface: the short wait that keeps a double from opening the card under the editor, and which clicks inside a card are its own. Pure but for the hook, tested. See [layout](layout.md#the-board) |
 | `src/desktop.ts` | The preload bridge, typed. Null in a browser — that's the contract |
@@ -267,6 +268,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `Automations.tsx` (the sid
 `ColorPicker.tsx` (a column's colour, from the profile board) ·
 `Notes.tsx` (cards popped out as notes over the window, dragged, resized, folded, edited in place; the card is the snapshot's; `NoteInside` is a note's inside, also a note window's) ·
 `NotePage.tsx` (`/?note=`: a card popped out as a desktop window of its own, over every app) ·
+`Float.tsx` (the floating Kuru: `/?float=logo` is the logo over every app, `/?float=panel` the chat behind it — `KuruDrawer` and `NeedsDrawer` themselves, mounted only while it is open — and `FloatWave` is the voice as a waveform, drawn by the pill's page beside the logo) ·
 `NeedsDrawer.tsx` (what needs you across the workspaces, in three bands, with the next one a press away, its groups folding and sorting; opened by the tray in `DrawerChips.tsx`) ·
 `NodeChip.tsx` (another node's name in its own hue, on every remote thing) · `RemoteBand.tsx` (the band over another node's workspace: whose, away since when, what could not be sent) ·
 `Timeline.tsx` (that board by when its cards are for; holds only which weeks it is showing) ·
@@ -290,7 +292,8 @@ open, and this is how loud the room is; dragged anywhere, ✕ or Esc to stop Kur
 | `talkkey.js` · `talkkey/talkkey.swift` | The talk key in every app: the native listen-only event tap, its router, and the floating pill's panel window |
 | `ink.js` · `inkshape.js` · `ink.html` · `inkpreload.js` · `glance/glance.swift` | The screen pen ([plan](plans/screen-annotate.md)): a session's overlays over every display, the pen, bursts and their stills, the bundle the owning page posts; its geometry without Electron (held to `shared/ink.ts` by a test); the overlay page the app ships and its preload; and the helper that takes a display without kururu's windows, inks it and says which window was under the pen. Phase 2: the pens and the highlighter, undo, the snapshot key, the never-capture list (in `desktop.json`), hold-to-draw (the talk-key hook's `--draw` key), the page or browser tab under a mark, and a clip's roll keeping the pen |
 | `notes.js` · `notelist.js` | Cards popped out as windows over every app: the panel windows and their verbs; their records off `desktop.json` and where a box goes on the screen, as data, tested |
-| `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left, which cards are note windows and where |
+| `float.js` · `floatshape.js` | The floating Kuru ([voice](voice.md#the-floating-kuru)): the logo's panel and the chat's, the drag, the chat's handle, and where the pill's window is docked while it is on; and where each goes on a display, as data, tested |
+| `desktop.js` | `desktop.json`: where the server runs from, whether the hook is on, where the pill was left, which cards are note windows and where, and the floating Kuru's switch, place and height |
 | `connect.html` | The one page kururu draws itself — the address picker |
 | `servers.js` | Addresses you have connected to, and what a typed one means |
 | `nodes.js` | The other kururus as the tray's "Open <node>" and the picker offer them, asked of the local server; a node that can be driven from here opens on its own Settings |

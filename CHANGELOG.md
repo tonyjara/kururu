@@ -15,6 +15,14 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **A floating Kuru.** Switch it on from the menu bar's frog or in Settings →
+  Voice, and Kuru's logo floats over every app, like the chat bubble on a web
+  page. Drag it anywhere; it stays where you leave it. Click it and the
+  conversation opens against it — the same one as the drawer, with the same
+  box, and the Needs you list a chip away — towards whichever side of the
+  screen has room; click again and it goes. Drag its far edge to make it
+  short enough to show only the last few messages. While it is on, the talk
+  key's pill is replaced by a waveform beside the logo. Off by default.
 - **A font and a size for kururu itself.** Settings → Interface sets the
   face and the size of everything that is not a terminal: the sidebar, the
   boards, Kuru's drawer, the reader, Settings. Labels, tabs and icons keep

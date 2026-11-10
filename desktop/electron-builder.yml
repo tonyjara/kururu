@@ -47,6 +47,8 @@ files:
   - talkkey.js
   - notes.js
   - notelist.js
+  - float.js
+  - floatshape.js
   - ink.js
   - inkshape.js
   - ink.html

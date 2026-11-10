@@ -26,6 +26,13 @@
  * installed — no microphone, no speech, no keys — since the pill's page is
  * the one voice client on this Mac while it is one, and a page made for a
  * pen must never be a second.
+ *
+ * **While the floating Kuru is on, the voice is drawn beside its logo and
+ * not as a pill** (`FloatWave` in `Float.tsx`). This page is still the voice
+ * client and nothing about the microphone or the player changes; the main
+ * process puts this window in the logo's row (`TalkKey.dock`) and what is
+ * drawn in it is a waveform. The pen's tools are then always in the
+ * draw-only form beside it, since there is no pill's meter to put them by.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DEFAULT_VOICE } from "../../../shared/voice";
@@ -35,6 +42,8 @@ import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
 import { installInk, installShiftPen, useInk } from "../ink";
 import { installReload } from "../reload";
+import { useFloat } from "../float";
+import { FloatWave } from "./Float";
 import { DrawPill, VoicePill } from "./VoicePill";
 
 /**
@@ -158,23 +167,41 @@ export function Pill() {
    */
   const key = voice?.settings.talkKey ?? DEFAULT_VOICE.talkKey;
   // The pen's tools, drawn here for a session whose tools are not beside the meter.
-  const drawing = ink.state.on && ink.state.tools === "draw";
+  const float = useFloat();
+  const docked = float?.on === true ? float : null;
+  const drawing = ink.state.on && (ink.state.tools === "draw" || docked !== null);
   const phase = DRAW_ONLY ? "idle" : ui.phase;
-  useLayoutEffect(() => {
+  const report = useRef(() => {});
+  report.current = () => {
     const bridge = desktop()?.voice;
     if (!bridge) return;
     // The stack, which is the voice's pill, the pen's, or both while a
     // recording is made during a pen session that is not its own.
     const box = root.current?.querySelector(".pill-stack")?.getBoundingClientRect();
     bridge.report({ phase, width: box?.width ?? 0, height: box?.height ?? 0, key, locating: here, drawing });
+  };
+  useLayoutEffect(() => {
+    report.current();
     // The pen's tools come and go with its session, its label counts the marks, and the panel is sized to them.
-  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.marks, ink.state.ending, ink.state.voice]);
+    // And docked to the floating Kuru it is the waveform's box, which is as wide as the chat it runs along.
+  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.marks, ink.state.ending, ink.state.voice, docked?.wave, docked?.reach]);
+  // Docked, the box also changes for a reason that is none of those: the
+  // waveform gives way to words when the server will not take a clip. The
+  // window beside the logo has to be exactly what is drawn, so it is watched.
+  const isDocked = docked !== null;
+  useEffect(() => {
+    const stack = isDocked ? root.current?.querySelector(".pill-stack") : null;
+    if (!stack) return;
+    const watch = new ResizeObserver(() => report.current());
+    watch.observe(stack);
+    return () => watch.disconnect();
+  }, [isDocked]);
 
   return (
-    <div className="pill-page-root" ref={root}>
+    <div className={`pill-page-root ${docked ? `pill-docked pill-docked-${docked.reach}` : ""}`} ref={root}>
       <div className="pill-stack">
         {drawing && <DrawPill />}
-        {DRAW_ONLY ? null : ui.phase === "idle" && here ? <PillHere /> : <VoicePill floating />}
+        {DRAW_ONLY ? null : ui.phase === "idle" && here ? <PillHere /> : docked ? <FloatWave float={docked} /> : <VoicePill floating />}
       </div>
     </div>
   );

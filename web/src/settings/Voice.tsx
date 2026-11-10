@@ -33,6 +33,7 @@
 import { useEffect, useState } from "react";
 import { KOKORO_SIZE_MB, LANG_NAMES, LOCALES, VOICE_LANGS, keyCodeLabel, type VoiceChoice, type VoiceLang, type VoiceSettings } from "../../../shared/voice";
 import { desktop, type VoiceGlobalState } from "../desktop";
+import { useFloat } from "../float";
 import { setFoldLong, useFoldLong } from "../kurufold";
 import { audioOutput } from "../notify";
 import * as api from "../session";
@@ -144,6 +145,9 @@ export function VoicePage() {
   const [global, setGlobal] = useState<VoiceGlobalState | null>(null);
   const tell = useEditing();
   const foldLong = useFoldLong();
+  // The floating Kuru's switch, which is the desktop app's: absent in a browser, on the phone, and in an app from before it.
+  const floatBridge = desktop()?.float ?? null;
+  const float = useFloat();
 
   useEffect(() => {
     if (!bridge) return;
@@ -251,6 +255,14 @@ export function VoicePage() {
             {global.status === "denied" && <Action label="Input Monitoring" hint="No restart is needed once it is allowed." button="Open System Settings" onClick={() => bridge.openInputMonitoring()} />}
             <Toggle label="⌥Space toggles the microphone" hint="From any app, no permission needed. Tap to open, tap again to send." on={global.altSpace} onChange={(on) => bridge.setAltSpace(on)} />
           </>
+        )}
+        {floatBridge && float && (
+          <Toggle
+            label="Floating Kuru"
+            hint="Kuru's logo over every app, on this Mac: click it for the conversation and what needs you, drag it anywhere. While it is on, the talk key's waveform is beside the logo and the pill is not shown."
+            on={float.on}
+            onChange={(on) => floatBridge.set(on)}
+          />
         )}
       </Group>
 

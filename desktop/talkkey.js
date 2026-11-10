@@ -28,6 +28,12 @@
  * the full pill again the moment the hook or ⌥Space is turned on, and goes
  * with the session otherwise.
  *
+ * **The floating Kuru docks the pill** (`float.js`, through `dock`). While
+ * that is on, the panel is put in its logo's row rather than at a place of
+ * its own, and its page draws the voice as a waveform there instead of the
+ * pill. Nothing else here changes — it is the same panel, the same page, the
+ * one voice client — and with it off `place` is exactly what it was.
+ *
  * The helper's events never reach the main window. They are sent to the
  * panel's webContents and nowhere else, and the panel's reports are accepted
  * from that webContents and no other, so a served page in the window cannot
@@ -267,6 +273,15 @@ class TalkKey extends EventEmitter {
     this.onDraw = null;
     /** A Shift press handed to the pill, whose release and chords follow it there whatever the phase is by then. */
     this.shiftSent = false;
+    /**
+     * Where the panel goes while the floating Kuru is on (`float.js`): asked
+     * with the panel's size on every `place`, and answering null while it is
+     * off, which is the pill where it has always been. Docked, the panel is
+     * the waveform in the logo's row, put there and never dragged, so a move
+     * of it pins nothing.
+     * @type {((size: { width: number, height: number }) => { x: number, y: number, side: string } | null) | null}
+     */
+    this.dock = null;
   }
 
   state() {
@@ -640,7 +655,7 @@ class TalkKey extends EventEmitter {
       // the change — a pin taken then would be a share of wherever the system
       // happened to drop it, measured against displays `screen` may not have
       // caught up with.
-      if (this.placing || Date.now() < this.settleUntil) return;
+      if (this.placing || Date.now() < this.settleUntil || this.docked()) return;
       clearTimeout(this.moveTimer);
       this.moveTimer = setTimeout(() => {
         if (!this.panel || this.panel.isDestroyed()) return;
@@ -731,6 +746,13 @@ class TalkKey extends EventEmitter {
     const panel = this.panel;
     if (!panel || panel.isDestroyed()) return;
     const [width, height] = /** @type {[number, number]} */ (panel.getSize());
+    // Beside the floating Kuru's logo while that is on: its row, not a place of the pill's own.
+    const docked = this.dock?.({ width, height }) ?? null;
+    if (docked) {
+      this.setPosition(docked.x, docked.y);
+      note("place", { why, via: `docked to the floating Kuru, on its ${docked.side}`, target: { ...docked, width, height }, got: panel.getBounds(), shown: this.shown, phase: this.phase });
+      return;
+    }
     const displays = realDisplays();
     const saved = this.pillPlace;
     const pinned = saved ? displays.find((d) => d.id === saved.displayId) : undefined;
@@ -772,6 +794,22 @@ class TalkKey extends EventEmitter {
       phase: this.phase,
       displays: displays.map(describe),
     });
+  }
+
+  /** Whether the floating Kuru has the panel in its logo's row just now. */
+  docked() {
+    if (!this.dock || !this.panel || this.panel.isDestroyed()) return false;
+    const [width, height] = /** @type {[number, number]} */ (this.panel.getSize());
+    return this.dock({ width, height }) !== null;
+  }
+
+  /**
+   * The floating Kuru moved, opened or shut its chat, or was switched: a
+   * panel that is up is put where it now belongs — against the logo, or back
+   * at the pill's own place. One that is hidden is placed when it is shown.
+   */
+  redock() {
+    if (this.shown) this.place("the floating Kuru changed");
   }
 
   setPosition(x, y) {

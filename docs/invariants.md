@@ -542,6 +542,18 @@ webContents and no other; the window's `voice.ts` forwards its gestures
 there (`setVoiceRemote`) so a key both saw fires once. A chord — another
 key during the hold — drops the clip. → [voice](voice.md#the-talk-key-everywhere)
 
+**The floating Kuru changes where the voice is drawn, never who holds it.**
+While it is on (`desktop/float.js`, off by default) the pill's panel is docked
+to the logo's row and its page draws a waveform instead of the pill; the page
+is still the one voice client. The chat behind the logo is `KuruDrawer` and
+`NeedsDrawer` themselves in a window of their own: mounted only while it is
+open, so a hidden drawer never reads a reply as seen; never a voice client,
+its gestures going to the pill as the window's do; and anything it shows in
+the window is said to the server and the window brought up, never drawn
+twice. Only the logo's page may press or drag the logo and only the chat's
+may resize or close the chat, checked by sender in `main.js`. →
+[voice](voice.md#the-floating-kuru)
+
 ## The slot queue
 
 **A lease ends with the terminal it was taken in, and nothing but the server

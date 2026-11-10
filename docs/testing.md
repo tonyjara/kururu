@@ -99,6 +99,31 @@ left in the Dock is how a force quit reached a coalition on 2026-10-10.
 
 Kept short on purpose; the detail is in git history.
 
+- **The floating Kuru** (2026-11-10), in an isolated instance on :7847 from
+  a scratch copy with a copy of the database, driven in the real Electron app
+  kept invisible and click-through (`BrowserWindow` subclassed through `-r`,
+  opacity held at 0, `setIgnoreMouseEvents`, no tray, no Dock tile) with
+  `sendInputEvent` and `capturePage`. A click on the logo opened the chat
+  above and left of a logo in the bottom right corner, with the conversation
+  at its newest line and the keyboard in the box; the Needs chip swapped the
+  drawer and Kuru's swapped it back; the lit chip, Escape and the ✕ each put
+  it away and unmounted the drawers. The handle made it shorter and taller
+  with the foot where it was and the newest line in view, and the height was
+  in `desktop.json`. A press that travelled dragged the logo, the chat
+  following and turning to open downwards and rightwards near the top left,
+  and the place was kept as a share of the display; past a corner it was
+  held inside the work area. With a recording faked in the pill's page (a
+  test-only setter in the copy; no microphone was opened), the pill's window
+  was docked 6 px from the logo's mark and drew the waveform, ran the chat's
+  width with the chat open, and drew the speaking swell and an error's
+  words; off, the same recording was the pill at its own place, and switched
+  mid-recording it docked and undocked. The tray's item, the window's bridge
+  and the logo's menu each switched it. A save under `web/src` reloaded the
+  logo at once and the chat once it was shut. **`sendInputEvent`'s moves
+  need `modifiers: ["leftButtonDown"]`**, or Chromium drops the pointer's
+  capture before the release; and its events carry no `screenX`. Not
+  pressed: a real mouse over another application, key focus (the harness
+  stubs `show` and `focus`), a full-screen space, a second display.
 - **The built-in browser and its marking** (phases 0 and 1, 2026-11-06)
   were verified end to end in an isolated instance and removed on
   2026-11-07; what was checked is in this file on the `browser-annotate`

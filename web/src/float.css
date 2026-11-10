@@ -1,0 +1,420 @@
+/* --------------------------------------------------------------------------
+   The floating Kuru
+
+   Kuru's logo over every application, the chat behind a click on it, and
+   the voice's waveform in its row (`components/Float.tsx`, and
+   `desktop/float.js` for the windows these are drawn in). A sheet of its
+   own, imported by the component rather than a section of `styles.css`,
+   because these are three small pages that are only ever loaded in their own
+   windows — the main window never draws any of it.
+
+   Everything here is in the one look's tokens (`:root` in `styles.css`). The
+   logo and the waveform sit on whatever is behind them — somebody's
+   wallpaper, a white document, a dark editor — so each is a disc of the
+   chrome with a hairline of the page's own light around it and a shadow
+   under it: the hairline is what holds the edge on a dark ground, the shadow
+   on a light one.
+   -------------------------------------------------------------------------- */
+
+html.float-logo-page,
+html.float-logo-page body,
+html.float-logo-page #root {
+  background: transparent;
+  overflow: hidden;
+}
+
+/* The window is exactly this, and the mark stands in the middle of it with
+   `LOGO_MARGIN` (`desktop/floatshape.js`) all round for its ring and its
+   shadow. */
+.float-logo-root {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+}
+
+.float-logo {
+  --float-ring: transparent;
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-round);
+  background: var(--chrome);
+  border: var(--border) solid var(--line);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text-strong) 14%, transparent),
+    0 3px 7px color-mix(in srgb, black 42%, transparent);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 140ms;
+}
+.float-logo:hover {
+  transform: scale(1.06);
+  background: var(--chrome-high);
+}
+.float-logo:active {
+  transform: scale(0.95);
+  cursor: grabbing;
+}
+
+/* The ring: what Kuru or the voice is doing, in that state's own ink. Drawn
+   outside the disc, inside the window's margin. */
+.float-logo-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: var(--radius-round);
+  border: var(--border-thick) solid var(--float-ring);
+  pointer-events: none;
+  transition: border-color 160ms;
+}
+.float-logo-open {
+  --float-ring: var(--accent);
+}
+.float-logo-thinking {
+  --float-ring: var(--working);
+}
+.float-logo-asking {
+  --float-ring: var(--blocked);
+}
+.float-logo-speaking,
+.float-voice-speaking {
+  --float-ring: var(--working);
+}
+.float-voice-sending,
+.float-voice-error {
+  --float-ring: var(--blocked);
+}
+/* Last, because the microphone being open outranks whatever else is true. */
+.float-voice-listening {
+  --float-ring: var(--danger);
+}
+.float-voice-listening .float-logo-ring {
+  animation: float-pulse 1.4s ease-in-out infinite;
+}
+@keyframes float-pulse {
+  50% {
+    transform: scale(1.07);
+    opacity: 0.55;
+  }
+}
+
+/* The mascot, at a size a logo is read at. The sidebar lifts its sprite onto
+   the text's baseline (`.mascot` in `styles.css`); here it stands on nothing.
+   A sprite's cell has its figure standing on the floor of it, with sky over
+   its head, so the box is lifted a little for the figure — not the box — to
+   sit in the middle of the disc. Measured against the frog; a sheet with
+   another figure in it is a pixel or two off, which a disc forgives. */
+.float-logo .status {
+  --status-size: 34px;
+  translate: -1px -3px;
+}
+.float-logo .mascot {
+  translate: none;
+}
+.float-logo-still .mascot {
+  animation-name: none;
+}
+.float-logo-off .status {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+/* What needs you, on the corner: the chip's own count, in the chip's ink. */
+.float-logo-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--blocked);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 2px var(--chrome);
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   The chat
+   -------------------------------------------------------------------------- */
+
+html.float-panel-page,
+html.float-panel-page body,
+html.float-panel-page #root {
+  height: 100%;
+  overflow: hidden;
+  background: var(--chrome);
+}
+
+/* The page is the chat, so it fills the window and leaves the corners and
+   the shadow to the desktop, which draws them. A column: the handle on the
+   edge away from the logo, then the drawer — turned over when the chat is
+   below the logo, so the handle is still the far edge. */
+.float-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+}
+.float-panel-below {
+  flex-direction: column-reverse;
+}
+
+/* The drawer, in a box that is the window's rather than a column beside the
+   panes: as wide as the box, no rule down its left, and no width of its own
+   to drag. */
+.float-panel .kuru-drawer {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  border-left: 0;
+}
+.float-panel .kuru-grip {
+  display: none;
+}
+/* The screen pen's pencil starts a session only from the window, whose box
+   its marks land in; here it would be a button that does nothing. */
+.float-panel .kuru-mic[aria-label="Draw on the screen"] {
+  display: none;
+}
+
+/* The handle: the far edge, which is what moves. Over the drawer's head
+   when it is the top — laid on the head's own top padding rather than
+   stacked above it, so the chat does not grow a band for it — and a strip of
+   its own under the box when it is the foot, where there is no padding to
+   borrow. */
+.float-grip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  height: 10px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.float-panel-below .float-grip {
+  position: relative;
+  flex: none;
+  background: var(--chrome);
+}
+.float-grip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 4px;
+  margin: -2px 0 0 -18px;
+  border-radius: 2px;
+  background: var(--line);
+  transition: background 120ms;
+}
+.float-grip:hover::after,
+.float-grip:active::after {
+  background: var(--accent);
+}
+
+.float-panel-wait {
+  margin: auto;
+  font-size: var(--fs-md);
+}
+
+/* Opening: the window fades in (`FloatKuru.fade`) while the drawer comes the
+   last few pixels from the logo's side, so the chat arrives from the thing
+   that was pressed. Shutting is the fade alone. */
+.float-panel-entering.float-panel-above .kuru-drawer,
+.float-panel-entering.float-panel-above .float-grip {
+  animation: float-rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.float-panel-entering.float-panel-below .kuru-drawer,
+.float-panel-entering.float-panel-below .float-grip {
+  animation: float-fall 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes float-rise {
+  from {
+    transform: translateY(14px);
+    opacity: 0.4;
+  }
+}
+@keyframes float-fall {
+  from {
+    transform: translateY(-14px);
+    opacity: 0.4;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   The waveform, in the pill's page
+   -------------------------------------------------------------------------- */
+
+/* While the floating Kuru is on, the pill's window is put in the logo's row
+   and its page draws this instead of the pill. Whatever else is in the
+   stack — the pen's tools — stands in the same row, further from the logo,
+   and nothing in it is a handle: a docked window is not dragged. */
+.pill-docked .pill-stack {
+  flex-direction: row;
+  align-items: center;
+}
+.pill-docked-right .pill-stack {
+  flex-direction: row-reverse;
+}
+.pill-docked .voice-pill.voice-pill-floating {
+  -webkit-app-region: no-drag;
+}
+
+/* As tall as the logo's mark and as round, so the two read as one thing. The
+   ✕ is at the end away from the logo and the waveform against it. */
+.float-wave {
+  box-sizing: border-box;
+  height: 48px;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 10px;
+  border-radius: 24px;
+  border: var(--border) solid var(--line);
+  background: var(--chrome);
+  color: var(--text);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text-strong) 14%, transparent),
+    0 3px 7px color-mix(in srgb, black 42%, transparent);
+  -webkit-user-select: none;
+  user-select: none;
+  transform-origin: right center;
+  animation: float-wave-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.float-wave-right {
+  flex-direction: row;
+  padding: 0 10px 0 14px;
+  transform-origin: left center;
+}
+@keyframes float-wave-in {
+  from {
+    transform: scaleX(0.55);
+    opacity: 0;
+  }
+}
+.float-wave-listening {
+  border-color: var(--danger);
+}
+.float-wave-speaking {
+  border-color: var(--working);
+}
+.float-wave-sending,
+.float-wave-error {
+  border-color: var(--blocked);
+}
+
+/* The bars: newest at the far end and running towards the logo while it
+   listens — the words going in — and fading out as they reach it. The scale
+   is an inline transform the component sets on a clock, as the pill's meter
+   is, so the sheet keeps the shape and the component the number. */
+.float-wave-bars {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to left, transparent, black 26%);
+  mask-image: linear-gradient(to left, transparent, black 26%);
+}
+.float-wave-right .float-wave-bars {
+  flex-direction: row;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 26%);
+  mask-image: linear-gradient(to right, transparent, black 26%);
+}
+.float-wave-bar {
+  flex: none;
+  width: 3px;
+  height: 30px;
+  border-radius: 2px;
+  background: var(--danger);
+  transform: scaleY(0.08);
+  transform-origin: center;
+  transition: transform 70ms linear;
+}
+/* Kuru's voice is not a level this page is told, so it is drawn as speech
+   rather than measured: every bar on the same swell, each a little out of
+   step with the one before (the delay is inline). */
+.float-wave-speaking .float-wave-bar {
+  background: var(--working);
+  transition: none;
+  animation: float-speak 1000ms ease-in-out infinite;
+}
+@keyframes float-speak {
+  0%,
+  100% {
+    transform: scaleY(0.14);
+  }
+  35% {
+    transform: scaleY(0.92);
+  }
+  70% {
+    transform: scaleY(0.4);
+  }
+}
+.float-wave-sending .float-wave-bar {
+  background: var(--blocked);
+  transition: none;
+  animation: float-wait 900ms ease-in-out infinite;
+}
+@keyframes float-wait {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.float-wave-words {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.float-wave-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-round);
+  color: var(--dim);
+  font-size: var(--fs-base);
+}
+.float-wave-close:hover {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .float-logo,
+  .float-logo-ring,
+  .float-wave,
+  .float-wave-bar,
+  .float-panel-entering .kuru-drawer,
+  .float-panel-entering .float-grip {
+    animation: none;
+    transition: none;
+  }
+}

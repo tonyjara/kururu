@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { Crash } from "./components/Crash";
+import { FloatLogo, FloatPanel } from "./components/Float";
 import { NotePage } from "./components/NotePage";
 import { Pill } from "./components/Pill";
 import { isLoopback } from "./preview";
@@ -25,6 +26,13 @@ const pill = query.has("pill");
  * the desktop says over the bridge; the address only picks the root.
  */
 const note = !pill && query.has("note");
+/**
+ * And the floating Kuru's two windows, the same way: `/?float=logo` is the
+ * logo over every application and `/?float=panel` the chat behind it — see
+ * `components/Float.tsx`. Anything else after the `=` is the app, as no
+ * query is.
+ */
+const float = !pill && !note ? query.get("float") : null;
 
 /**
  * Vite's dev client reads a dropped socket as vite restarting: it polls until
@@ -52,6 +60,6 @@ if (import.meta.hot && !isLoopback(location.hostname)) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Crash>{pill ? <Pill /> : note ? <NotePage /> : <App />}</Crash>
+    <Crash>{pill ? <Pill /> : note ? <NotePage /> : float === "logo" ? <FloatLogo /> : float === "panel" ? <FloatPanel /> : <App />}</Crash>
   </StrictMode>,
 );

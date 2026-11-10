@@ -31,11 +31,12 @@ const CARDS_WAIT_MS = 350;
  * @param {import("./runner").Runner} options.runner
  * @param {import("./talkkey").TalkKey} options.talk
  * @param {import("./notes").NoteWindows} options.notes
+ * @param {import("./float").FloatKuru} options.float
  * @param {string} options.version
  * @param {boolean} options.packaged
  * @param {object} options.actions  `openWindow`, `closeWindow`, `windowOpen`, `nodes`, `openNode`, `quit`, `serverChanged`, `webRebuilt`
  */
-function createTray({ runner, talk, notes, version, packaged, actions }) {
+function createTray({ runner, talk, notes, float, version, packaged, actions }) {
   const image = nativeImage.createFromPath(path.join(__dirname, "icon", "trayTemplate.png"));
   image.setTemplateImage(true);
   const tray = new Tray(image);
@@ -75,6 +76,7 @@ function createTray({ runner, talk, notes, version, packaged, actions }) {
       source: config.source,
       savedCheckout: config.checkout,
       talk: talk.state(),
+      float: { on: float.enabled },
       notes: {
         list: notes.list(),
         cards: runner.health ? cards : null,
@@ -198,6 +200,8 @@ function createTray({ runner, talk, notes, version, packaged, actions }) {
     "talk-permission": () => talk.openInputMonitoring(),
     "talk-altspace": () => talk.setAltSpace(!talk.altSpace),
     "reset-pill": () => talk.resetPlace(),
+    "float-toggle": () => float.setEnabled(!float.enabled),
+    "float-reset": () => float.resetPlace(),
     annotate: () => actions.annotate(),
     "notes-show-all": () => notes.showAll(),
     "notes-hide-all": () => notes.hideAll(),
