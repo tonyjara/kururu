@@ -777,6 +777,24 @@ function createWindow() {
     Menu.buildFromTemplate(template).popup({ window: win });
   });
 
+  // The window's three buttons, which the page may ask to draw itself; see
+  // `claimFrame` below for the terms.
+  for (const event of ["focus", "blur"]) win.on(/** @type {"focus"} */ (event), () => tellFrame(win));
+  win.on("enter-full-screen", () => {
+    // Full screen keeps its buttons in the title bar that slides down with
+    // the menu bar, and those are the system's whoever drew the others.
+    if (process.platform === "darwin") win.setWindowButtonVisibility(true);
+    tellFrame(win);
+  });
+  win.on("leave-full-screen", () => {
+    if (process.platform === "darwin" && frames.get(win)?.claimed) win.setWindowButtonVisibility(false);
+    tellFrame(win);
+  });
+  win.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) leaveFrame(win, details.url.startsWith("file:") ? 0 : FRAME_GRACE_MS);
+  });
+  win.webContents.on("render-process-gone", () => leaveFrame(win, 0));
+
   /**
    * The renderer being killed is the way this window goes black that is not
    * kururu's own doing.
@@ -931,6 +949,99 @@ function closeWindow() {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle("kururu:server-url", () => connected);
+
+/**
+ * The window's three buttons, and who draws them.
+ *
+ * The window has no title bar, and macOS floats its close, minimise and zoom
+ * over the top-left corner. Since macOS 26 it draws them large and glassy for
+ * an app built against its SDK, which this Electron is, and has no switch for
+ * the small flat ones the owner asked for (2026-11-10). So the page may draw
+ * its own (`web/src/components/WindowButtons.tsx`) and the system's are put
+ * away while it does.
+ *
+ * The page asks; the main process never assumes. This window shows whatever a
+ * server serves, and that may be a box running an older kururu whose page
+ * draws no buttons, the picker (a file of ours, which draws none), or a page
+ * that crashed before it drew anything: a window with no way to close it is
+ * the one outcome worth every line here to rule out. So the system's buttons
+ * are hidden only on a claim from the page in the main window, and come back
+ * when that page goes: at once for the picker and for a renderer that died,
+ * and after a moment for any other navigation or a page that lets go, so
+ * that a reload of a page that claims again does not flash the large ones in
+ * between.
+ *
+ * macOS only. Elsewhere the window has the platform's own frame and a claim
+ * is answered with null, which the page reads as "not yours to draw".
+ */
+const FRAME_GRACE_MS = 2500;
+/**
+ * And for a page that says it has stopped drawing. Not at once, because React
+ * in development mounts everything twice, and a claim, a release and a claim
+ * inside a millisecond would flash the system's buttons on every load of a
+ * checkout's page.
+ */
+const FRAME_RELEASE_MS = 400;
+/** @type {WeakMap<import("electron").BrowserWindow, { claimed: boolean, timer: ReturnType<typeof setTimeout> | null }>} */
+const frames = new WeakMap();
+
+/** @param {import("electron").BrowserWindow} w */
+function frameState(w) {
+  return { focused: w.isFocused(), fullscreen: w.isFullScreen() };
+}
+
+/** @param {import("electron").BrowserWindow | null} w */
+function tellFrame(w) {
+  if (w && !w.isDestroyed() && frames.get(w)?.claimed) w.webContents.send("kururu:frame-state", frameState(w));
+}
+
+/**
+ * The page that drew the buttons is going, or gone: the system's come back
+ * after `after` milliseconds unless a page has claimed them again by then.
+ * @param {import("electron").BrowserWindow} w
+ * @param {number} after
+ */
+function leaveFrame(w, after) {
+  const frame = frames.get(w);
+  if (!frame?.claimed) return;
+  frame.claimed = false;
+  if (frame.timer) clearTimeout(frame.timer);
+  const back = () => {
+    frame.timer = null;
+    if (!frame.claimed && !w.isDestroyed()) w.setWindowButtonVisibility(true);
+  };
+  if (after > 0) frame.timer = setTimeout(back, after);
+  else back();
+}
+
+ipcMain.handle("kururu:frame-claim", (event) => {
+  const w = BrowserWindow.fromWebContents(event.sender);
+  // The main window only: a note and the pill are windows of other kinds,
+  // with frames of their own.
+  if (process.platform !== "darwin" || !w || w !== win || w.isDestroyed()) return null;
+  const frame = frames.get(w) ?? { claimed: false, timer: null };
+  frames.set(w, frame);
+  if (frame.timer) clearTimeout(frame.timer);
+  frame.timer = null;
+  frame.claimed = true;
+  if (!w.isFullScreen()) w.setWindowButtonVisibility(false);
+  return frameState(w);
+});
+
+ipcMain.on("kururu:frame-release", (event) => {
+  const w = BrowserWindow.fromWebContents(event.sender);
+  if (w && !w.isDestroyed()) leaveFrame(w, FRAME_RELEASE_MS);
+});
+
+ipcMain.on("kururu:frame-act", (event, verb) => {
+  const w = BrowserWindow.fromWebContents(event.sender);
+  if (!w || w.isDestroyed() || !frames.get(w)?.claimed) return;
+  // `close` is the window's own close, so whatever asks before closing still asks.
+  if (verb === "close") w.close();
+  else if (verb === "minimize") w.minimize();
+  else if (verb === "fullscreen") w.setFullScreen(!w.isFullScreen());
+  else if (verb === "zoom") w.isMaximized() ? w.unmaximize() : w.maximize();
+});
 
 /**
  * A notification was clicked, so bring the window forward.

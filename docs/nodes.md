@@ -989,9 +989,9 @@ one, and a split or a focus made here moves the child's own phone, which is
 what two clients of one server have always done.
 
 **The window.** The pane area draws `remote.workspace` with the agents from
-both lists. The top band takes the node's hue (`nodeHue`, a board-palette
+both lists. The panes' strips take the node's hue (`nodeHue`, a board-palette
 token set as `--node-hue`, which the Kuru drawer's chips also wear), with
-the node's name at its left end. Every tab wears the node's chip
+the node's name at the head of the top-left one. Every tab wears the node's chip
 (`NodeChip.tsx`). A document tab in a remote pane reads the node's file, and
 the file tree is the node's disk (phase 2, below). Rename and Delete
 workspace do nothing while a remote workspace is on screen, rather than act

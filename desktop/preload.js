@@ -98,6 +98,22 @@ if (isPicker) {
      */
     show: () => ipcRenderer.send("kururu:show"),
     /**
+     * The window's three buttons, for a page that draws them itself: see
+     * `claimFrame`'s note in `main.js`. `claim` asks for the system's to be
+     * put away and resolves with the window's state, or null where they are
+     * not the page's to draw; `release` gives them back, for a page that has
+     * stopped drawing; `act` is what a button does, to the window the page is
+     * in and no other.
+     */
+    frame: {
+      claim: () => ipcRenderer.invoke("kururu:frame-claim"),
+      release: () => ipcRenderer.send("kururu:frame-release"),
+      onState: (listener) => relayOn("kururu:frame-state", listener),
+      act: (verb) => {
+        if (verb === "close" || verb === "minimize" || verb === "fullscreen" || verb === "zoom") ipcRenderer.send("kururu:frame-act", verb);
+      },
+    },
+    /**
      * Raise the *main* window, for a click on the floating pill — which may be
      * sent from the panel's own webContents, so `show()` (whichever window sent
      * it) is the wrong half to reuse: the panel is non-focusable and was never

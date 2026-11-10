@@ -22,6 +22,7 @@ import { installInk } from "./ink";
 import { installReload } from "./reload";
 import { isLoopback } from "./preview";
 import * as api from "./session";
+import { useInterface } from "./fonts";
 import { applyTerminalAppearance } from "./terminals";
 import { installSpeech, installTalkKey, setSpeechVolume, setVoiceProfile, setVoiceRemote } from "./voice";
 
@@ -43,6 +44,7 @@ export function useAppearance(snapshot: SessionSnapshot | null): void {
     if (terminal) applyTerminalAppearance(terminal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
+  useInterface(snapshot);
 }
 
 /**

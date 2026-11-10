@@ -136,7 +136,7 @@ function LoadDetail({ view }: { view: SlotsView }) {
  */
 function GaugeMark() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="glyph glyph-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 18a8 8 0 1 1 16 0" />
       <path d="M12 18l4-6" />
     </svg>

@@ -612,7 +612,7 @@ function SayMark({ phase, toggled, level, onPress }: { phase: "idle" | "listenin
  */
 function QuoteMark() {
   return (
-    <svg className="quote-pop-glyph" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg className="glyph quote-pop-glyph" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M4 17.5c0-4.6 2.2-8.4 6-10.5l1 1.6C8.7 10 7.6 11.8 7.4 13.6H10V19H4v-1.5Zm10 0c0-4.6 2.2-8.4 6-10.5l1 1.6c-2.3 1.4-3.4 3.2-3.6 5H20V19h-6v-1.5Z" />
     </svg>
   );
@@ -621,7 +621,7 @@ function QuoteMark() {
 /** The arrow that puts it in: into the box, not sent, so an arrow in rather than a paper plane away. */
 function GoMark() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M5 12h14" />
       <path d="m13 6 6 6-6 6" />
     </svg>

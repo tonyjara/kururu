@@ -102,7 +102,7 @@ function pinnedWhen(at: number): string {
 /** A pushpin — drawn here for the drawer's own icons' reason: a picture of a physical object that means the same in any chrome. Filled once pinned. */
 export function PinIcon({ filled = false }: { filled?: boolean }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M9 3h6l-1 1.5V9l3 4H7l3-4V4.5Z" fill={filled ? "currentColor" : "none"} />
       <path d="M12 13v8" />
     </svg>

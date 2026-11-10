@@ -63,6 +63,7 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar, WorkspaceToggle } from "./components/StatusBar";
 import { DrawerChips } from "./components/DrawerChips";
 import { VoicePill } from "./components/VoicePill";
+import { useWindowFrame, WindowButtons } from "./components/WindowButtons";
 import { ReloadNotice } from "./components/ReloadNotice";
 import { VaultAsks } from "./components/VaultAsk";
 import { KuruDrawer } from "./components/KuruDrawer";
@@ -304,6 +305,7 @@ export function App() {
   const [drawerWidth, setDrawerWidth] = useState(() => storedWidth(DRAWER_WIDTH_KEY, DRAWER_DEFAULT, DRAWER_MIN, Infinity));
   /** Zen: the focused pane takes the window. A view state, never the server's. */
   const [zen, setZen] = useState(false);
+  const frame = useWindowFrame();
   /**
    * The touch toolbar, and whether this device has any use for one.
    *
@@ -1338,6 +1340,7 @@ export function App() {
   if (!snapshot || !profile || !workspace || !mascot) {
     return (
       <div className="app app-booting">
+        <WindowButtons frame={frame} />
         <p className="muted">{connected ? "Starting…" : "Connecting to the kururu server…"}</p>
       </div>
     );
@@ -1381,14 +1384,14 @@ export function App() {
     />
   );
   const drawerOpen = kuruDrawer.open || (needsOpen && !!needs);
-  /* The name and then the toggle, in the same place whether the sidebar is up
-     or away, so a press does not move the button it was on. A phone's bar has
-     the toggle first, under the thumb. */
+  /* The toggle and then the workspace's name, for wherever the sidebar is not:
+     the head of the top-left pane's strip while it is away, a phone's bottom
+     bar. While it is up its own top line has the toggle, at the right end. */
   const toggle = (
     <WorkspaceToggle
       name={remote ? `${remote.node.name} · ${remote.workspace?.name ?? "…"}` : workspace.name}
       sidebarOpen={sidebarOpen}
-      toggleFirst={narrow}
+      toggleFirst
       onToggle={() => run("toggle-sidebar")}
     />
   );
@@ -1399,17 +1402,21 @@ export function App() {
        overlay — nothing at all. Putting it on the root lets the stylesheet
        decide which of those applies, which is the whole point of stating the
        breakpoint once. `app-window` says this is Electron rather than a browser
-       tab, and exists for exactly one thing: the traffic lights, which float
-       over this corner and are not there on a phone. `app-band` is the desktop,
-       where the top row of pane strips is the middle of the window's top band
-       — see `.app-band` in the stylesheet. */
+       tab, and exists for exactly one thing: the window's three buttons, which
+       stand over this corner and are not there on a phone. `app-lights` says
+       they are kururu's own drawing (`WindowButtons`) rather than the
+       system's, and `app-fullscreen` that there are none, so the room kept
+       for them is given back. */
     <div
-      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"} ${!zen && !narrow ? "app-band" : ""}`}
+      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${frame.own ? "app-lights" : ""} ${frame.fullscreen ? "app-fullscreen" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px`, "--drawer-w": `${drawerWidth}px`, "--drawer-min": `${DRAWER_MIN}px`, "--stage-floor": `${STAGE_FLOOR}px` } as React.CSSProperties}
     >
       {/* Everything but the bottom bar, side by side: the sidebar, the panes,
           a drawer, the tree. A row of its own since 2026-10-18 so that the bar
           under it can run the whole width of the window. */}
+      {/* The window's three buttons, where the system's stood, in an app that
+          has none of its own. See `WindowButtons.tsx`. */}
+      <WindowButtons frame={frame} />
       <div className="app-body">
       {sidebarOpen && !zen && (
         <Sidebar
@@ -1425,7 +1432,7 @@ export function App() {
           remoteOn={remote ? { nodeId: remote.node.id, workspaceKey: remote.workspaceKey } : null}
           needsYou={needyWorkspaces}
           onRun={run}
-          toggle={narrow ? null : toggle}
+          onToggle={narrow ? null : () => run("toggle-sidebar")}
           onDeleteWorkspace={confirmDeleteWorkspace}
           onEditing={setEditing}
           onPrompt={setDialog}

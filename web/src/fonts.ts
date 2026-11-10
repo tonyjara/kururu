@@ -42,6 +42,8 @@
  * this list was written is the same case as a font on a machine we are not
  * looking at.
  */
+import { useLayoutEffect } from "react";
+import { interfaceOf, interfaceScale, type Appearance, type InterfaceAppearance } from "../../shared/theme";
 
 /**
  * The faces worth asking about by name.
@@ -92,10 +94,35 @@ const CANDIDATES = [
  * machine, it never changes while the window is open, and subscribing to it
  * would be a re-render for something that arrives once.
  */
+/**
+ * The same question for the interface's face, which is read rather than laid
+ * on a grid: the proportional faces a machine is likely to have, and the ones
+ * people install to set an interface in. `queryLocalFonts` finds the rest.
+ */
+const INTERFACE_CANDIDATES = [
+  // macOS
+  "SF Pro", "SF Pro Text", "SF Pro Display", "SF Pro Rounded", "SF Compact", "New York", "Helvetica Neue",
+  "Helvetica", "Avenir", "Avenir Next", "Optima", "Gill Sans", "Futura", "Lucida Grande", "Charter",
+  // Windows
+  "Segoe UI", "Segoe UI Variable", "Calibri", "Tahoma", "Verdana", "Trebuchet MS",
+  // Linux / free
+  "Cantarell", "Ubuntu", "Ubuntu Sans", "Noto Sans", "DejaVu Sans", "Liberation Sans", "Adwaita Sans",
+  // The usual interface faces
+  "Inter", "Inter Variable", "Inter Display", "Geist", "IBM Plex Sans", "Roboto", "Open Sans", "Source Sans 3",
+  "Source Sans Pro", "Work Sans", "Manrope", "DM Sans", "Figtree", "Public Sans", "Nunito", "Nunito Sans",
+  "Lato", "Poppins", "Montserrat", "Rubik", "Outfit", "Plus Jakarta Sans", "Atkinson Hyperlegible",
+  "Atkinson Hyperlegible Next", "Lexend", "Recursive", "Red Hat Text", "Red Hat Display", "Hanken Grotesk",
+  "Space Grotesk", "Satoshi", "General Sans", "Instrument Sans", "Albert Sans", "Onest", "Mona Sans",
+  "Hubot Sans", "iA Writer Quattro S", "iA Writer Quattro V", "Iosevka Aile", "Iosevka Etoile",
+  // An interface set in a terminal's face is a look some people want.
+  "SF Mono", "Menlo", "Berkeley Mono", "JetBrains Mono", "Geist Mono", "Iosevka", "Monaspace Neon", "Commit Mono",
+];
+
 let granted: string[] | null = null;
 
 /** Measured once. The probe is cheap but it is not free, and nothing about it changes. */
 let probed: string[] | null = null;
+let probedInterface: string[] | null = null;
 
 /**
  * Whether the browser can be asked properly at all. Read rather than assumed
@@ -114,8 +141,37 @@ export function canEnumerate(): boolean {
  * next render longer.
  */
 export function knownFonts(): string[] {
-  if (probed === null) probed = probe();
+  if (probed === null) probed = probe(CANDIDATES);
   return [...new Set([...(granted ?? []), ...probed])].sort((a, b) => a.localeCompare(b));
+}
+
+/** The same list for the interface's face: `INTERFACE_CANDIDATES` as the floor. */
+export function knownInterfaceFonts(): string[] {
+  if (probedInterface === null) probedInterface = probe(INTERFACE_CANDIDATES);
+  return [...new Set([...(granted ?? []), ...probedInterface])].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Set the interface in a face and at a size: the two custom properties the
+ * stylesheet's `--ui` and its type ramp are written in terms of, on the root,
+ * and nothing else. See `InterfaceAppearance` in `shared/theme.ts`.
+ *
+ * The face is quoted and put in front of the system's stack rather than in
+ * place of it (`--ui-system`), so a name this device does not have — a phone
+ * looking at a desktop's choice — falls through to what it was drawn in
+ * before and not to a serif. No face removes the property, and the
+ * stylesheet's own default stands.
+ *
+ * These are the only two properties of the look written at run time. A
+ * colour or a radius is the stylesheet's and stays there.
+ */
+export function applyInterface(ui: InterfaceAppearance): void {
+  const root = document.documentElement.style;
+  if (ui.fontFamily) root.setProperty("--ui-font", `"${ui.fontFamily}", var(--ui-system)`);
+  else root.removeProperty("--ui-font");
+  const scale = interfaceScale(ui);
+  if (scale === 1) root.removeProperty("--ui-scale");
+  else root.setProperty("--ui-scale", String(scale));
 }
 
 /**
@@ -142,7 +198,7 @@ export async function enumerate(): Promise<boolean> {
 }
 
 /**
- * Which of `CANDIDATES` resolve to something.
+ * Which of a list of candidates resolve to something.
  *
  * Three generic families rather than one, because a candidate is only detectable
  * when it differs from the generic it is being compared against — and a face
@@ -154,7 +210,7 @@ export async function enumerate(): Promise<boolean> {
  * span per candidate is a hundred forced reflows, which is the version of this
  * that is slow enough to notice.
  */
-function probe(): string[] {
+function probe(candidates: readonly string[]): string[] {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   if (!ctx) return [];
@@ -169,7 +225,7 @@ function probe(): string[] {
     base.set(generic, ctx.measureText(sample).width);
   }
   const found: string[] = [];
-  for (const family of CANDIDATES) {
+  for (const family of candidates) {
     for (const generic of generics) {
       ctx.font = `48px "${family}", ${generic}`;
       if (ctx.measureText(sample).width !== base.get(generic)) {
@@ -179,4 +235,21 @@ function probe(): string[] {
     }
   }
   return found;
+}
+
+/**
+ * Set the page in the face and at the size the server says, for any page that
+ * draws the interface: the window, and a note's window, which has no
+ * terminals and so no `useAppearance`. Keyed on the two values serialized,
+ * since a snapshot is a new object several times a second however little
+ * has changed. A layout effect, so the first paint with a snapshot
+ * is already at the chosen size rather than a frame behind it.
+ */
+export function useInterface(snapshot: { appearance: Partial<Appearance> } | null): void {
+  const ui = snapshot ? interfaceOf(snapshot.appearance) : null;
+  const key = ui ? JSON.stringify(ui) : null;
+  useLayoutEffect(() => {
+    if (ui) applyInterface(ui);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 }

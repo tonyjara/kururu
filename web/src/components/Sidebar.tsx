@@ -50,6 +50,7 @@
  * once already, with the dev servers.
  */
 import { Fragment, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { SidebarToggle } from "./StatusBar";
 import { panes } from "../../../shared/layout";
 import type {
   AgentSnapshot,
@@ -152,11 +153,11 @@ interface Props {
    */
   onPrompt: (state: DialogState) => void;
   /**
-   * The sidebar's toggle and the workspace's name, for the strip along the
-   * top — see `WorkspaceToggle` in `StatusBar.tsx`. Null on a phone, whose
-   * bottom bar has them.
+   * Fold the sidebar away, for the button at the right end of its top line.
+   * Null on a phone, whose bottom bar has the toggle and whose sidebar is a
+   * screen with a close button of its own.
    */
-  toggle: ReactNode;
+  onToggle: (() => void) | null;
   /** Opens the settings dialog. The corner is the only way in. */
   onSettings: () => void;
   /** Opens the phone dialog — the addresses this server answers at, as QR codes. */
@@ -212,7 +213,7 @@ export function Sidebar({
   onBoard,
   needsYou,
   remoteOn,
-  toggle,
+  onToggle,
   onSettings,
   onReach,
   overlay,
@@ -944,36 +945,33 @@ export function Sidebar({
 
   return (
     <aside className={`sidebar ${overlay ? "sidebar-overlay" : ""}`}>
-      {/* The strip the traffic lights sit in.
-          The window is `titleBarStyle: "hiddenInset"`, so macOS floats its close,
-          minimise and zoom buttons over this corner and gives us no title bar to
-          drag the window by. This is both answers at once: it is the drag handle,
-          and it is the space the buttons are standing in.
+      {/* The sidebar's top line: whose window this is, and the button that folds
+          the sidebar away, at the right end where the hand already goes for
+          it in every other app that has one (the owner, 2026-11-10, beside
+          Herdr's). In the window it is also the room the three window buttons
+          stand in — macOS's own, floated over this corner by `titleBarStyle`,
+          or the ones kururu draws there itself (`WindowButtons`) — and the
+          handle the window is dragged by.
 
-          It used to be the profile row itself, with 78px of left padding to get
-          out of their way — which put the profile name in the gap beside three
-          system buttons, in a row it did not fill, wearing an indent that
-          belonged to something else. So the strip is now empty and the profile
-          name has a line of its own underneath it, where it can start at the same
-          left edge every other row in the sidebar starts at.
+          The workspace's name stood here from 2026-10-18 until then, as the
+          window's title, and was taken out: the row that is lit in the list
+          below already says which workspace this is, and the line is worth
+          more as the one place the window says what it is. The name still
+          leads the top-left pane's strip while the sidebar is away
+          (`WorkspaceToggle`), where nothing else says it.
 
-          Empty, and therefore drawn only in the Electron window: in a browser tab
-          — which is what the phone loads — there is nothing floating over this
-          corner and the strip would be thirty pixels of nothing at the top of the
-          screen. `app-window` on the root is what says which of the two this is.
-
-          Since 2026-10-18 it is not empty on a desktop: the sidebar's toggle and
-          the workspace's name came up from the bar under the panes to stand
-          beside the traffic lights, where a window's title would be. So the
-          strip is drawn in a browser tab too when it has them — a line that
-          holds something is not thirty pixels of nothing — and stays the empty
-          drag handle on a phone's full-screen sidebar, which has its close
-          button for a way out. The name leads and the toggle stands right
-          after it — where the two also stand at the head of the top-left
-          pane's strip while the sidebar is away, so folding it moves
-          neither. */}
-      {toggle ? (
-        <div className="sidebar-drag sidebar-top">{toggle}</div>
+          A phone's full-screen sidebar keeps the empty drag strip instead —
+          thirty pixels of nothing in a browser tab, so drawn only in the
+          window — and its close button below for a way out. */}
+      {onToggle ? (
+        <div className="sidebar-drag sidebar-top">
+          <span className="brand">
+            <img className="brand-logo" src="/apple-touch-icon.png" alt="" draggable={false} />
+            <span className="brand-name">Kururu</span>
+          </span>
+          <span className="sidebar-head-spacer" />
+          <SidebarToggle open onToggle={onToggle} />
+        </div>
       ) : (
         <div className="sidebar-drag" aria-hidden="true" />
       )}

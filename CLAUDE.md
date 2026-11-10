@@ -159,10 +159,17 @@ The load-bearing invariants, one line each, with the argument behind the link:
   database that will not open is a server that does not start. →
   [more](docs/invariants.md#boards-in-the-database)
 - **Kururu has one look, and it is the `:root` block of `web/src/styles.css`.**
-  Nothing writes a colour or a shape at run time; the terminal's palette is
-  `TERMINAL` in `shared/theme.ts`, kept in step with `--bg` by hand. Themes,
-  skins, packs, the registry and the studio were removed on 2026-11-09: do
-  not bring a switch back without the user asking. → [styles](docs/styles.md)
+  Nothing writes a colour or a shape at run time; the interface's face and
+  size are the two properties that are written (`--ui-font`, `--ui-scale`,
+  Settings → Interface), and the terminal's palette is `TERMINAL` in
+  `shared/theme.ts`, kept in step with `--bg` by hand. Themes, skins, packs,
+  the registry and the studio were removed on 2026-11-09: do not bring a
+  switch back without the user asking. → [styles](docs/styles.md)
+- **A pane is a card, and a size is a token.** Gutter on every side, the top
+  included; an icon is one of `--icon-sm/-md/-lg` and type is the `--fs-*`
+  ramp, so the interface's size scales both. The window's three buttons are
+  the page's only after it asks (`frame.claim`), and go back to the system's
+  when that page goes. → [styles](docs/styles.md#the-window-as-cards)
 - **A terminal's font change re-measures and nothing else about the look
   does.** A proposal is a pty resize and a SIGWINCH into every agent. →
   [terminals](docs/terminals.md#the-size-policy)

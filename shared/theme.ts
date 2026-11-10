@@ -13,9 +13,10 @@
  * fair price: `TERMINAL.background` is `--bg`, and the rest of the ANSI set is
  * the published Dracula one, which is where the chrome's colours came from.
  *
- * What a person may still change is the terminal's type and cursor and the
- * bottom bar's chips: preferences, not a look. They are the `Appearance` at
- * the foot, saved in `~/.config/kururu/appearance.json`.
+ * What a person may still change is the terminal's type and cursor, the face
+ * and the size the interface is set in, and the bottom bar's chips:
+ * preferences, not a look. They are the `Appearance` at the foot, saved in
+ * `~/.config/kururu/appearance.json`.
  */
 import { adoptBar, DEFAULT_BAR, type BarSettings } from "./statusbar";
 
@@ -150,6 +151,39 @@ export interface TerminalAppearance {
   cursorBlink: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// The interface's type
+// ---------------------------------------------------------------------------
+
+/**
+ * How big the interface's type may be: the size of running text, which the
+ * stylesheet calls `--fs-lg`, with the rest of the ramp scaled round it.
+ *
+ * A narrower range than the terminal's, because this one scales a layout
+ * rather than a grid: under 11 the smallest step of the ramp is under eight
+ * pixels and stops being type, and over 18 a strip of tabs is a third of a
+ * small pane. Clamped rather than refused, on `MIN_FONT_SIZE`'s reasoning.
+ */
+export const MIN_UI_FONT_SIZE = 11;
+export const MAX_UI_FONT_SIZE = 18;
+export const DEFAULT_UI_FONT_SIZE = 13;
+
+/**
+ * The type kururu's own interface is set in: the sidebar, the boards, the
+ * drawers, the reader, Settings. Everything that is not a terminal, which
+ * has its own above.
+ *
+ * Server-owned like the terminal's, so one choice for the desktop and the
+ * phone. It reaches the page as two custom properties on the root and nothing
+ * else (`applyInterface` in `web/src/fonts.ts`): `--ui-font`, which goes in
+ * front of the system's stack, and `--ui-scale`, the size over the default.
+ */
+export interface InterfaceAppearance {
+  /** A face to put in front of the system's, or empty for the system's alone. */
+  fontFamily: string;
+  fontSize: number;
+}
+
 /**
  * What a person may change about how kururu looks, as one saved decision:
  * `~/.config/kururu/appearance.json`. The colours and the shape are not in
@@ -157,6 +191,11 @@ export interface TerminalAppearance {
  */
 export interface Appearance {
   terminal: TerminalAppearance;
+  /**
+   * Absent in a snapshot from a server older than 2026-11-10 — another node's,
+   * say — which is why a page reads it through `interfaceOf`.
+   */
+  ui: InterfaceAppearance;
   /**
    * Which of the bottom bar's chips are drawn — see `shared/statusbar.ts`. In
    * here rather than a file of its own because it is what the window looks
@@ -172,8 +211,26 @@ export const DEFAULT_APPEARANCE: Appearance = {
     cursorStyle: "block",
     cursorBlink: true,
   },
+  ui: {
+    fontFamily: "",
+    fontSize: DEFAULT_UI_FONT_SIZE,
+  },
   bar: DEFAULT_BAR,
 };
+
+/** The interface's type out of an appearance that may predate it. */
+export function interfaceOf(appearance: Partial<Appearance> | null | undefined): InterfaceAppearance {
+  return appearance?.ui ?? DEFAULT_APPEARANCE.ui;
+}
+
+/**
+ * The interface's size as the stylesheet wants it: a factor on the ramp it
+ * was written at. Rounded to a thousandth so the same size is always the same
+ * string on the root, and a snapshot that changed nothing writes nothing.
+ */
+export function interfaceScale(ui: InterfaceAppearance): number {
+  return Math.round((clampUiFontSize(ui.fontSize) / DEFAULT_UI_FONT_SIZE) * 1000) / 1000;
+}
 
 /**
  * Whatever arrived, made into something that can be drawn.
@@ -196,7 +253,8 @@ export const DEFAULT_APPEARANCE: Appearance = {
  * dropped the next time the file is written.
  */
 export function adoptAppearance(value: unknown): Appearance {
-  const raw = (value ?? {}) as { terminal?: unknown; bar?: unknown };
+  const raw = (value ?? {}) as { terminal?: unknown; ui?: unknown; bar?: unknown };
+  const ui = (raw.ui ?? {}) as Partial<Record<keyof InterfaceAppearance, unknown>>;
   const term = (raw.terminal ?? {}) as Partial<Record<keyof TerminalAppearance, unknown>>;
   const d = DEFAULT_APPEARANCE.terminal;
   return {
@@ -208,6 +266,10 @@ export function adoptAppearance(value: unknown): Appearance {
         : d.cursorStyle,
       cursorBlink: typeof term.cursorBlink === "boolean" ? term.cursorBlink : d.cursorBlink,
     },
+    ui: {
+      fontFamily: adoptFontFamily(ui.fontFamily),
+      fontSize: clampUiFontSize(ui.fontSize),
+    },
     bar: adoptBar(raw.bar),
   };
 }
@@ -217,6 +279,10 @@ function clampFontSize(value: unknown): number {
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
 }
 
+function clampUiFontSize(value: unknown): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : DEFAULT_UI_FONT_SIZE;
+  return Math.min(MAX_UI_FONT_SIZE, Math.max(MIN_UI_FONT_SIZE, n));
+}
 /** A face somebody named, made safe to put in a `font-family`. */
 export function adoptFontFamily(value: unknown): string {
   if (typeof value !== "string") return "";

@@ -14,8 +14,10 @@ every file, and this document as it was.
 In two places, kept in step by hand.
 
 - **The chrome** is plain custom properties in the `:root` block of
-  `web/src/styles.css`: Dracula's palette, and the radii, line weights and type
-  ramp the window already had. Nothing writes them at run time.
+  `web/src/styles.css`: Dracula's palette, and the radii, line weights, type
+  ramp and icon sizes. Nothing writes a colour or a shape at run time. Two
+  properties are written, and they are a person's rather than the design's:
+  `--ui-font` and `--ui-scale`, the interface's face and size (below).
 - **The terminal** is the constant `TERMINAL` in `shared/theme.ts`, handed to
   ghostty as an object in `web/src/terminals.ts`, because the emulator paints
   into a canvas CSS cannot reach. It is Dracula's published ANSI set with the
@@ -33,15 +35,22 @@ in `server/src/markdown.ts`.
 A rule asks for a value by name. What `:root` declares:
 
 - **Colours:** `--bg`, `--chrome`, `--chrome-high`, `--chrome-low`, `--strip`,
-  `--line`, `--line-high`, `--text`, `--text-strong`, `--dim`, `--dimmer`,
+  `--line`, `--line-soft`, `--line-high`, `--text`, `--text-strong`, `--dim`, `--dimmer`,
   `--accent`, `--on-accent`, the agent states `--idle`, `--working`, `--blocked`,
   `--done` and `--exited`, `--danger`, `--danger-bg`, `--on-danger`, `--scrim`
   and `--shadow`.
-- **Six radii:** `--radius-xs`, `-sm`, `-md`, `-lg`, `-xl` and `--radius-round`.
+- **Six radii and the card's:** `--radius-xs`, `-sm`, `-md`, `-lg`, `-xl`,
+  `--radius-round`, and `--radius-card` for a pane.
 - **Two line weights:** `--border` and `--border-thick`.
 - **Six type steps:** `--fs-xs`, `-sm`, `-base`, `-md`, `-lg`, `-xl`, with
-  `--ui-line-height`.
-- **Two faces:** `--ui` and `--mono`.
+  `--ui-line-height`. Each is its size at 13px running text times
+  `--ui-scale`.
+- **Three icon sizes:** `--icon-sm`, `-md`, `-lg`, scaled the same way (see
+  [Icons](#icons)).
+- **Two faces:** `--ui` and `--mono`. `--ui` is `--ui-font` in front of
+  `--ui-system`, the system's stack.
+- **The strip's measures:** `--tab-row`, `--tab-h`, `--strip-h` and `--top-h`,
+  worked out from the type (see [The window as cards](#the-window-as-cards)).
 - **Two shadows:** `--elev-dialog` and `--elev-menu`.
 - **`--gutter`**, the gap between panes.
 - **`--ws-*`**, the fourteen tag colours a board column can wear.
@@ -51,6 +60,10 @@ A rule that names a colour, a radius or a font size should use one of these
 rather than a literal, so that the next look is a change to `:root` and not a
 search through ten thousand lines. Nothing enforces it any more: the test that
 failed on a hex or a px outside `:root` went with the themes it was protecting.
+
+A size is a token too. The stylesheet has two font sizes that are not on the
+ramp, both the 16px floor below, and an icon is one of the three sizes. That
+is what lets one number, `--ui-scale`, resize the interface.
 
 **`--mono` is not the terminal's face.** A rule that names it is saying "this is
 a fragment of terminal", a pid, a path, a key. `--ui` is the chrome's typeface.
@@ -63,13 +76,72 @@ each other, which a palette chosen for chrome does not promise.
 `web/test/usage-palette.test.ts` reads the stylesheet's `:root` and fails if the
 `--chart-*` values there have drifted from what it works out.
 
+## The window as cards
+
+Since 2026-11-10 a pane is a card: its strip of tabs and what they show on one
+surface (`--bg`), a `--radius-card` corner, a hairline round it (`--line-soft`,
+a layer over the pane so it costs a terminal no pixel), and `--gutter` on each
+side of it and of the well, which makes 8px between cards and at every edge,
+the top included. The focused pane's hairline is the accent, mixed part of the
+way out. Zen and a phone's one pane have no gutter, corner or line.
+
+Before that the top of the window was one 38px band in a darker tone, with the
+top row of pane strips flush against the window's edge inside it. The owner
+asked for the cards beside Herdr's window, and for the sidebar's header and
+the list under it to be one surface.
+
+The measures that keep the columns on one line:
+
+- `--tab-row` is what a tab holds, from the type, rounded up to an even pixel.
+  `--tab-h` is a tab, 5px above and below that. `--strip-h` is a strip, 5px
+  above and below a tab.
+- `--top-h` is the head of a column beside the panes: the sidebar's top line,
+  a drawer's head, the file tree's. It is the gutter above a card and then a
+  strip, with its content centred on the strip's part. So the logo, a
+  drawer's buttons and the top row of tabs stand on one line, and the rule
+  under a drawer's head is level with the rule under those tabs.
+
+The sidebar's top line holds the logo, the name and, at its right end, the
+button that folds the sidebar away. The workspace's name is not there. While
+the sidebar is away the toggle and the name lead the top-left pane's strip
+(`.strip-lead`, `leadPane` in `Panes.tsx`).
+
+**The window's three buttons** are drawn by the page in the Mac app
+(`WindowButtons.tsx`): 12px, flat, the three plain colours, grey while the
+window is not the key one, level with the top of the logo. macOS draws its own
+large and glassy for an app built against the macOS 26 SDK, which Electron
+44 is, and has no switch for the old ones.
+
+The page asks before it draws. `frame.claim()` on the bridge has the main
+process put the system's away (`setWindowButtonVisibility`) and answers with
+the window's state, or null where the buttons are not the page's (not macOS,
+or not the main window). The system's come back when that page goes: at once
+for the picker and for a renderer that died, after a moment for any other
+navigation or a release. The window may next show a server whose page draws
+none, and a window with no way to close it is what this rules out. Full
+screen always has the system's, in the title bar that slides down. An app
+built before 2026-11-10 has no `frame` on its bridge and keeps the system's
+buttons; the layout keeps the same room either way.
+
 ## What a person can still change
 
-The terminal's type and cursor, and the bottom bar's chips: preferences, not a
-look. They are the `Appearance` in `shared/theme.ts`, `{ terminal: { fontFamily,
-fontSize, cursorStyle, cursorBlink }, bar }`, saved in
-`~/.config/kururu/appearance.json` and edited in Settings → Terminal and
-Settings → Bottom bar.
+The terminal's type and cursor, the interface's face and size, and the bottom
+bar's chips: preferences, not a look. They are the `Appearance` in
+`shared/theme.ts`, `{ terminal: { fontFamily, fontSize, cursorStyle,
+cursorBlink }, ui: { fontFamily, fontSize }, bar }`, saved in
+`~/.config/kururu/appearance.json` and edited in Settings → Terminal,
+Settings → Interface and Settings → Bottom bar.
+
+**The interface's type is two custom properties.** `applyInterface` in
+`web/src/fonts.ts` writes `--ui-font` (the chosen face, quoted, in front of
+the system's stack) and `--ui-scale` (the chosen size over 13) on the root,
+and removes each at its default. Every rule reaches them through `--ui`, the
+type ramp and the icon sizes. The size is clamped to 11–18px
+(`MIN_UI_FONT_SIZE`, `MAX_UI_FONT_SIZE`). A snapshot from an older server has
+no `ui`, so a page reads it through `interfaceOf`. A note's window and the
+pill apply it too (`useInterface`). It reaches no pty: a terminal whose box
+moved by a strip's few pixels proposes a size as it does after any change of
+layout.
 
 **A font change re-measures every terminal, and nothing else here does.**
 `applyTerminalAppearance` asks for a re-measure only when the family or the size
@@ -119,8 +191,19 @@ iOS for any field it misses while Safari still lets a pinch past it.
 `--icon-<name>-svg`; a `.icon-<name>` line in `styles.css` points `--icon-svg` at
 it and a `::before` paints it as a mask over `currentColor`. A mask is what makes
 a data URI take the colour of the control it sits in, and every one of these
-changes colour on hover. It is sized in em, so an icon is as big as the type of
-its control.
+changes colour on hover.
+
+**An icon is one of three sizes.** `--icon-md` (16px) is a button's, and the
+default. `--icon-sm` (14px) is an icon in a line of small text: a caret, a
+grip, a mark beside a time, anything in the status bar. `--icon-lg` (19px) is
+a thumb's, which is what `--icon-md` becomes on a phone. A rule that wants
+another of the three sets `--icon-size` on the control. An icon was 1.2em of
+its control's type until 2026-11-10, and the controls are set in five sizes.
+
+The few drawings that are an `<svg>` in the tree, because the set has none (a
+microphone, a speaker, the sidebar's toggle), wear `.glyph` or `.glyph-sm`:
+the same sizes and the set's 2-unit line. New ones should do the same rather
+than carry a width.
 
 It is a component rather than a bare span so that the name is typed: `IconName`
 is the keys of the drawings in `web/src/icons.ts`, and a name typed by hand into

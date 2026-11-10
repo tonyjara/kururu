@@ -168,7 +168,7 @@ interface Props {
   chips: ReactNode;
   /**
    * The sidebar's toggle and the workspace's name while the sidebar is away,
-   * or null while it is up and carries them itself. See `leadPane` below.
+   * or null while it is up and has its own toggle. See `leadPane` below.
    */
   lead: ReactNode;
   /**
@@ -347,9 +347,9 @@ export function Panes({
   /**
    * And the pane whose strip carries the sidebar's toggle and the workspace's
    * name while the sidebar is away: the top-left one, whose strip starts where
-   * the window does — where the sidebar's top strip had them, so putting the
-   * sidebar away shortens the band's left end to these two rather than moving
-   * the strips off the band's row. Chosen as `chipsPane` is, for its reasons.
+   * the window does, under the window's three buttons — so the toggle is in
+   * the corner the sidebar came out of and no bar is dropped over the panes
+   * to hold it. Chosen as `chipsPane` is, for its reasons.
    */
   const leadPane =
     shown?.id ??
@@ -383,13 +383,8 @@ export function Panes({
               ? FULL
               : { ...box, visibility: "hidden" as const }
             : box;
-        /* Whether this pane touches the top of the stage, where its strip is
-           the middle of the window's top band — see `.pane-box-top` in the
-           stylesheet. From the geometry, as `chipsPane` is, because the tree
-           does not say which panes reach the top. */
-        const atTop = shown || zen ? true : !rect || rect.y <= 1e-6;
         return (
-          <div className={`pane-box ${atTop ? "pane-box-top" : ""}`} key={pane.id} style={style}>
+          <div className="pane-box" key={pane.id} style={style}>
             <Pane
               pane={pane}
               /* Always true in solo, since the pane drawn is the focused one by

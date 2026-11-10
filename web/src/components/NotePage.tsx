@@ -37,12 +37,14 @@ import type { NoteReport, NoteSelf } from "../desktop";
 import { forgetNoteQuote, quoteAcross } from "../notequote";
 import { desktopNotes, locateCard } from "../notes";
 import { installReload } from "../reload";
+import { useInterface } from "../fonts";
 import { useKururu } from "../session";
 import { NoteInside, readNote } from "./Notes";
 import { QuoteToKuru } from "./Quote";
 
 export function NotePage() {
   const { snapshot } = useKururu();
+  useInterface(snapshot);
   const [self, setSelf] = useState<NoteSelf | null>(null);
   const [focused, setFocused] = useState(() => document.hasFocus());
   const root = useRef<HTMLElement>(null);

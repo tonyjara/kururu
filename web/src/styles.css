@@ -89,37 +89,62 @@
   --chart-6: #d95926;
   --chart-6-ink: #ffffff;
 
-  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* The interface's face and size, which are the two things about the look a
+     person sets: Settings → Interface writes `--ui-font` and `--ui-scale`
+     onto the root (`applyInterface` in `web/src/fonts.ts`), and every rule
+     reaches them through `--ui` and the type ramp below, so there is one
+     place a size is decided. The ramp is written at the size kururu ships at
+     — 13px for running text, `--fs-lg` — and the scale is the chosen size
+     over that. */
+  --ui-system: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --ui: var(--ui-font, var(--ui-system));
+  --ui-scale: 1;
   /* A rule that names `--mono` is saying "this is a fragment of terminal": a
      pid, a path, a key. The terminal's own face is the user's, in
      `appearance.json`. */
   --mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
 
-  /* The shape: six radii, two line weights, six type steps. */
-  --radius-xs: 2px;
-  --radius-sm: 2px;
-  --radius-md: 3px;
-  --radius-lg: 4px;
-  --radius-xl: 5px;
+  /* The shape: six radii and the card's, two line weights, six type steps.
+     Rounder than they were until 2026-11-10, when the panes became cards: a
+     10px card with 2px buttons inside it is two looks in one window. */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 5px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
   --radius-round: 50%;
+  /* A pane: the card a terminal, a document or a board is drawn on. */
+  --radius-card: 10px;
 
   --border: 1px;
   --border-thick: 2px;
 
-  --fs-xs: 9px;
-  --fs-sm: 10px;
-  --fs-base: 11px;
-  --fs-md: 12px;
-  --fs-lg: 13px;
-  --fs-xl: 15px;
+  --fs-xs: calc(9px * var(--ui-scale));
+  --fs-sm: calc(10px * var(--ui-scale));
+  --fs-base: calc(11px * var(--ui-scale));
+  --fs-md: calc(12px * var(--ui-scale));
+  --fs-lg: calc(13px * var(--ui-scale));
+  --fs-xl: calc(15px * var(--ui-scale));
   --ui-line-height: 1.4;
+
+  /* Three sizes of icon, and no fourth. An icon was 1.2em of whatever control
+     it stood in, and the controls are set in five sizes of type, so the same
+     drawing came out at five sizes across one header. `--icon-md` is a
+     button's: a pane's controls, a drawer's, the sidebar's. `--icon-sm` is an
+     icon standing in a line of small text, a caret or a mark beside a time.
+     `--icon-lg` is a thumb's, on a phone. They grow with the interface's
+     size, as the type does. */
+  --icon-sm: calc(14px * var(--ui-scale));
+  --icon-md: calc(16px * var(--ui-scale));
+  --icon-lg: calc(19px * var(--ui-scale));
 
   --elev-dialog: 0 16px 48px var(--shadow);
   --elev-menu: 0 12px 32px var(--shadow);
 
-  /* The gap between panes. 3px here and 3px on each pane box makes every
-     gutter 6px, edges included. */
-  --gutter: 3px;
+  /* The gap between panes. 4px here and 4px on each pane box makes every
+     gutter 8px, edges included: the room a card needs round it to read as a
+     card on the well rather than as a region of it. */
+  --gutter: 4px;
 
   /* The window's bottom edge, read twice.
      The status bar and the corner of the sidebar the cog sits in are the same
@@ -131,32 +156,42 @@
      indicator's inset. */
   --bar-h: 38px;
 
-  /* The window's top edge, which is one band: the strip the traffic lights
-     stand in, the top row of pane strips, the gutters between them and the
-     head of whichever drawer or tree is open on the right — all this tall,
-     all one tone, all ruled underneath, so the top of the window reads as a
-     title bar rather than as four headers that nearly agree. 38px is the
-     height macOS gives a window's toolbar, which is what `hiddenInset` is
-     emulating, so the traffic lights are centred on it; the tabs are centred
-     in it by the padding worked out at `.tabstrip`. A constant on `--bar-h`'s
-     reasoning, and the same number on purpose — the top and the bottom of
-     the window are the two edges of one frame. */
-  --top-h: 38px;
+  /* The head of a column beside the panes: the sidebar's top, a drawer's, the
+     file tree's. The panes are cards on the well with a gutter above them, so
+     a head is that gutter and then a card's strip — `--strip-h` — and what is
+     in it is centred on the strip's part, which puts the logo, a drawer's
+     buttons and the top row of tabs on one line across the window, and the
+     rule under a drawer's head level with the rule under those tabs. It was a
+     38px band in one tone across the whole top edge until 2026-11-10, with
+     the top row of panes flush against the window's edge inside it. */
+  --top-h: calc(2 * var(--gutter) + var(--strip-h));
 
-  /* The tone of that frame — the top band, the status bar, and every pane's
-     tab strip — one step below `--chrome`, so the sidebar, the drawers and
-     the well read as the body of the window and the bands as what holds it.
-     Mixed towards black, which is not a colour here but a direction: deeper. */
+  /* The tone of the status bar: one step below `--chrome`, so the sidebar, the
+     drawers and the well read as the body of the window and the bar as what
+     it stands on. Mixed towards black, which is not a colour here but a
+     direction: deeper. */
   --chrome-low: color-mix(in srgb, var(--chrome) 72%, black);
 
+  /* A card's edge, and the rule under its strip: `--line` most of the way
+     into the card's own ground. `--line` itself round every pane was the
+     loudest thing in a window whose whole content is text; this is enough to
+     close the corner and no more. */
+  --line-soft: color-mix(in srgb, var(--line) 55%, var(--bg));
+
   /* The height of what a tab holds: the tallest of its status badge (16px,
-     `.status`), its label's line, and its close button (a 1.2em icon given
-     back 2px of its box). Stated once because three things are held to it —
-     every pane's strip, whatever is in it, the file tree's head and the
-     drawers' heads — and until it was, a strip with only its `+` in it was a
-     pixel and a half shorter than the one beside it with tabs, and the heads
-     beside them agreed with neither. Worked out from the type, not chosen. */
-  --tab-row: max(16px, calc(1.4 * var(--fs-base)), calc(1.2 * var(--fs-base) + 2px));
+     `.status`), its label's line and its close button's icon. Stated once
+     because three things are held to it — every pane's strip, whatever is in
+     it, the file tree's head and the drawers' heads — and until it was, a
+     strip with only its `+` in it was a pixel and a half shorter than the one
+     beside it with tabs. Worked out from the type, not chosen, and rounded up
+     to an even number of pixels so that a 20px logo and a 12px button centred
+     in a strip land on whole pixels at every size of type. */
+  --tab-row: max(16px, round(up, calc(1.4 * var(--fs-md)), 2px), var(--icon-sm));
+  /* A tab: that row and 5px above and below it. And a strip: a tab and 5px
+     above and below that. Roomier than the 3px each was, at the owner's
+     asking (2026-11-10): a tab is a thing you aim at. */
+  --tab-h: calc(var(--tab-row) + 10px);
+  --strip-h: calc(var(--tab-h) + 10px);
 
   /* A board column's width: the one every column starts at, and the floor
      and the ceiling a drag is held to (`shared/board.ts`'s `LANE_WIDTH_MIN`
@@ -168,14 +203,18 @@
   --board-col-min: 220px;
   --board-col-max: 640px;
 
-  /* The tab strip's ground. It was one step *between* the well and the
-     terminal; since the top band it is the band's own tone, so a strip in the
-     top row is a stretch of the band and a strip lower down is the same bar
-     on its own pane. Still a name of its own rather than `--chrome-low`
-     written three times, because the strip, the sticky block of pane controls
-     and the gradient in front of that block have to agree or the controls
-     stop looking like part of the strip. */
-  --strip: var(--chrome-low);
+  /* The tab strip's ground: the card's own, so a pane is one surface with a
+     rule under its tabs rather than a bar on top of a box. Still a name of
+     its own, because the strip, the sticky block of pane controls and the
+     gradient in front of that block have to agree or the controls stop
+     looking like part of the strip. */
+  --strip: var(--bg);
+}
+
+/* On a phone a button's icon is a thumb's. Said once, on the token, where it
+   was a larger type size on each button that held one. */
+:root[data-narrow] {
+  --icon-md: var(--icon-lg);
 }
 
 * {
@@ -188,9 +227,14 @@
    `currentColor`, so it takes the colour of the button it is in and follows
    that colour on hover.
 
-   Sized in em, so an icon is as big as the type of the control it sits in.
-   1.2em rather than 1em because a stroke drawing inside a 24-unit box leaves
-   two units of air on each side. */
+   Sized by one of three tokens — see `--icon-md` — and a button's unless the
+   rule for where it stands says otherwise with `--icon-size`. It was 1.2em
+   of the control's type, which made one drawing five sizes.
+
+   `.glyph` is the same promise for the few drawings that are an `<svg>` in
+   the tree because they are not in the set (a microphone, a speaker, the
+   sidebar's toggle): the set's size and the set's 2-unit line, so the two
+   kinds cannot be told apart on the screen. */
 .icon {
   display: inline-flex;
   align-items: center;
@@ -202,11 +246,27 @@
 .icon::before {
   content: "";
   display: block;
-  width: 1.2em;
-  height: 1.2em;
+  width: var(--icon-size, var(--icon-md));
+  height: var(--icon-size, var(--icon-md));
   background-color: currentColor;
   -webkit-mask: var(--icon-svg) center / contain no-repeat;
   mask: var(--icon-svg) center / contain no-repeat;
+}
+.glyph {
+  flex: none;
+  width: var(--icon-size, var(--icon-md));
+  height: var(--icon-size, var(--icon-md));
+  stroke-width: 2;
+}
+.glyph-sm {
+  width: var(--icon-size, var(--icon-sm));
+  height: var(--icon-size, var(--icon-sm));
+}
+/* A caret and a grip are marks in a line of text, not buttons, wherever they
+   stand. */
+.icon-caret,
+.icon-grip {
+  --icon-size: var(--icon-sm);
 }
 .icon-close { --icon-svg: var(--icon-close-svg); }
 .icon-run { --icon-svg: var(--icon-run-svg); }
@@ -413,6 +473,10 @@ kbd {
   display: flex;
   flex-direction: column;
   background: var(--chrome);
+  /* Its edge against the well: the hairline the drawer and the tree have on
+     theirs, so the three columns round the panes are ruled alike. A shadow
+     inside the box, so the sidebar is exactly as wide as it was told to be. */
+  box-shadow: inset calc(-1 * var(--border)) 0 0 var(--line-soft);
   min-height: 0;
   /* The last resort, and it should never be reached: the sections below share
      out a short window between them, and everything here is sized so that the
@@ -433,20 +497,14 @@ kbd {
 }
 
 /**
- * The strip the traffic lights stand in, and the handle the window is dragged
- * by — the window is `titleBarStyle: "hiddenInset"`, so macOS floats its three
- * buttons over this corner and hands us no title bar.
+ * The strip the window's buttons stand in on a phone-width window, and the
+ * handle the window is dragged by — the window has no title bar, so its three
+ * buttons stand over this corner (`WindowButtons.tsx`, or the system's own in
+ * an older app) and nothing else is there to drag it by.
  *
- * It is empty, and that is the fix rather than an oversight. The profile name
- * used to live up here behind 78px of left padding to clear those buttons,
- * which put it in the gap beside them wearing an indent that belonged to
- * something else and lining up with nothing below it. Now the buttons get a
- * line to themselves and the name gets one of its own, starting at the left
- * edge every other row in the sidebar starts at.
- *
- * Drawn only in the Electron window. In a browser tab — which is what the phone
- * loads — nothing is floating over this corner, and an empty strip would be
- * thirty pixels of nothing above the fold.
+ * Empty, and so drawn only in the Electron window. In a browser tab — which
+ * is what the phone loads — nothing is standing over this corner, and an
+ * empty strip would be thirty pixels of nothing above the fold.
  */
 .sidebar-drag {
   display: none;
@@ -459,29 +517,26 @@ kbd {
 }
 
 /**
- * The same strip with something in it: the sidebar's toggle and the
- * workspace's name, up from the bar that ran under the panes until
- * 2026-10-18. Drawn in a browser tab too, where it is the sidebar's first
- * line, because a line that holds something is not thirty pixels of nothing.
+ * The sidebar's top line on a desktop: the logo and the name, and at the
+ * right end the button that folds the sidebar away. Drawn in a browser tab
+ * too, where it is the sidebar's first line.
  *
- * It is the left end of the top band — `--top-h` tall, the band's tone, the
- * band's rule under it. While the sidebar is away the same two things stand
- * at the head of the top-left pane's strip instead (`.strip-lead`), so the
- * band's left end shortens to them and the strips stay on its row. In the
- * window it starts after the traffic lights, which a 38px band is centred on;
- * the 78px is the inset the profile row wore when it stood up here. The rule
- * is an inset shadow and not a border, as the pane strips' and the status
- * bar's are: one mechanism along the whole band is what keeps it one line.
+ * `--top-h` tall with the well's gutter above it, so what is in it stands on
+ * the line the top row of tabs stands on — see `--top-h`. The sidebar's own
+ * ground and no rule under it: it was the left end of a darker band with a
+ * line along its bottom until 2026-11-10, and the owner asked for the header
+ * and the list under it to be one surface. In the window it starts after the
+ * three buttons, `--lights-w` in.
  */
 .sidebar-top {
+  --lights-w: 86px;
   display: flex;
   align-items: center;
+  gap: 8px;
   flex: none;
   min-width: 0;
   height: var(--top-h);
-  padding: 0 8px 0 12px;
-  background: var(--chrome-low);
-  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
+  padding: calc(2 * var(--gutter)) 8px 0 14px;
 }
 /* The height is said again here because the empty drag strip above shares
    this element's class and sets its own, 28px, with the same weight — and
@@ -489,8 +544,121 @@ kbd {
 .app-window .sidebar-top {
   display: flex;
   height: var(--top-h);
-  padding-left: 78px;
+  padding-left: var(--lights-w);
   -webkit-app-region: drag;
+}
+.app-fullscreen .sidebar-top {
+  padding-left: 14px;
+}
+
+/* Whose window this is: the frog and the name. The tile is the app's icon,
+   which is pixel art drawn at 512 and shown here at a size no whole number of
+   its pixels fits, so it is smoothed rather than held to the sidebar's
+   `pixelated` — a mascot's sprite is drawn at a multiple of its grid and this
+   is not. */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.brand-logo {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-md);
+  image-rendering: auto;
+  -webkit-user-drag: none;
+}
+.brand-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-strong);
+}
+
+/**
+ * The window's three buttons — see `WindowButtons.tsx`. Twelve pixels, flat,
+ * the three colours macOS used before its glass ones, and grey while the
+ * window is not the key one.
+ *
+ * Fixed over the corner, where the system's stood: 14px in, and down by the
+ * well's gutter and then to the top of a 20px mark centred in a strip, which
+ * is where the logo's top edge is — the owner's ask was that the two line up
+ * along the top. Above the dialogs' scrims, as the system's were above
+ * everything.
+ */
+.win-btns {
+  position: fixed;
+  z-index: 70;
+  left: 14px;
+  top: calc(2 * var(--gutter) + (var(--strip-h) - 20px) / 2);
+  display: flex;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+/* A phone-width window, or zen: no strip to stand in, so the corner itself. */
+/* With the sidebar away there is no logo to line up with: they stand in the
+   head of the top-left pane's strip, centred on its row. */
+.app-sidebar-hidden .win-btns {
+  top: calc(2 * var(--gutter) + (var(--strip-h) - 12px) / 2);
+}
+:root[data-narrow] .win-btns,
+.app-zen .win-btns {
+  top: 9px;
+}
+.win-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-round);
+  cursor: default;
+}
+.win-close {
+  background: #ff5f57;
+}
+.win-min {
+  background: #febc2e;
+}
+.win-zoom {
+  background: #28c840;
+}
+.win-btns-away .win-btn {
+  background: var(--line);
+}
+.win-btns-away:hover .win-close {
+  background: #ff5f57;
+}
+.win-btns-away:hover .win-min {
+  background: #febc2e;
+}
+.win-btns-away:hover .win-zoom {
+  background: #28c840;
+}
+.win-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  opacity: 0;
+}
+.win-btn .win-fill {
+  fill: rgba(0, 0, 0, 0.6);
+  stroke: none;
+}
+.win-btns:hover .win-btn svg {
+  opacity: 1;
+}
+.win-btn:active {
+  filter: brightness(0.82);
 }
 
 .sidebar-head {
@@ -543,8 +711,7 @@ kbd {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-lg);
-  color: var(--dim);
-  font-size: var(--fs-xl);
+  color: var(--dimmer);
 }
 .sidebar-close:hover {
   color: var(--text);
@@ -2376,7 +2543,6 @@ a.machine-name:hover {
 :root[data-narrow] .cog {
   width: 36px;
   height: 36px;
-  font-size: var(--fs-xl);
 }
 .cog:hover {
   color: var(--text);
@@ -2487,10 +2653,11 @@ a.machine-name:hover {
 :root[data-narrow] .pane {
   border-radius: 0;
 }
-/* And no focus ring, because there is nothing for it to distinguish this pane
-   from: a narrow window draws one pane, so the outline would be a hairline
-   traced around the edge of the screen saying something that is always true. */
-:root[data-narrow] .pane-on::after {
+/* And no edge and no focus ring, because there is nothing for either to
+   distinguish this pane from: a narrow window draws one pane, so the line
+   would be a hairline traced around the edge of the screen saying something
+   that is always true. */
+:root[data-narrow] .pane::after {
   display: none;
 }
 :root[data-narrow] .term {
@@ -2522,39 +2689,34 @@ a.machine-name:hover {
   flex-direction: column;
   min-height: 0;
   background: var(--chrome);
-  border-left: var(--border) solid var(--line);
+  border-left: var(--border) solid var(--line-soft);
 }
 
-/* The header is the right end of the top band: `--top-h` tall like the
-   sidebar's top and the pane strips it stands beside, the band's tone, the
-   band's rule under it, and everything in it centred on the line the tabs
-   are. It was built to a strip's measurements before there was a band — the
-   well's gutters as padding, the strip's border borrowed — so that the
-   two would nearly agree; a band one height everywhere needs none of that
-   arithmetic. */
+/* The header is a column's head beside the panes — see `--top-h` — so the
+   root's name and the buttons stand on the line the top row of tabs stands
+   on, and the rule under it is level with the rule under those tabs. The
+   tree's own ground, as the sidebar's top is the sidebar's. */
 .files-head {
   display: flex;
   align-items: center;
   gap: 2px;
   height: var(--top-h);
-  padding: 0 4px 0 6px;
+  padding: calc(2 * var(--gutter)) 6px 0 8px;
   min-width: 0;
-  background: var(--chrome-low);
-  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line-soft);
   -webkit-app-region: drag;
 }
-/* Its buttons stretched to the row while the row was a tab's height; centred
-   in the band they are given that height instead, so they match the pane
-   buttons in the strips beside them. */
+/* Its buttons are a tab's height, so they match the pane buttons in the
+   strips beside them. */
 .files-head .pane-btn {
-  height: calc(var(--tab-row) + 6px);
+  height: var(--tab-h);
 }
 .files-root {
   display: flex;
   align-items: center;
   padding: 3px 4px;
   font-family: var(--mono);
-  font-size: var(--fs-base);
+  font-size: var(--fs-md);
   color: var(--text);
   white-space: nowrap;
 }
@@ -2786,51 +2948,13 @@ a.button {
   display: flex;
   /* Half the gutter here and half on each pane box — see `--gutter`. */
   padding: var(--gutter);
-  /* The well. It is what replaced the panes' borders: a step down in tone does
-     the same job as a grey stroke and does not draw a rectangle round every
-     terminal to do it. It is the sidebar's colour on purpose, so the chrome
-     reads as one ground with the panes floating on it rather than as three
-     surfaces that happen to be adjacent. */
+  /* The well the cards stand on. It is the sidebar's colour on purpose, so
+     the chrome reads as one ground with the panes floating on it rather than
+     as three surfaces that happen to be adjacent. */
   background: var(--chrome);
 }
 .app-zen .panes {
   padding: 0;
-}
-
-/* The top band's middle. On a desktop (`.app-band`, set by `App.tsx`) the
-   panes start at the top of the window, so the top row of strips is the band
-   between the sidebar's top and the drawer's head: the well's top gutter goes,
-   and a pane box in that row (`.pane-box-top`, from the pane's geometry in
-   `Panes.tsx`) loses its own and the two corners it would round against the
-   edge. The gutters between those panes would still show the well, which
-   would notch the band once per pane; so the well paints the band's tone and
-   its rule across its own top `--top-h` first, under the panes, and a gutter
-   shows the band passing behind. With the sidebar away the band starts at the
-   window's edge, with the toggle and the workspace's name at the head of the
-   top-left strip (`.strip-lead`) where the sidebar's top had them — the
-   sidebar folds into the band rather than dropping a bar over the panes. Zen
-   has no band; a phone's one pane has no gutter to show. */
-.app-band .panes {
-  padding-top: 0;
-}
-.app-band .panes::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: var(--top-h);
-  box-sizing: border-box;
-  background: var(--chrome-low);
-  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
-  pointer-events: none;
-}
-.app-band .pane-box-top {
-  padding-top: 0;
-}
-.app-band .pane-box-top .pane {
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
 }
 
 /**
@@ -2896,51 +3020,60 @@ a.button {
   background: var(--line);
 }
 
+/* A pane is a card: its strip of tabs and whatever they show, on one surface
+   with a rounded corner and a hairline round it, a gutter clear of the
+   window's edges and of the next card on every side — the top included, where
+   the top row of strips ran flush along the window's edge as a band until
+   2026-11-10 and a pane's tone and its ring went all the way up with them.
+
+   The hairline is a layer over the pane (`::after`) rather than a border on
+   it, so it costs the content no pixel — a terminal's grid is measured off
+   this box — and so the focused pane's ring is the same line in another
+   colour, not a second one beside it. */
 .pane {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border-radius: var(--radius-xl);
-  /* No border: a grey stroke around every pane is the loudest thing in a
-     window whose whole content is text. What separates a pane from the window
-     is *ground* — `.panes` is the darker `--chrome` well and the pane is
-     `--bg` on it. */
+  border-radius: var(--radius-card);
   overflow: hidden;
+}
+.pane::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: var(--border) solid var(--line-soft);
+  border-radius: inherit;
+  pointer-events: none;
 }
 .app-zen .pane {
   border-radius: 0;
 }
+.app-zen .pane::after {
+  display: none;
+}
 
-/* The focused pane is the one the keyboard is going to, and with the borders
-   gone it has to say so some other way: a ring, a hairline in the accent mixed
-   most of the way out, on the reasoning `.agent-item-on` already uses for the
-   same job. Deliberately not grey: a grey ring here would be the border this
-   sweep just removed, reinstated on the one pane you are looking at. The ring
-   is the whole signal. The strip's rule went accent under the focused pane for
-   a while (a3226fc), and two marks for one fact was one too many.
+/* The focused pane is the one the keyboard is going to, and it says so with
+   its edge: the card's hairline in the accent, mixed part of the way out, on
+   the reasoning `.agent-item-on` uses for the same job. The ring is the whole
+   signal. The strip's rule went accent under the focused pane for a while
+   (a3226fc), and two marks for one fact was one too many.
 
    A layer over the pane rather than an `outline` on it. The outline was inset
    by its own width to land on the pane rather than in the gutter, and that put
    it under `.pane-body`, which is positioned and so paints after its parent's
    outline: a terminal's body let the edge show through and a board's columns
-   covered it, so a focused board had a ring along its strip and nowhere else.
-   `isolation` keeps the
-   layer's z-index inside the pane, where it only has to clear the drop zones,
-   rather than in contest with whatever lies over the stage. */
+   covered it. `isolation` keeps the layer's z-index inside the pane, where it
+   only has to clear the drop zones, rather than in contest with whatever lies
+   over the stage. */
 .pane {
   position: relative;
   isolation: isolate;
 }
 .pane-on::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  border: var(--border) solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border-radius: inherit;
-  pointer-events: none;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-soft));
 }
 
 /* --------------------------------------------------------------------------
@@ -2950,62 +3083,53 @@ a.button {
 .tabstrip {
   display: flex;
   align-items: stretch;
-  gap: 1px;
-  /* The band's height, every strip, wherever its pane is — see `--top-h` —
-     with the tabs centred in it: the padding is what is left of the band once
-     a tab (`--tab-row`, its own 3px above and below) is taken out, halved. A
-     floor rather than a height, so a strip holding something taller — a
-     phone's thumb-sized buttons — grows rather than clips. */
-  min-height: var(--top-h);
-  padding: calc((var(--top-h) - var(--tab-row) - 6px) / 2) 4px;
-  /* The band's tone — see `--strip` — and the band's rule along its bottom,
-     an inset shadow as it is along the whole band (see `.sidebar-top`). */
+  gap: 2px;
+  /* One height, every strip, whatever is in it — see `--strip-h` — with the
+     tabs centred in it. A floor rather than a height, so a strip holding
+     something taller — a phone's thumb-sized buttons — grows rather than
+     clips. */
+  min-height: var(--strip-h);
+  padding: 5px 6px;
+  /* The card's own ground — see `--strip` — and a rule along its bottom, an
+     inset shadow so it takes no pixel from the row. */
   background: var(--strip);
-  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line-soft);
   flex: none;
   overflow-x: auto;
-  /* Visible rather than `none`: the strip is the only way to the `+` once the
-     tabs outgrow it, and a scrollbar you cannot see is a control you cannot
-     find. Thin, and coloured like every other line in the chrome. */
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  /* No scrollbar. It was drawn, thin, while the strip was the only way to the
+     `+` once the tabs outgrew it; the `+` and the pane's controls are pinned
+     now, a wheel turned down scrolls the strip sideways and the tab in front
+     is brought into view (`Panes.tsx`), and the fade in front of the controls
+     says there is more. What the bar still did was take ten pixels of the
+     strip's height in a window whose scrollbars are not overlaid, so a pane
+     with one tab too many had a taller head than the card beside it. */
+  scrollbar-width: none;
 }
 .tabstrip::-webkit-scrollbar {
-  height: 6px;
-}
-.tabstrip::-webkit-scrollbar-track {
-  background: transparent;
-}
-.tabstrip::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: var(--radius-sm);
-}
-.tabstrip::-webkit-scrollbar-thumb:hover {
-  background: var(--line-high);
+  display: none;
 }
 
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 7px;
-  border-radius: var(--radius-md);
-  font-size: var(--fs-base);
+  gap: 7px;
+  padding: 5px 10px;
+  border-radius: var(--radius-lg);
+  font-size: var(--fs-md);
   color: var(--dim);
   white-space: nowrap;
-  max-width: 180px;
+  max-width: 200px;
 }
 .tab:hover {
-  background: var(--chrome-high);
+  background: color-mix(in srgb, var(--chrome-high) 55%, transparent);
   color: var(--text);
 }
-/* The tab whose terminal is showing. It wears the terminal's own colour, which
-   is what says the two are one thing — and that is the whole signal now: the
-   grey ring that used to be round it is gone with the rest of them, and a ring
-   was never what made an active tab legible anyway. */
+/* The tab whose terminal is showing: a step up from the strip, which is the
+   card's own ground now, where it used to be the terminal's colour on a
+   darker bar. One fill and no ring, as before. */
 .tab-on,
 .tab-on:hover {
-  background: var(--bg);
+  background: var(--chrome-high);
 }
 .tab-on {
   color: var(--text);
@@ -3141,14 +3265,14 @@ a.button {
   background: var(--bg);
   color: var(--text);
   font-family: var(--mono);
-  font-size: var(--fs-base);
+  font-size: var(--fs-md);
   outline: none;
 }
 .tab-renaming:hover {
   background: none;
 }
 .tab-renaming.tab-on:hover {
-  background: var(--bg);
+  background: var(--chrome-high);
 }
 
 /* A target rather than a glyph: the icon sits in a padded, rounded box that
@@ -3157,14 +3281,14 @@ a.button {
    one that closes the neighbouring tab instead. The negative margin gives the
    box back to the tab, so the tab is no wider for having a bigger button. */
 .tab-close {
+  --icon-size: var(--icon-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin: -2px -4px -2px 0;
+  margin: -3px -6px -3px 0;
   padding: 3px;
   border-radius: var(--radius-sm);
   opacity: 0;
-  font-size: var(--fs-base);
   color: var(--dimmer);
 }
 .tab:hover .tab-close,
@@ -3197,10 +3321,12 @@ a.button {
   display: flex;
   align-items: center;
   color: var(--dimmer);
-  padding: 3px 7px;
+  padding: 3px 8px;
+  border-radius: var(--radius-lg);
   font-size: var(--fs-md);
   position: sticky;
-  right: var(--actions-w);
+  /* Less the six pixels `.tab-actions` hangs over the strip's padding. */
+  right: calc(var(--actions-w) - 6px);
   flex: none;
   background: var(--strip);
 }
@@ -3225,25 +3351,30 @@ a.button {
    Pinned at the strip's left as the pane's controls are at its right, with
    the strip's own ground, so the tabs pass under it rather than carrying it
    off the edge; and the window's drag handle, since with the sidebar away
-   nothing else under the traffic lights is. It starts where the sidebar's
-   top line starts — 12px in, or 78px in the window, after the lights — less
-   the well's gutter and the strip's padding already in front of it, so the
-   name and the toggle after it stand on the same pixels with the sidebar up
-   or away, and folding the sidebar moves neither. */
+   nothing else under the window's buttons is. */
 .strip-lead {
   position: sticky;
-  left: 0;
+  left: -6px;
   display: inline-flex;
   align-items: center;
+  gap: 10px;
   flex: none;
-  margin-right: 6px;
-  padding-left: calc(12px - 2 * var(--gutter) - 4px);
+  /* Out over the strip's padding on its side, as `.tab-actions` is on the
+     other. */
+  margin: 0 6px 0 -6px;
+  padding-left: 10px;
   padding-right: 6px;
   background: var(--strip);
   -webkit-app-region: drag;
 }
+/* In the window, the three buttons stand over this corner (`WindowButtons`,
+   or the system's own in an older app): the room the sidebar's top line
+   keeps for them, less the well's gutter in front of the card. */
 .app-window .strip-lead {
-  padding-left: calc(78px - 2 * var(--gutter) - 4px);
+  padding-left: calc(86px - 2 * var(--gutter));
+}
+.app-fullscreen .strip-lead {
+  padding-left: 10px;
 }
 .strip-lead .sb-workspace {
   max-width: 24ch;
@@ -3263,11 +3394,16 @@ a.button {
    background so the tabs pass *under* it rather than through it. */
 .tab-actions {
   position: sticky;
-  right: 0;
+  /* Out over the strip's own padding: a sticky box is held inside the
+     scroller's padding, so at `0` a tab passing under it came out again in
+     the six pixels between it and the card's edge. */
+  right: -6px;
   display: flex;
   align-items: stretch;
-  gap: 1px;
+  gap: 2px;
   flex: none;
+  margin-right: -6px;
+  padding-right: 6px;
   background: var(--strip);
 }
 
@@ -3291,9 +3427,9 @@ a.button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  padding: 0 4px;
-  border-radius: var(--radius-md);
+  min-width: var(--tab-h);
+  padding: 0 5px;
+  border-radius: var(--radius-lg);
   color: var(--dimmer);
   line-height: 1;
   font-size: var(--fs-md);
@@ -3301,7 +3437,7 @@ a.button {
 }
 .pane-btn:hover {
   color: var(--text);
-  background: var(--line);
+  background: var(--chrome-high);
 }
 /* A pane button that is a mode, while the mode is on — the reader's follow toggle. */
 .pane-btn-on {
@@ -3326,9 +3462,9 @@ a.button {
   min-width: 36px;
   font-size: var(--fs-xl);
 }
-/* A phone's strip is sized by its thumb targets rather than by the band — it
-   has no sidebar or drawer beside it to be one line with — so it keeps the
-   old 3px around a tab and grows to whatever is in it. */
+/* A phone's strip is sized by its thumb targets rather than by `--strip-h` —
+   it has no sidebar or drawer beside it to be one line with — so it keeps
+   3px around a tab and grows to whatever is in it. */
 :root[data-narrow] .tabstrip {
   min-height: 0;
   padding: 3px 4px;
@@ -3491,7 +3627,10 @@ a.button {
   flex: 1;
   min-height: 0;
   min-width: 0;
-  padding: 4px 6px;
+  /* Room between a card's edge and the first cell: a glyph against a rounded
+     corner is a glyph with its shoulder cut off. It is the grid's to pay for,
+     a column and a row of it, and worth that. */
+  padding: 8px 12px;
   overflow: hidden;
   /**
    * The gestures over a terminal are kururu's, not the browser's.
@@ -3678,15 +3817,16 @@ a.button {
    * negative the moment the keyboard is taller than the inset, which is always.
    */
   padding-bottom: max(3px, calc(env(safe-area-inset-bottom, 0px) - var(--keyboard, 0px)));
-  /* The frame's tone — this is the bottom edge of the frame the top band is
-     the top of, see `--chrome-low` — and the rule along its top, the whole
-     width of the window, that says where the panes and the drawers stop and
-     the bar begins. An inset shadow rather than a border, as the top band's
-     rule is. */
+  /* A step below the chrome — see `--chrome-low` — and the rule along its
+     top, the whole width of the window, that says where the panes and the
+     drawers stop and the bar begins. An inset shadow rather than a border,
+     so it takes no pixel from the row. */
   background: var(--chrome-low);
-  box-shadow: inset 0 var(--border) 0 var(--line);
+  box-shadow: inset 0 var(--border) 0 var(--line-soft);
   font-size: var(--fs-base);
   color: var(--dim);
+  /* A line of small type, and its marks are that line's. */
+  --icon-size: var(--icon-sm);
 }
 .app-zen .statusbar {
   display: none;
@@ -3763,9 +3903,13 @@ a.button {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 20px;
-  border-radius: var(--radius-md);
+  /* A pane button's box and a button's icon, wherever it stands: the
+     sidebar's top line, a strip's head, a phone's bar (whose own marks are a
+     size down). */
+  --icon-size: var(--icon-md);
+  width: var(--tab-h);
+  height: var(--tab-h);
+  border-radius: var(--radius-lg);
   color: var(--dimmer);
   flex: none;
 }
@@ -3787,6 +3931,7 @@ a.button {
    three icon buttons in it; what it does not borrow is the hover, because on
    the device this is drawn for there is none. */
 .sb-panes {
+  --icon-size: var(--icon-md);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4124,9 +4269,8 @@ a.button {
   height: 16px;
   flex: none;
 }
-.sb-kuru-mark svg {
-  width: 14px;
-  height: 14px;
+.sb-kuru-mark {
+  --icon-size: var(--icon-sm);
 }
 .sb-kuru-dot {
   width: 7px;
@@ -4161,9 +4305,10 @@ a.button {
   line-height: 15px;
   font-variant-numeric: tabular-nums;
 }
-.sb-kuru-news svg {
-  width: 11px;
-  height: 11px;
+/* Smaller than the set's smallest on purpose: a mark inside a badge that is
+   itself a line of the smallest type. */
+.sb-kuru-news {
+  --icon-size: calc(11px * var(--ui-scale));
 }
 .sb-kuru-failed {
   background: var(--danger-bg);
@@ -4214,10 +4359,8 @@ a.button {
 .sb-needs-some:hover {
   color: var(--blocked);
 }
-.sb-needs svg {
-  width: 14px;
-  height: 14px;
-  flex: none;
+.sb-needs {
+  --icon-size: var(--icon-sm);
 }
 /* The count, in the chip's own ink on the chip's own ground: a second colour
    here would make three on one bar with Kuru's red, and the blocked ink on
@@ -5012,10 +5155,20 @@ html.pill-page #root {
   color: var(--danger);
 }
 /* A rule above, not below: it separates what follows from what came before. */
+/* The rule above a group's first item. A line of its own in the gap rather
+   than the item's top border, which took the item's rounded corners and
+   curled down at both ends. */
 .menu-sep {
-  margin-top: 5px;
+  position: relative;
+  margin-top: 11px;
+}
+.menu-sep::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -6px;
   border-top: var(--border) solid var(--line);
-  padding-top: 7px;
 }
 
 /* --------------------------------------------------------------------------
@@ -5043,7 +5196,9 @@ html.pill-page #root {
   flex-direction: column;
   min-height: 0;
   background: var(--chrome);
-  border-left: var(--border) solid var(--line);
+  /* The one line between the drawer and the panes. The pane beside it used to
+     run to the drawer's edge with its focus ring on, which made two. */
+  border-left: var(--border) solid var(--line-soft);
 }
 .kuru-sheet {
   position: fixed;
@@ -5076,8 +5231,7 @@ html.pill-page #root {
    nothing until the drawer is wider than that: the percentage is resolved
    where it is used, against the drawer, since every rule using it is on a
    box the drawer's width is the width of. The head is left the full width,
-   because it is the right end of the window's top band and its buttons
-   belong at the edge the close is at. */
+   because its buttons belong at the edge the close is at. */
 .kuru-drawer {
   --kuru-col: calc(56 * var(--fs-md));
   --kuru-gutter: max(0px, calc((100% - var(--kuru-col)) / 2));
@@ -5119,33 +5273,28 @@ html.pill-page #root {
   flex: 1;
 }
 
-/* Beside the panes, the head is the right end of the top band: `--top-h`
-   tall like the sidebar's top and the pane strips it stands beside, the
-   band's tone, the band's rule under it — drawn as the shadow the rest of the
-   band draws rather than the border above, so the two cannot be a pixel
-   apart — and everything in it centred on the line the tabs are, its buttons
-   a tab's height and its close a pane button's size. It was built to a
-   strip's measurements for a day, with the well's gutters as padding, and
-   nearly lined up; a band one height everywhere needs no arithmetic to. A
+/* Beside the panes, the head is a column's head — see `--top-h` — so the
+   chips and the buttons stand on the line the top row of tabs stands on and
+   the rule under it is level with the rule under those tabs: the drawer's own
+   ground, with the rule drawn as an inset shadow so it takes no pixel. A
    phone's sheet has no strip beside it and keeps its own head. */
 .kuru-drawer:not(.kuru-sheet) .kuru-head {
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: 4px;
   height: var(--top-h);
-  padding: 0 8px 0 12px;
-  background: var(--chrome-low);
+  padding: calc(2 * var(--gutter)) 8px 0 12px;
   border-bottom: 0;
-  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line);
+  box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--line-soft);
 }
 .kuru-drawer:not(.kuru-sheet) .kuru-head .kuru-head-btn {
-  height: calc(var(--tab-row) + 6px);
+  height: var(--tab-h);
   padding-top: 0;
   padding-bottom: 0;
 }
 .kuru-drawer:not(.kuru-sheet) .kuru-head .kuru-close {
-  width: 24px;
-  height: calc(var(--tab-row) + 6px);
-  border-radius: var(--radius-md);
+  width: var(--tab-h);
+  height: var(--tab-h);
+  border-radius: var(--radius-lg);
 }
 .kuru-head-btn {
   display: inline-flex;
@@ -5178,22 +5327,37 @@ html.pill-page #root {
   color: var(--working);
   border-color: var(--working);
 }
-.kuru-head-btn svg {
-  flex: none;
-  width: 13px;
-  height: 13px;
+.kuru-head-btn {
+  --icon-size: var(--icon-sm);
 }
-/* The speaker switch: a header button with only its glyph, so it is padded
-   square rather than for a word, and the glyph is a size up — the height a
-   word's line gives its neighbours — so the cross of the muted speaker reads
-   at a glance beside them. */
+/* A header button with only its glyph — the search, the speaker switch, the
+   pen: a pane's button, in its size and with no frame round it. They wore the
+   word buttons' border until 2026-11-10, the only framed icons in the window,
+   at a size of their own. On is the accent ink on a wash of it, since there
+   is no border left to colour. */
+.kuru-head-icon,
+.kuru-head-icon:hover:not(:disabled),
+.kuru-head-icon.kuru-head-btn-on,
+.kuru-head-icon.kuru-head-btn-warn {
+  border-color: transparent;
+}
 .kuru-head-icon {
   justify-content: center;
-  padding: 3px 7px;
+  min-width: var(--tab-h);
+  padding: 3px 5px;
+  border-radius: var(--radius-lg);
+  color: var(--dimmer);
 }
-.kuru-head-icon svg {
-  width: 14px;
-  height: 14px;
+.kuru-head-icon.kuru-head-btn-on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.kuru-head-icon.kuru-head-btn-warn {
+  color: var(--working);
+  background: color-mix(in srgb, var(--working) 14%, transparent);
+}
+.kuru-head-icon {
+  --icon-size: var(--icon-md);
 }
 /* Where a message of yours came from when it was a channel: the plane and the
    channel's name, since a plane alone is a glyph somebody has to learn. */
@@ -5503,8 +5667,8 @@ html.pill-page #root {
   border-bottom: var(--border) solid var(--line);
   color: var(--dim);
 }
-.kuru-search > svg {
-  flex: none;
+.kuru-search {
+  --icon-size: var(--icon-sm);
 }
 .kuru-search-field {
   flex: 1 1 96px;
@@ -5645,10 +5809,8 @@ html.pill-page #root {
   color: var(--dimmer);
   font-variant-numeric: tabular-nums;
 }
-.kuru-meta svg {
-  flex: none;
-  width: 13px;
-  height: 13px;
+.kuru-meta {
+  --icon-size: var(--icon-sm);
 }
 /* The speaker doubles as Play and Stop, once a reply has an utterance to
    replay: a button rather than the bare glyph, tinted the same ink the
@@ -6114,10 +6276,10 @@ button.kuru-quote:hover {
   font-size: var(--fs-sm);
   color: var(--dim);
 }
+.kuru-quoting {
+  --icon-size: var(--icon-sm);
+}
 .kuru-quoting > svg {
-  flex: none;
-  width: 13px;
-  height: 13px;
   color: var(--accent);
 }
 .kuru-quoting-what {
@@ -6262,8 +6424,8 @@ button.kc {
 .kc-icon {
   flex: none;
   align-self: center;
-  width: 12px;
-  height: 12px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   color: var(--accent);
 }
 .kc-code {

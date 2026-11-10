@@ -62,7 +62,7 @@ import type { MoveCheck, MoveDone, MovePlan, NewWorkspaceMade } from "../../shar
 import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import type { VaultView } from "../../shared/vaultview";
 import type { FieldOutcome, UseAnswer, UseRule, VaultAsk, VaultPage } from "../../shared/vaultitems";
-import type { TerminalAppearance } from "../../shared/theme";
+import type { InterfaceAppearance, TerminalAppearance } from "../../shared/theme";
 import type { BarSettings } from "../../shared/statusbar";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
 import { applyDelta } from "../../shared/snapdelta";
@@ -1294,6 +1294,11 @@ export function resetKeys(): void {
 /** The terminal's type and cursor, all four at once — they are edited together. */
 export function setTerminalAppearance(terminal: TerminalAppearance): void {
   send({ type: "set-terminal-appearance", terminal });
+}
+
+/** The face and the size the interface is set in. See `set-interface-appearance`. */
+export function setInterfaceAppearance(ui: InterfaceAppearance): void {
+  send({ type: "set-interface-appearance", ui });
 }
 
 /** Which of the bottom bar's chips are drawn: the whole list of the hidden ones. */

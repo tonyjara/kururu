@@ -203,22 +203,19 @@ export function StatusBar({
  * of the workspace the panes belong to.
  *
  * They were the left end of the bar under the panes, and on 2026-10-18 they
- * went up into the strip the traffic lights stand in — the sidebar's top line
- * while there is a sidebar, the top of the panes while there is not — and the
- * name sits where a window's title would. On a phone they are still the
- * bottom bar's left end, where a thumb is.
+ * went up into the strip the traffic lights stand in. Since 2026-11-10 the
+ * sidebar's top line has the logo and the toggle alone, at its right end
+ * (`SidebarToggle`, in `Sidebar.tsx`), and this pair is drawn where the
+ * sidebar is not: at the head of the top-left pane's strip while it is
+ * away, and at the bottom bar's left end on a phone, where a thumb is.
  *
- * The name leads and the toggle stands right after it — in the sidebar's top
- * line and at the head of the top-left pane's strip alike, both starting at
- * the same inset — so that putting the sidebar away moves neither: the button
- * that was under the pointer for the click is still there for the next one.
- * It stood at the sidebar's far end for a day, on the edge the sidebar folds
- * towards, and jumped to the other side of the name on every press.
- * `toggleFirst` is the phone's bar, where the toggle is navigation and goes
- * first, under the thumb.
- *
- * The name is heavier than it was. With the bar it was one quiet label among
- * several; up here it is the window's title, and it is read as one.
+ * The toggle leads in both. In the strip that puts it against the window's
+ * buttons, the corner a sidebar's own button is looked for in, with the name
+ * after it as that pane's title; on a phone it is navigation and goes under
+ * the thumb. It followed the name for a while so that folding the sidebar
+ * did not move the button, which held only while the button stood beside the
+ * name in the sidebar too. `toggleFirst` is still a prop for the bar's sake:
+ * the phone's bar nudges it to the edge.
  */
 export function WorkspaceToggle({
   name,
@@ -231,23 +228,32 @@ export function WorkspaceToggle({
   toggleFirst: boolean;
   onToggle: () => void;
 }) {
-  const button = (
-    <button
-      className="sb-bars"
-      onClick={onToggle}
-      title={sidebarOpen ? "Hide the sidebar (C-a b)" : "Show the sidebar (C-a b)"}
-      aria-label={sidebarOpen ? "Hide the sidebar" : "Show the sidebar"}
-      aria-expanded={sidebarOpen}
-    >
-      <SidebarIcon />
-    </button>
-  );
+  const button = <SidebarToggle open={sidebarOpen} onToggle={onToggle} />;
   return (
     <span className={`ws-toggle ${toggleFirst ? "ws-toggle-first" : ""}`}>
       {toggleFirst && button}
       <span className="sb-workspace">{name}</span>
       {!toggleFirst && button}
     </span>
+  );
+}
+
+/**
+ * The button that folds the sidebar away and brings it back, by itself: the
+ * right end of the sidebar's top line while it is up, and beside the
+ * workspace's name in `WorkspaceToggle` while it is away or on a phone.
+ */
+export function SidebarToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      className="sb-bars"
+      onClick={onToggle}
+      title={open ? "Hide the sidebar (C-a b)" : "Show the sidebar (C-a b)"}
+      aria-label={open ? "Hide the sidebar" : "Show the sidebar"}
+      aria-expanded={open}
+    >
+      <SidebarIcon />
+    </button>
   );
 }
 
@@ -279,7 +285,7 @@ function WatchedBy() {
  */
 function SidebarIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M9 4v16" />
@@ -297,7 +303,7 @@ function SidebarIcon() {
  */
 function SwapIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"
+    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 9h13M13 5l4 4-4 4" />
       <path d="M20 15H7M11 11l-4 4 4 4" />
@@ -311,7 +317,7 @@ function SwapIcon() {
  */
 function KeysIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
+    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />

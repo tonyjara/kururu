@@ -38,6 +38,7 @@ import { AgentsPage } from "./Agents";
 import { BackupsPage } from "./Backups";
 import { BarPage } from "./Bar";
 import { ChannelsPage } from "./Channels";
+import { InterfacePage } from "./Interface";
 import { KeyboardPage } from "./Keyboard";
 import { MachinesPage } from "./Machines";
 import { NodesPage } from "./Nodes";
@@ -57,6 +58,7 @@ import { WorkspacesPage } from "./Workspaces";
 
 export type Tab =
   | "terminal"
+  | "interface"
   | "mascot"
   | "bar"
   | "profiles"
@@ -88,6 +90,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
     label: "Appearance",
     pages: [
       ["terminal", "Terminal", "The type and the cursor every terminal is set in."],
+      ["interface", "Interface", "The face and the size kururu's own text is set in."],
       ["mascot", "Mascot", "What moves in the sidebar while an agent works."],
       ["bar", "Bottom bar", "Which chips the bar along the bottom shows."],
     ],
@@ -324,6 +327,8 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
   switch (tab) {
     case "terminal":
       return <TerminalPage appearance={p.appearance} />;
+    case "interface":
+      return <InterfacePage appearance={p.appearance} />;
     case "mascot":
       return <MascotPage mascots={p.mascots} />;
     case "bar":

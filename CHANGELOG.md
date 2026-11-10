@@ -15,6 +15,11 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **A font and a size for kururu itself.** Settings → Interface sets the
+  face and the size of everything that is not a terminal: the sidebar, the
+  boards, Kuru's drawer, the reader, Settings. Labels, tabs and icons keep
+  their proportions to the size you pick, and it lands on the phone too. The
+  terminal's own font and size are still on the Terminal page.
 - **Paste keys into a dialog, not a chat.** When Kuru or an agent needs a
   key, it opens a dialog on your screen — the window and the phone alike —
   with a masked field per key and where each one goes: the Mac's Keychain,
@@ -82,6 +87,26 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **Panes are cards.** Every pane, its tabs included, sits on the window
+  with room round it on all four sides and a rounded corner, instead of
+  running flush to the window's top edge. The line between Kuru's drawer and
+  the panes is one line. A terminal has a little more room between its text
+  and its edge.
+- **The sidebar's top says Kururu.** The logo and the name are at the top of
+  the sidebar, on the same ground as the list under it, and the button that
+  folds the sidebar away is at its right end. The workspace's name is no
+  longer there; it leads the first pane's tabs while the sidebar is away.
+- **Smaller, flat window buttons.** Close, minimise and full screen are
+  twelve-pixel dots in the plain three colours, level with the top of the
+  logo, in place of the large glass ones macOS draws. Needs the app updated,
+  not only a reload; an app from before keeps the system's. Hold Option on
+  the green one to zoom instead of going full screen.
+- **Roomier tabs, and icons that match.** Tabs have more room in every
+  direction and are a size larger. Icons across the window come in three
+  sizes instead of one per button, a little bigger than before, and the
+  icon buttons in Kuru's drawer lost the frames only they had. Corners are a
+  little rounder everywhere. A strip of tabs no longer grows a scrollbar
+  when it overflows: a wheel still scrolls it and the + stays in reach.
 - **Kururu's keys live in the Mac's Keychain.** The OpenRouter key, the
   Telegram bot's token, the Firecrawl keys and the Claude tokens kept for
   lending move out of their files in `~/.config/kururu` into the Keychain

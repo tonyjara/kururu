@@ -166,6 +166,15 @@ export function lookVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
       saveAppearance(adoptAppearance({ ...appearance, terminal: msg.terminal }));
       return true;
 
+    /**
+     * The interface's face and size. Nothing here reaches a pty: a page writes
+     * two custom properties, and a terminal whose box moved by a strip's few
+     * pixels proposes a size the way it does after any change of layout.
+     */
+    case "set-interface-appearance":
+      saveAppearance(adoptAppearance({ ...appearance, ui: msg.ui }));
+      return true;
+
     /** Only what the window draws: the slot queue, the polls and the counts go on whatever the bar shows. */
     case "set-bar":
       saveAppearance({ ...appearance, bar: adoptBar(msg.bar) });

@@ -30,6 +30,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DEFAULT_VOICE } from "../../../shared/voice";
 import { desktop } from "../desktop";
+import { useInterface } from "../fonts";
 import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
 import { installInk, installShiftPen, useInk } from "../ink";
@@ -95,6 +96,7 @@ if (import.meta.hot && typeof location !== "undefined" && new URLSearchParams(lo
 
 export function Pill() {
   const { snapshot, voice } = useKururu();
+  useInterface(snapshot);
   const ui = useVoiceUi();
   const ink = useInk();
   const profileRef = useRef("");

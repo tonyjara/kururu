@@ -66,6 +66,14 @@ export interface DesktopBridge {
    */
   voice?: DesktopVoice;
   /**
+   * The window's three buttons, which the page may draw itself
+   * (`WindowButtons.tsx`) once it has asked for the system's to be put away.
+   * Optional, and its absence is an answer: a window from an app built
+   * before 2026-11-10 keeps macOS's own over its corner, and the page keeps
+   * the room for those instead.
+   */
+  frame?: DesktopFrame;
+  /**
    * Cards popped out as windows of their own, over every application.
    * Optional: a window from before them keeps its notes in the page, which
    * is what a browser and the phone do anyway.
@@ -80,6 +88,31 @@ export interface DesktopBridge {
 }
 
 /** The screen pen's session as main holds it. */
+/** What the page cannot see about the window it is in. */
+export interface FrameState {
+  /** The key window: the buttons wear their colours. Grey otherwise, as the system's are. */
+  focused: boolean;
+  /** Full screen has no buttons, the system's or these, and needs no room kept for them. */
+  fullscreen: boolean;
+}
+
+/**
+ * The window's three buttons, for a page that draws them. The page asks
+ * (`claim`), and the main process puts the system's away and says what the
+ * window's state is, or answers null where they are not the page's to draw: a
+ * platform whose windows have a frame, a note's window. `release` gives the
+ * system's back, for a page that has stopped drawing. `act` is what a button
+ * does: `zoom` is the green one with Option held, the window fitted to the
+ * screen without leaving the desktop it is on. All of it reaches the window
+ * the page is in and no other, which is the reach `show` has.
+ */
+export interface DesktopFrame {
+  claim(): Promise<FrameState | null>;
+  release(): void;
+  onState(listener: (state: FrameState) => void): () => void;
+  act(verb: "close" | "minimize" | "fullscreen" | "zoom"): void;
+}
+
 export interface InkState {
   on: boolean;
   id: string | null;

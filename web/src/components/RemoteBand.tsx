@@ -5,10 +5,10 @@
  * The panes of a remote workspace are drawn by the components every local
  * workspace is drawn by (`Panes.tsx`), so the one thing that has to be
  * added is the label, and it goes where the eye already reads which
- * workspace this is: the left end of the top band. While the watch is down
- * the panes keep what their emulators hold, greyed, because a window that
- * empties itself when a lid closes is a window nobody can read; the band
- * says since when, in the sidebar's words (`web/src/nodes.ts`).
+ * workspace this is: the head of the top-left pane's strip. While the watch
+ * is down the panes keep what their emulators hold, greyed, because a window
+ * that empties itself when a lid closes is a window nobody can read; the
+ * band says since when, in the sidebar's words (`web/src/nodes.ts`).
  */
 import { useEffect, useState } from "react";
 import type { RemoteView } from "../../../shared/remote";

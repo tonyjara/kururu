@@ -10,6 +10,7 @@
 import { useMemo, useState } from "react";
 import { CURSOR_STYLES, MAX_FONT_SIZE, MIN_FONT_SIZE, type Appearance, type CursorStyle } from "../../../shared/theme";
 import { canEnumerate, enumerate, knownFonts } from "../fonts";
+import type { ReactNode } from "react";
 import * as api from "../session";
 import { Group, Row, Select, Slider, TextBox, Toggle } from "./ui";
 
@@ -26,7 +27,13 @@ export function TerminalPage({ appearance }: { appearance: Appearance }) {
   return (
     <>
       <Group title="Terminal" foot="The cursor is the default, not the rule: a program with its own opinion about it gets its way.">
-        <FontRow value={terminal.fontFamily} onPick={(fontFamily) => set({ fontFamily })} />
+        <FontRow
+          value={terminal.fontFamily}
+          onPick={(fontFamily) => set({ fontFamily })}
+          fonts={knownFonts}
+          generic="monospace"
+          hint="Goes in front of the built-in stack, so an agent's icons keep working."
+        />
         <Slider label="Size" min={MIN_FONT_SIZE} max={MAX_FONT_SIZE} step={1} value={terminal.fontSize} onChange={(fontSize) => set({ fontSize })} format={(n) => `${n}px`} />
         <Select label="Cursor" value={terminal.cursorStyle} onChange={(value) => set({ cursorStyle: value as CursorStyle })}>
           {CURSOR_STYLES.map((style) => (
@@ -42,19 +49,35 @@ export function TerminalPage({ appearance }: { appearance: Appearance }) {
 }
 
 /**
- * The terminal's face, as a list of the ones this machine has, with a box
- * behind `Custom…` for the one it cannot find. `web/src/fonts.ts` finds fonts
+ * A face, as a list of the ones this machine has, with a box behind
+ * `Custom…` for the one it cannot find: the terminal's here, and the
+ * interface's on its own page (`Interface.tsx`), each with its own list. `web/src/fonts.ts` finds fonts
  * two ways and neither is complete, so there will always be a machine with a
  * font that is not in the list, and the server accepts any string because what
  * is *valid* and what is *offered* are different questions. The enumeration
  * hangs off `onPointerDown` because the good API needs a user activation.
  */
-function FontRow({ value, onPick }: { value: string; onPick: (value: string) => void }) {
+export function FontRow({
+  value,
+  onPick,
+  fonts: known,
+  generic,
+  hint,
+}: {
+  value: string;
+  onPick: (value: string) => void;
+  /** The faces to offer: `knownFonts` or `knownInterfaceFonts`. */
+  fonts: () => string[];
+  /** What a name in the list is drawn in when this device turns out not to have it. */
+  generic: "monospace" | "sans-serif";
+  hint: ReactNode;
+}) {
   const [scanned, setScanned] = useState(0);
   const [custom, setCustom] = useState(false);
   // Recomputed when a scan lands, and not otherwise: the installed faces are a
   // fact about the machine and do not change while the window is open.
-  const fonts = useMemo(() => knownFonts(), [scanned]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fonts = useMemo(() => known(), [scanned, known]);
   const unknown = value !== "" && !fonts.includes(value);
   const showBox = custom || unknown;
 
@@ -62,7 +85,7 @@ function FontRow({ value, onPick }: { value: string; onPick: (value: string) => 
     <>
       <Select
         label="Font"
-        hint="Goes in front of the built-in stack, so an agent's icons keep working."
+        hint={hint}
         wide
         value={showBox ? CUSTOM : value}
         onPointerDown={() => {
@@ -78,7 +101,7 @@ function FontRow({ value, onPick }: { value: string; onPick: (value: string) => 
       >
         <option value="">System default</option>
         {fonts.map((font) => (
-          <option key={font} value={font} style={{ fontFamily: `"${font}", monospace` }}>
+          <option key={font} value={font} style={{ fontFamily: `"${font}", ${generic}` }}>
             {font}
           </option>
         ))}
@@ -88,7 +111,7 @@ function FontRow({ value, onPick }: { value: string; onPick: (value: string) => 
         <Row label="Name" hint="Exactly as the system spells it." wide as="label">
           <TextBox
             value={value}
-            mono
+            mono={generic === "monospace"}
             placeholder="A font name"
             /* Focused when `Custom…` opened this box, and not when it is merely
                here because this device cannot find the font that is set — the

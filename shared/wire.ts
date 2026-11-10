@@ -55,7 +55,7 @@ import type { LendAsk, SecretsView } from "./secrets";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
-import type { TerminalAppearance } from "./theme";
+import type { InterfaceAppearance, TerminalAppearance } from "./theme";
 import type { BarSettings } from "./statusbar";
 import type { UseAnswer, UseRule, VaultAsk } from "./vaultitems";
 
@@ -1483,6 +1483,13 @@ export type ClientMessage =
    * SIGWINCH into a shape no box has, and `adoptAppearance` clamps it.
    */
   | { type: "set-terminal-appearance"; terminal: TerminalAppearance }
+  /**
+   * The face and the size kururu's own interface is set in, both at once on
+   * `set-terminal-appearance`'s reasoning. Adopted on arrival: the size is
+   * clamped to a range a layout survives, and the face is stripped of what
+   * could end a CSS declaration, since that is where it ends up.
+   */
+  | { type: "set-interface-appearance"; ui: InterfaceAppearance }
   /**
    * Which of the bottom bar's chips are drawn — the whole list of the hidden
    * ones, on `set-terminal-appearance`'s reasoning: one page edits it, and the
