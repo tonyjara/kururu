@@ -70,10 +70,25 @@ vault ask --title "Bancard staging keys for Pylink" --reason "PYL-14's local che
   dialog the owner has to puzzle over.
 - **Drawn on every page** of this server — the window and the phone — over
   everything (`web/src/components/VaultAsk.tsx`), sent as `vault-asks` on
-  connect and on every change, never to another node's watcher. The first
-  Save or Cancel answers; the others close. Unanswered in fifteen minutes it
-  closes as cancelled; a CLI that hangs up cancels it. The scrim does not
-  close it.
+  connect and on every change, never to another node's watcher, so a phone
+  that wakes up later still finds it. The first Save or Cancel answers; the
+  others close. The scrim does not close it, and it says when it closes by
+  itself.
+- **How long it stays up** is the caller's: fifteen minutes by default,
+  `--timeout 3h` (`vault ask`) or `open_for_min` (`ask_secret`), at most six
+  hours, a stay outside 1 minute–6 hours refused rather than clamped. Ask for
+  hours when the owner is away, rather than reopening it in a loop.
+- **It survives the server restarting** — `bun run dev` restarts on every
+  save. Each open ask (its words and deadline; there is no value yet) and
+  what became of the last fifty for a day are kept in
+  `<state>/vault-asks.json` (`0600`) and taken up by the next server with
+  the time they have left; one that ran out meanwhile ends as `timeout`.
+  `POST /api/vault/ask` answers with the ask's id at once and the outcome
+  later, as JSON lines; a `vault ask` cut off by a restart waits again on
+  `POST /api/vault/wait` by that id, for up to ninety seconds of no server.
+  At shutdown `Vault.shutdown()` writes the asks and stops reading the
+  connections closing under it as callers hanging up. Only an ask's caller
+  hanging up — Ctrl-C, its agent ended — cancels it.
 - **The fields** are masked inputs with a Show per field, uncontrolled, read
   once on Save into the one message that carries vault values
   (`vault-answer`), with every autofill hint off. Under each: the Keychain
@@ -82,9 +97,14 @@ vault ask --title "Bancard staging keys for Pylink" --reason "PYL-14's local che
   file, then into `vault.json` (`Vault.answer`, `server/src/vaultstore.ts`);
   an empty field is skipped; one that fails does not stop the next. The
   page shows the outcome per field before it closes.
-- **The caller hears** `saved`, `skipped`, `cancelled` or `failed: <why>` per
-  field, and never a value. `ask_secret` waits up to nine minutes; after that
-  it returns the ask's id and `ask_secret ask=<id>` waits again.
+- **The caller hears**, per field, `saved`, `skipped`, `cancelled` (the
+  owner's Cancel, or the caller stopped waiting), `timeout` (it stayed up its
+  whole time unanswered) or `failed`, each but a save with why — "nobody
+  answered within 3 hours", "the owner pressed Cancel" — and never a value.
+  `vault ask` exits 0 when every field was saved, 3 on a timeout, 1
+  otherwise. `ask_secret` waits up to nine minutes; after that it returns
+  the ask's id and `ask_secret ask=<id>` waits again, or says how it ended,
+  up to a day later.
 - **The phone works**: it reaches this Mac over the tailnet, so a value
   travels inside Tailscale's WireGuard tunnel behind the share token; a
   paste is the operating system's and needs no secure context. A phone on

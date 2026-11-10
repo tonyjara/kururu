@@ -1473,9 +1473,10 @@ export class Harness {
       let done: Promise<FieldOutcome[]> | null;
       if (id) {
         done = vault.wait(id);
-        if (!done) return fail(`No ask ${id}: it ended more than half an hour ago, or the server restarted. Ask again.`);
+        if (!done) return fail(`No ask ${id}: it ended more than a day ago, or was never made here. Ask again.`);
       } else {
-        const req = adoptAskRequest(args);
+        const minutes = args.open_for_min;
+        const req = adoptAskRequest(typeof minutes === "number" ? { ...args, openForMs: minutes * 60_000 } : args);
         if ("error" in req) return fail(req.error);
         try {
           const opened = vault.ask(req, "Kuru");

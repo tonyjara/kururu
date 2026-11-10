@@ -31,6 +31,13 @@ import * as api from "../session";
 
 type Values = Extract<VaultAsk, { kind: "values" }>;
 
+/** When an ask closes by itself: a time today, else the day and the time. */
+function until(at: number): string {
+  const d = new Date(at);
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
+}
+
 /** "a shell" at the start of a sentence. */
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 type Use = Extract<VaultAsk, { kind: "use" }>;
@@ -164,7 +171,9 @@ function ValuesAsk({ ask, more, onDone }: { ask: Values; more: string | null; on
           onUse={(on) => uses.current.set(field.id, on ? "ask" : "free")}
         />
       ))}
-      <p className="vault-note">The values go to the vault and to the places above; {ask.from} is told only whether each was saved. An empty field is skipped.</p>
+      <p className="vault-note">
+        The values go to the vault and to the places above; {ask.from} is told only whether each was saved. An empty field is skipped. Open until {until(ask.until)}.
+      </p>
       {error && <p className="dialog-move-refused">{error}</p>}
       <div className="dialog-actions">
         <button type="button" className="button button-quiet" onClick={() => send(true)} disabled={busy}>
@@ -193,7 +202,7 @@ function Outcomes({ ask, outcomes, onClose }: { ask: Values; outcomes: FieldOutc
         <ul className="vault-outcomes">
           {outcomes.map((o) => (
             <li key={o.field} className={o.outcome === "failed" ? "vault-failed" : undefined}>
-              <strong>{label.get(o.field) ?? o.name}</strong>: {o.outcome === "failed" ? `failed — ${o.why}` : o.outcome}
+              <strong>{label.get(o.field) ?? o.name}</strong>: {"why" in o ? `${o.outcome} — ${o.why}` : o.outcome}
             </li>
           ))}
         </ul>

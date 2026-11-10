@@ -52,8 +52,26 @@ export function defaultUse(name: string, label: string): UseRule {
 export const MAX_FIELDS = 8;
 /** A value's longest. A PEM key is a few KB; anything near this is not a key. */
 export const VALUE_MAX = 64 * 1024;
-/** How long an ask waits for the owner before it closes as cancelled. */
+/** How long an ask waits for the owner before it closes as timed out, when its caller does not say. */
 export const ASK_MS = 15 * 60_000;
+/**
+ * The longest a caller may ask it to stay up: an afternoon away from the
+ * Mac, which is what the first real use needed (the owner, 2026-11-10: "up
+ * to a few hours, so a caller doesn't have to loop reopening the dialog").
+ * Longer than that and a key is waiting on somebody who has forgotten it.
+ */
+export const ASK_MAX_MS = 6 * 3_600_000;
+export const ASK_MIN_MS = 60_000;
+
+/** "15 minutes", "3 hours", "1 hour 30 minutes": a stay as a sentence says it. */
+export function durationWords(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const part = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  if (!h) return part(Math.max(1, m), "minute");
+  return m ? `${part(h, "hour")} ${part(m, "minute")}` : part(h, "hour");
+}
 /** The words a caller may write, clipped where the dialog would. */
 export const TITLE_MAX = 120;
 export const REASON_MAX = 600;
@@ -79,6 +97,8 @@ export interface AskRequest {
   title: string;
   reason: string;
   fields: FieldAsk[];
+  /** How long the dialog stays up for the owner, in milliseconds: `ASK_MS` unless the caller said. */
+  openFor: number;
 }
 
 function words(value: unknown, max: number): string | null {
@@ -137,7 +157,17 @@ export function adoptAskRequest(raw: unknown): AskRequest | { error: string } {
     }
     fields.push({ label, name: field.name, env, use });
   }
-  return { title, reason, fields };
+  // A number off the wire: checked, never clamped, so a caller that asked
+  // for a day hears that it cannot have one instead of getting six hours
+  // it did not ask for.
+  let openFor = ASK_MS;
+  if (r.openForMs !== undefined && r.openForMs !== null) {
+    if (typeof r.openForMs !== "number" || !Number.isFinite(r.openForMs) || r.openForMs < ASK_MIN_MS || r.openForMs > ASK_MAX_MS) {
+      return { error: `The dialog can stay up between 1 minute and ${durationWords(ASK_MAX_MS)}.` };
+    }
+    openFor = Math.round(r.openForMs);
+  }
+  return { title, reason, fields, openFor };
 }
 
 /** One field as the dialog draws it. Never a value: there is none to draw. */
@@ -186,8 +216,15 @@ export type VaultAsk =
       until: number;
     };
 
-/** What became of one field. A failure says why, never with the value in it. */
-export type FieldOutcome = { field: string; name: string; outcome: "saved" | "skipped" | "cancelled" } | { field: string; name: string; outcome: "failed"; why: string };
+/**
+ * What became of one field, and for anything but a save, why — never with
+ * the value in it. `cancelled` is somebody's doing (the owner's Cancel, the
+ * caller hanging up), `timeout` is nobody's: the dialog stayed up its whole
+ * time unanswered, which tells a caller that asking again later is fair.
+ */
+export type FieldOutcome =
+  | { field: string; name: string; outcome: "saved" | "skipped" }
+  | { field: string; name: string; outcome: "cancelled" | "timeout" | "failed"; why: string };
 
 /** The owner's answer to a `use` ask. */
 export type UseAnswer = "once" | "lasting" | "deny";
@@ -197,7 +234,7 @@ export function outcomeLines(outcomes: readonly FieldOutcome[], labels: Readonly
   return outcomes
     .map((o) => {
       const label = labels.get(o.field) ?? o.name;
-      return o.outcome === "failed" ? `${label} (${o.name}): failed: ${o.why}` : `${label} (${o.name}): ${o.outcome}`;
+      return "why" in o ? `${label} (${o.name}): ${o.outcome} — ${o.why}` : `${label} (${o.name}): ${o.outcome}`;
     })
     .join("\n");
 }

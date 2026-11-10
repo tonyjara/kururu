@@ -23,6 +23,11 @@ shows, so it is written once and read in three places — see
   paste and press Save; the agent is told "saved" and never sees the value.
   Agents ask with `vault ask`, Kuru with `ask_secret`; `vault list` and
   `list_secrets` name what is kept. See `docs/vault.md`.
+- **A key request can wait for you for hours.** An agent or Kuru can keep
+  the dialog up for up to six hours (`vault ask --timeout 3h`) instead of
+  fifteen minutes, it stays on the phone until you answer or it runs out —
+  through kururu restarting in between — and the agent is told why it
+  closed: saved, cancelled, or timed out with nobody answering.
 - **Run a command with a key it never shows.** `vault run --secret
   NAME=VAR -- command` runs the command with the key in its environment and
   gives the agent its output with the key masked, and `--askpass` hands a

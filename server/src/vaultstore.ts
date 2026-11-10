@@ -10,27 +10,35 @@
  * `0600` though nothing in it is secret, because it is a list of what there
  * is to take.
  *
- * An ask is held in memory: the dialog on every page, its timer, and the
- * promise its caller waits on. A server restarted with one open loses it,
- * and its caller is told so by the connection it was waiting on ending —
- * nothing was saved, and the owner sees the dialog go. That is the right
- * failure for a dialog about keys: never one answered on the owner's behalf.
+ * An ask is the dialog on every page, its timer, and the promise its caller
+ * waits on. It may stay up for hours (the owner away from the Mac), and the
+ * server under `bun run dev` restarts on every save, so an open ask — its
+ * title, fields and deadline, never a value, there being none yet — is also
+ * written to `<state>/vault-asks.json` and taken up again by the next
+ * server, with what became of recent ones, so a caller that reconnects by id
+ * hears how its ask ended. A command's ask to use an item is not kept: it
+ * belongs to a run, and the run's caller is gone with the server.
  *
  * Generic over nothing and given its store, its clock and its writers, so
  * the tests drive a whole ask with a store in memory and a scratch home.
  */
 import { randomUUID } from "node:crypto";
-import { defaultUse, ASK_MS, type AskFieldView, type AskRequest, type EnvTarget, type FieldOutcome, type UseAnswer, type UseRule, type VaultAsk, type VaultItemView } from "../../shared/vaultitems";
+import { defaultUse, durationWords, type AskFieldView, type AskRequest, type EnvTarget, type FieldOutcome, type UseAnswer, type UseRule, type VaultAsk, type VaultItemView } from "../../shared/vaultitems";
 import type { Approval } from "./vaultrun";
 import { readConfigFile, writeConfigFile } from "./config";
+import { stateDir, writeAtomic } from "./fsutil";
 import type { SecretStore } from "./keychain";
 import { envPath, tildePath, writeEnvVariable } from "./vaultfile";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export const VAULT_FILE = "vault.json";
 /** Env files remembered per item, newest first. */
 const ENV_KEPT = 5;
-/** How long a finished ask's outcomes can still be asked for, by a caller whose wait ran out first. */
-const DONE_KEPT_MS = 30 * 60_000;
+/** How long a finished ask's outcomes can still be asked for, by a caller whose wait ran out first: Kuru comes back by id hours later. */
+const DONE_KEPT_MS = 24 * 3_600_000;
+/** And at most this many of them. */
+const DONE_KEPT = 50;
 /** How long a command waits for the owner to allow an item before it is refused. */
 export const USE_ASK_MS = 5 * 60_000;
 /** "Allow for 15 minutes": per agent, per item, in memory. */
@@ -66,6 +74,9 @@ export interface VaultDeps {
   log?: (line: string) => void;
   /** The home folder paths are said against, `~/…`. Default the process's. */
   home?: string;
+  /** Where open asks outlive a restart: the server's are `readAsksFile` and `writeAsksFile`. None given, they do not — a test never writes the state folder. */
+  loadAsks?: () => unknown;
+  saveAsks?: (value: unknown) => void;
 }
 
 interface OpenUse {
@@ -78,6 +89,8 @@ interface OpenUse {
 
 interface OpenAsk {
   view: Extract<VaultAsk, { kind: "values" }>;
+  /** How long it was asked to stay up, for the sentence that says it ran out. */
+  openFor: number;
   timer: Timer;
   resolve: (outcomes: FieldOutcome[]) => void;
   done: Promise<FieldOutcome[]>;
@@ -119,11 +132,63 @@ export class Vault {
   private readonly setTimer: (fn: () => void, ms: number) => Timer;
   private readonly clearTimer: (timer: Timer) => void;
 
+  /** Set by `close()` at shutdown: from then on a hangup is the server going, not the caller, and changes nothing. */
+  private closing = false;
+
   constructor(private readonly deps: VaultDeps) {
     this.now = deps.now ?? Date.now;
     this.setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
     this.clearTimer = deps.clearTimer ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
     this.items = adoptItems((deps.load ?? (() => readConfigFile(VAULT_FILE)))());
+    this.takeUp(deps.loadAsks?.() ?? null);
+  }
+
+  /**
+   * The asks the last server left open, put back up with what is left of
+   * their time, and those that ran out while nobody was serving them ended
+   * as timed out. And what became of recent ones, for a caller asking by id.
+   */
+  private takeUp(raw: unknown): void {
+    const r = raw && typeof raw === "object" ? (raw as { open?: unknown; finished?: unknown }) : {};
+    const now = this.now();
+    if (Array.isArray(r.finished)) {
+      for (const f of r.finished) {
+        const e = f as { id?: unknown; at?: unknown; outcomes?: unknown };
+        if (typeof e.id === "string" && typeof e.at === "number" && Number.isFinite(e.at) && now - e.at <= DONE_KEPT_MS && Array.isArray(e.outcomes)) {
+          this.finished.set(e.id, { at: e.at, outcomes: e.outcomes as FieldOutcome[] });
+        }
+      }
+    }
+    if (!Array.isArray(r.open)) return;
+    for (const raw of r.open) {
+      const v = raw as OpenAsk["view"] & { openFor?: unknown };
+      if (!v || v.kind !== "values" || typeof v.id !== "string" || typeof v.until !== "number" || !Number.isFinite(v.until) || !Array.isArray(v.fields)) continue;
+      const openFor = typeof v.openFor === "number" && Number.isFinite(v.openFor) ? v.openFor : 0;
+      const view: OpenAsk["view"] = { kind: "values", id: v.id, title: String(v.title ?? ""), reason: String(v.reason ?? ""), from: String(v.from ?? ""), fields: v.fields, until: v.until };
+      this.openWith(view, openFor);
+      if (v.until <= now) this.close(view.id, "timeout", `nobody answered within ${durationWords(openFor || 0)}`);
+    }
+  }
+
+  /** What survives a restart: the open asks' views (no value is ever in one) and recent outcomes. */
+  private keepAsks(): void {
+    if (this.closing || !this.deps.saveAsks) return;
+    const value = {
+      v: 1,
+      open: [...this.open.values()].map((a) => ({ ...a.view, openFor: a.openFor })),
+      finished: [...this.finished].map(([id, f]) => ({ id, at: f.at, outcomes: f.outcomes })),
+    };
+    try {
+      this.deps.saveAsks(value);
+    } catch (err) {
+      this.log(`could not keep the open asks for the next server (${(err as NodeJS.ErrnoException).code ?? "error"})`);
+    }
+  }
+
+  /** The server is going: what is open stays written for the next one, and the connections closing under it are not callers hanging up. */
+  shutdown(): void {
+    this.keepAsks();
+    this.closing = true;
   }
 
   get storeKind(): "keychain" | "file" {
@@ -148,6 +213,7 @@ export class Vault {
   }
 
   private announce(): void {
+    this.keepAsks();
     this.deps.changed(this.asks());
   }
 
@@ -181,17 +247,40 @@ export class Vault {
       return { id: String(i), label: f.label, name: f.name, env, use, exists: Boolean(had) };
     });
     const id = randomUUID().slice(0, 8);
+    const view: OpenAsk["view"] = { kind: "values", id, title: req.title, reason: req.reason, from, fields, until: this.now() + req.openFor };
+    const done = this.openWith(view, req.openFor);
+    this.log(`${from} asked for ${fields.map((f) => f.name).join(", ")} for ${durationWords(req.openFor)} (${id})`);
+    this.hangup(id, signal);
+    this.announce();
+    return { id, done };
+  }
+
+  /** An ask up, with its timer and the promise its callers wait on. */
+  private openWith(view: OpenAsk["view"], openFor: number): Promise<FieldOutcome[]> {
     let resolve!: (outcomes: FieldOutcome[]) => void;
     const done = new Promise<FieldOutcome[]>((r) => {
       resolve = r;
     });
-    const view: OpenAsk["view"] = { kind: "values", id, title: req.title, reason: req.reason, from, fields, until: this.now() + ASK_MS };
-    const timer = this.setTimer(() => this.close(id, "cancelled", "nobody answered in time"), ASK_MS);
-    this.open.set(id, { view, timer, resolve, done });
-    this.log(`${from} asked for ${fields.map((f) => f.name).join(", ")} (${id})`);
-    signal?.addEventListener("abort", () => this.close(id, "cancelled", "the caller went away"), { once: true });
-    this.announce();
-    return { id, done };
+    const left = Math.max(0, view.until - this.now());
+    const timer = this.setTimer(() => this.close(view.id, "timeout", `nobody answered within ${durationWords(openFor)}`), left);
+    this.open.set(view.id, { view, openFor, timer, resolve, done });
+    return done;
+  }
+
+  /** A caller that hangs up cancels its ask — unless it is the server going, whose connections all close at once. */
+  hangup(id: string, signal?: AbortSignal): void {
+    signal?.addEventListener(
+      "abort",
+      () => {
+        if (!this.closing) this.close(id, "cancelled", "the caller stopped waiting (Ctrl-C, or its agent ended)");
+      },
+      { once: true },
+    );
+  }
+
+  /** The labels of an open ask's fields, in order, for the lines a caller reads. */
+  labelsOf(id: string): string[] | null {
+    return this.open.get(id)?.view.fields.map((f) => f.label) ?? null;
   }
 
   /** An ask's outcomes: waited for while it is open, or as it ended, for a while after. Null for one never heard of. */
@@ -206,15 +295,20 @@ export class Vault {
     const now = this.now();
     for (const [k, v] of this.finished) if (now - v.at > DONE_KEPT_MS) this.finished.delete(k);
     this.finished.set(id, { at: now, outcomes });
+    while (this.finished.size > DONE_KEPT) this.finished.delete(this.finished.keys().next().value!);
+    // A Save finishes after the dialog was taken off the pages, so this is
+    // not always followed by an `announce`: kept here for a caller asking by
+    // id from the next server.
+    this.keepAsks();
   }
 
   /** End an open ask with every field the same outcome, without a value having been seen. */
-  private close(id: string, outcome: "cancelled", why: string): void {
+  private close(id: string, outcome: "cancelled" | "timeout", why: string): void {
     const open = this.open.get(id);
     if (!open) return;
     this.open.delete(id);
     this.clearTimer(open.timer);
-    const outcomes: FieldOutcome[] = open.view.fields.map((f) => ({ field: f.id, name: f.name, outcome }));
+    const outcomes: FieldOutcome[] = open.view.fields.map((f) => ({ field: f.id, name: f.name, outcome, why }));
     this.finish(id, outcomes);
     this.log(`ask ${id} ${outcome}: ${why}`);
     this.announce();
@@ -384,4 +478,21 @@ export class Vault {
     }
     if (any) this.persist();
   }
+}
+
+function asksPath(): string {
+  return join(stateDir(), "vault-asks.json");
+}
+
+export function readAsksFile(): unknown {
+  try {
+    return JSON.parse(readFileSync(asksPath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** Owner-only though no value is in it: it names what keys are wanted and where they go. */
+export function writeAsksFile(value: unknown): void {
+  writeAtomic(asksPath(), `${JSON.stringify(value)}\n`, { mode: 0o600 });
 }

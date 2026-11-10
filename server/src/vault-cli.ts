@@ -22,6 +22,7 @@
  */
 import { request } from "node:http";
 import { readdirSync } from "node:fs";
+import { parseDuration } from "../../shared/slots";
 import { tokenHeaders } from "../localtoken.mjs";
 import { configDir, configPath, readConfigFileRaw } from "./config";
 import { keychainSealer, OWNER_ONLY, sealableFiles, unsealConfigSecrets } from "./configkeys";
@@ -39,14 +40,18 @@ function die(line: string, code = 2): never {
 
 const HELP = `vault — keep secrets out of transcripts.
 
-  vault ask --title TEXT [--reason TEXT] --field LABEL --name ITEM [--env FILE:VAR] [--use ask] [--field …]
+  vault ask --title TEXT [--reason TEXT] [--timeout 3h] --field LABEL --name ITEM [--env FILE:VAR] [--use ask] [--field …]
       Open a dialog on the owner's screen (the Kururu window and the phone)
       with one masked field per --field. Each value is saved to the Mac's
       Keychain as the vault item --name, and with --env also written to that
       one variable of an env file under the home folder (backed up first,
       only that variable replaced, kept 0600). You are told, per field:
-      saved, skipped, cancelled or failed — never the value. Waits for the
-      owner, up to 15 minutes. Exit 0 when every field was saved.
+      saved, skipped, cancelled, timeout or failed, with why — never the
+      value. The dialog stays up 15 minutes, or --timeout (45m, 3h; at most
+      6h), on the window and the phone, and survives the server restarting:
+      this waits on through a restart. Exit 0 when every field was saved, 3
+      when nobody answered in time (asking again later is fair), 1 when it
+      was cancelled or a field skipped or failed.
       Names are lower-case, up to four /-separated parts:
       pylink/bancard-staging-private.
 
@@ -77,7 +82,8 @@ const HELP = `vault — keep secrets out of transcripts.
 Never print, echo or cat a secret, read it from the Keychain yourself, or
 ask the owner to paste one into a chat: ask with \`vault ask\`, use it with
 \`vault run\`. Exit codes: 0 done, 1 not everything was saved, 2 a usage
-error or a refusal, 6 no kururu server, 77 not allowed; a run otherwise
+error or a refusal, 3 an ask nobody answered in time, 6 no kururu
+server, 77 not allowed; a run otherwise
 exits with its command's code.
 `;
 
@@ -139,6 +145,7 @@ async function askCommand(args: string[]): Promise<void> {
   let reason: string | undefined;
   const fields: Field[] = [];
   let json: Record<string, unknown> | null = null;
+  let openForMs: number | null = null;
   const last = (flag: string): Field => {
     const f = fields[fields.length - 1];
     if (!f) die(`${flag} belongs to a --field; put --field LABEL first`);
@@ -157,6 +164,11 @@ async function askCommand(args: string[]): Promise<void> {
     else if (flag === "--field") fields.push({ label: value() });
     else if (flag === "--name") last(flag).name = value();
     else if (flag === "--use") last(flag).use = value();
+    else if (flag === "--timeout") {
+      const spec = value();
+      openForMs = parseDuration(spec);
+      if (openForMs === null) die("--timeout is a time such as 45m, 3h or 90 (minutes); at most 6h");
+    }
     else if (flag === "--env") {
       const spec = value();
       const at = spec.lastIndexOf(":");
@@ -172,12 +184,87 @@ async function askCommand(args: string[]): Promise<void> {
       }
     } else die(`unknown flag ${flag}; see vault --help`);
   }
-  const body = json ?? { title, reason, fields };
-  say("the dialog is on the owner's screen; waiting for them (up to 15 minutes)");
-  const answer = await ask("/api/vault/ask", { ...body, agentId });
+  const body = { ...(json ?? { title, reason, fields }), ...(openForMs !== null ? { openForMs } : {}) };
+  let id: string | null = null;
+  let final: Record<string, unknown> | null = null;
+  const onLine = (line: Record<string, unknown>) => {
+    if (typeof line.id === "string" && !id) {
+      id = line.id;
+      const until = typeof line.until === "number" ? new Date(line.until).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : null;
+      say(`the dialog is on the owner's screen (ask ${id})${until ? `; it stays up until ${until}` : ""}. Waiting.`);
+    }
+    if ("outcomes" in line) final = line;
+  };
+  let lost = await streamLines("/api/vault/ask", { ...body, agentId }, onLine);
+  // The server went away under the wait — a restart under `bun run dev` —
+  // and the next one takes the ask up: wait for it again by its id.
+  let downSince: number | null = null;
+  while (!final) {
+    if (!id) die(`the kururu server on :${port} went away before the dialog opened (${lost}); ask again`, 6);
+    downSince ??= Date.now();
+    if (Date.now() - downSince > DOWN_MS) die(`no kururu server came back on :${port} to wait on ask ${id}; it is still up for the owner if the server returns`, 6);
+    await new Promise((r) => setTimeout(r, 1000));
+    lost = await streamLines("/api/vault/wait", { id }, onLine);
+    if (lost === "") downSince = null;
+    else if (lost.startsWith("404")) die(`ask ${id} is gone: ${lost.slice(4)}`, 6);
+  }
+  const answer = final as Record<string, unknown>;
   process.stdout.write(`${String(answer.text ?? "")}\n`);
   const outcomes = Array.isArray(answer.outcomes) ? (answer.outcomes as { outcome?: string }[]) : [];
-  process.exit(outcomes.length && outcomes.every((o) => o.outcome === "saved") ? 0 : 1);
+  if (outcomes.length && outcomes.every((o) => o.outcome === "saved")) process.exit(0);
+  process.exit(outcomes.some((o) => o.outcome === "timeout") ? 3 : 1);
+}
+
+/** A server restarting under `bun run dev` is back in seconds; one silent this long is down. */
+const DOWN_MS = 90_000;
+
+/**
+ * One request whose answer is JSON lines, each handed to `onLine`. Resolves
+ * with "" when the answer ended, or with why it did not: "404 <error>", or a
+ * dropped connection's message. A refusal other than 404 ends the CLI.
+ */
+function streamLines(path: string, body: unknown, onLine: (line: Record<string, unknown>) => void): Promise<string> {
+  return new Promise((resolve) => {
+    const payload = JSON.stringify(body);
+    const req = request(
+      { host: "127.0.0.1", port, path, method: "POST", headers: { ...tokenHeaders(), "content-type": "application/json", "content-length": Buffer.byteLength(payload) } },
+      (res) => {
+        let buffered = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => {
+          buffered += c;
+          let nl = buffered.indexOf("\n");
+          while (nl >= 0) {
+            const text = buffered.slice(0, nl);
+            buffered = buffered.slice(nl + 1);
+            nl = buffered.indexOf("\n");
+            if ((res.statusCode ?? 0) >= 400) continue;
+            try {
+              onLine(JSON.parse(text) as Record<string, unknown>);
+            } catch {
+              // Not a line of ours.
+            }
+          }
+        });
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          if (status < 400) return resolve("");
+          let why = buffered;
+          try {
+            why = String((JSON.parse(buffered) as { error?: unknown }).error ?? buffered);
+          } catch {
+            // As it came.
+          }
+          if (status === 404) return resolve(`404 ${why.trim()}`);
+          die(why.trim() || `the server said ${status}`);
+        });
+        res.on("error", (err) => resolve(err.message || "the connection dropped"));
+        res.on("aborted", () => resolve("the connection dropped"));
+      },
+    );
+    req.on("error", (err) => resolve(err.message || "no answer"));
+    req.end(payload);
+  });
 }
 
 /** `--secret ITEM=VAR` and `--askpass ITEM` up to `--`, the command after it. */

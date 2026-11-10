@@ -91,10 +91,52 @@ export const vaultRoutes: Route[] = [
         json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
         return;
       }
+      // The id first, at once, so a caller cut off by a restart can wait again by it.
+      res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
+      res.write(`${JSON.stringify({ id: opened.id, until: Date.now() + ask.openFor })}\n`);
       const outcomes = await opened.done;
-      if (hangup.signal.aborted) return;
+      if (hangup.signal.aborted || res.writableEnded) return;
       const labels = new Map(ask.fields.map((f, i) => [String(i), f.label]));
-      json(res, { id: opened.id, outcomes, text: outcomeLines(outcomes, labels) });
+      res.end(`${JSON.stringify({ id: opened.id, outcomes, text: outcomeLines(outcomes, labels) })}\n`);
+    },
+  },
+
+  /**
+   * Waiting again for an ask by its id: what `vault ask` does when the
+   * server it asked went away under it (a restart under `bun run dev`) and
+   * the next one has taken the ask up. The same lines as an ask's, the id
+   * first; 404 for an ask this server never heard of or forgot. Hanging up
+   * cancels it, as hanging up on the ask does.
+   */
+  {
+    path: "/api/vault/wait",
+    method: "POST",
+    handle: async (req, res) => {
+      if (refuseRemote(req, res)) return;
+      let id = "";
+      try {
+        const raw = (await readJsonBody(req, 1024)) as { id?: unknown } | null;
+        id = typeof raw?.id === "string" && /^[0-9a-f]{8}$/.test(raw.id) ? raw.id : "";
+      } catch {
+        // No id, then.
+      }
+      const done = id ? vault.wait(id) : null;
+      if (!done) {
+        json(res, { error: "no such ask: it ended more than a day ago, or was never made here" }, 404);
+        return;
+      }
+      const hangup = new AbortController();
+      res.on("close", () => {
+        if (!res.writableFinished) hangup.abort();
+      });
+      vault.hangup(id, hangup.signal);
+      res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
+      res.write(`${JSON.stringify({ id })}\n`);
+      // Read now: once the ask ends it is no longer open to read them from.
+      const labels = new Map((vault.labelsOf(id) ?? []).map((l, i) => [String(i), l]));
+      const outcomes = await done;
+      if (hangup.signal.aborted || res.writableEnded) return;
+      res.end(`${JSON.stringify({ id, outcomes, text: outcomeLines(outcomes, labels) })}\n`);
     },
   },
 

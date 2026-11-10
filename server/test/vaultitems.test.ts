@@ -328,3 +328,91 @@ describe("approval", () => {
     expect(() => vault.allow(ask.id, "once")).toThrow(/closed/);
   });
 });
+
+describe("how long an ask stays up, and why it ended", () => {
+  let now: number;
+  let timers: { fn: () => void; ms: number }[];
+  let kept: unknown;
+  const make = (loadAsks: () => unknown = () => null) =>
+    new Vault({
+      store: memoryStore(),
+      changed: () => {},
+      load: () => null,
+      save: () => {},
+      log: () => {},
+      now: () => now,
+      setTimer: (fn, ms) => timers.push({ fn, ms }),
+      clearTimer: () => {},
+      loadAsks,
+      saveAsks: (value) => {
+        kept = JSON.parse(JSON.stringify(value));
+      },
+    });
+  const req = (openForMs?: number) => adoptAskRequest({ title: "Bancard staging keys", fields: [{ label: "Private key", name: "pylink/bancard-staging-private" }], ...(openForMs ? { openForMs } : {}) }) as AskRequest;
+
+  beforeEach(() => {
+    now = 1_800_000_000_000;
+    timers = [];
+    kept = null;
+  });
+
+  it("stays up 15 minutes unless asked, up to six hours, and refuses more rather than clamping", () => {
+    expect(req().openFor).toBe(15 * 60_000);
+    expect(req(3 * 3_600_000).openFor).toBe(3 * 3_600_000);
+    expect("error" in adoptAskRequest({ title: "t", fields: [{ label: "x", name: "a" }], openForMs: 24 * 3_600_000 })).toBe(true);
+    expect("error" in adoptAskRequest({ title: "t", fields: [{ label: "x", name: "a" }], openForMs: Number.NaN })).toBe(true);
+    expect("error" in adoptAskRequest({ title: "t", fields: [{ label: "x", name: "a" }], openForMs: 1000 })).toBe(true);
+  });
+
+  it("ends as timeout, saying for how long nobody answered — told apart from a Cancel", async () => {
+    const vault = make();
+    const late = vault.ask(req(3 * 3_600_000), "PYL-14 (a12)");
+    expect(timers.at(-1)!.ms).toBe(3 * 3_600_000);
+    timers.at(-1)!.fn();
+    const [o] = await late.done;
+    expect(o).toMatchObject({ outcome: "timeout", why: "nobody answered within 3 hours" });
+    expect(outcomeLines(await late.done, new Map([["0", "Private key"]]))).toBe("Private key (pylink/bancard-staging-private): timeout — nobody answered within 3 hours");
+    const cancelled = vault.ask(req(), "Kuru");
+    await vault.answer(cancelled.id, null, new Map());
+    expect((await cancelled.done)[0]).toMatchObject({ outcome: "cancelled", why: "the owner pressed Cancel" });
+    const gone = new AbortController();
+    const hung = vault.ask(req(), "Kuru", gone.signal);
+    gone.abort();
+    expect((await hung.done)[0]!.outcome).toBe("cancelled");
+  });
+
+  it("is taken up by the next server with the time it has left, and answered there", async () => {
+    const first = make();
+    const { id } = first.ask(req(3 * 3_600_000), "PYL-14 (a12)");
+    expect(JSON.stringify(kept)).not.toContain("FAKE");
+    now += 3_600_000;
+    const second = make(() => kept);
+    expect(second.asks().map((a) => a.id)).toEqual([id]);
+    expect(timers.at(-1)!.ms).toBe(2 * 3_600_000);
+    const waiting = second.wait(id)!;
+    await second.answer(id, new Map([["0", PRIVATE]]), new Map());
+    expect((await waiting)[0]!.outcome).toBe("saved");
+    // And a third, a while later, can still say how it ended.
+    now += 3_600_000;
+    expect((await make(() => kept).wait(id)!)[0]!.outcome).toBe("saved");
+  });
+
+  it("ends one that ran out while no server was up as timed out", async () => {
+    const first = make();
+    const { id } = first.ask(req(), "Kuru");
+    now += 20 * 60_000;
+    const second = make(() => kept);
+    expect(second.asks()).toEqual([]);
+    expect((await second.wait(id)!)[0]).toMatchObject({ outcome: "timeout", why: "nobody answered within 15 minutes" });
+  });
+
+  it("does not read the server's own going as callers hanging up", async () => {
+    const vault = make();
+    const going = new AbortController();
+    const { id } = vault.ask(req(), "PYL-14 (a12)", going.signal);
+    vault.shutdown();
+    going.abort();
+    expect(vault.asks().map((a) => a.id)).toEqual([id]);
+    expect(make(() => kept).asks().map((a) => a.id)).toEqual([id]);
+  });
+});

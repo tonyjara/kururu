@@ -117,7 +117,7 @@ import { resumeCommand } from "../../shared/launchers";
 import { claudeTranscriptPath, readTail as readSessionTail } from "./sessions";
 import { Slots, writeSlotCommand } from "./slots";
 import { machineStore } from "./keychain";
-import { Vault } from "./vaultstore";
+import { readAsksFile, Vault, writeAsksFile } from "./vaultstore";
 import { vaultAskpassPath, writeVaultCommand } from "./vaultbin";
 import { usesPath, VaultRuns } from "./vaultrun";
 import { specsSnapshot } from "./specs";
@@ -678,6 +678,9 @@ export async function attach(port: Port): Promise<void> {
     // The login Keychain on a Mac; 0600 files on a node with none. See `keychain.ts`.
     store: machineStore("kururu-vault", join(configDir(), "vault")),
     changed: (asks) => broadcast({ type: "vault-asks", asks }),
+    // An ask may stay up for hours, across the restarts `bun run dev` makes on every save.
+    loadAsks: readAsksFile,
+    saveAsks: writeAsksFile,
   }));
   provide("vaultRuns", new VaultRuns({
     item: (name) => vault.item(name),
@@ -1349,6 +1352,9 @@ export function shutdown(): Promise<void> {
   stopping = (async () => {
     stopSweeps();
     slots?.stop();
+    // Before the connections are closed below, which would otherwise read
+    // as every waiting caller hanging up and cancel their asks.
+    vault?.shutdown();
     // The arrangement outlives this process either way; flush it while it is
     // whole, to the host as well, since a restart is what reads that copy.
     if (keepTimer) keepNow();
