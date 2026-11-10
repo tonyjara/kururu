@@ -28,6 +28,11 @@ shows, so it is written once and read in three places — see
   gives the agent its output with the key masked, and `--askpass` hands a
   password to `sudo -A` instead. Every use is written down: who, which key,
   what command, where and when.
+- **Keys that ask before each use.** A key can be set to ask you every time
+  a command would use it — a sudo password or a production key does by
+  default — and the command waits for your Allow once, Allow for 15 minutes,
+  or Deny, on the window or the phone. Settings → Vault lists what is kept,
+  each key's rule, and the recent uses.
 - **Automations: things kururu does on a schedule, on this Mac.** A section
   in the sidebar under the agents lists each with a dot for its state and
   its next run; its sheet has the form, the next five runs and the last

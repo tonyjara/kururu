@@ -659,13 +659,7 @@ export async function attach(port: Port): Promise<void> {
     item: (name) => vault.item(name),
     valueOf: (name) => vault.valueOf(name),
     used: (names, by) => vault.used(names, by),
-    approve: async ({ items }, note) => {
-      // Approval is step 4 of the plan; until it is built, an item that asks is refused rather than used unasked.
-      const asking = items.filter((i) => i.use === "ask").map((i) => i.name);
-      if (!asking.length) return "free";
-      note(`${asking.join(", ")} asks the owner before each use, and this kururu cannot ask yet`);
-      return "denied";
-    },
+    approve: (run, note, signal) => vault.approve(run, note, signal),
     askpassPath: vaultAskpassPath,
     port: PORT,
     logPath: () => usesPath(dataDir()),

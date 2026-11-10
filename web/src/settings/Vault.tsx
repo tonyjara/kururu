@@ -13,9 +13,15 @@
  * sent and is live. Everything else is asked for when the page opens, and
  * again on Look again, because an env file's names are this page's to ask
  * for and not every client's to be sent on every save.
+ *
+ * Above the census, the vault's own store (`docs/vault.md`): the items
+ * pasted into its dialog, each with its rule — free, or ask before each use —
+ * and Remove; and below them the recent uses by `vault run`. Names, rules
+ * and commands; never a value, which this page is never sent.
  */
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { NEVER_SHARED } from "../../../shared/secrets";
+import type { VaultPage as StorePage, VaultUse } from "../../../shared/vaultitems";
 import { envLentTo, lentRows, lentTo, type VaultKey, type VaultLogin, type VaultPage as KeyPage, type VaultView, type VaultWorkspace } from "../../../shared/vaultview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -47,6 +53,7 @@ export function VaultPage({ readOnly, onOpen }: { readOnly: boolean; onOpen: (pa
   return (
     <>
       {error && <Banner tone="bad">Could not read the vault again: {error}</Banner>}
+      <Kept readOnly={readOnly} />
       <Group title="In the vault" foot="Names, places and hints only. No value is ever sent to this page, not even masked; a private key or a token is listed by its file being there.">
         <Tiles>
           <Tile value={String(view.keys.filter((key) => key.set).length)} label="kururu keys" under={`of ${view.keys.length} files`} />
@@ -100,6 +107,113 @@ export function VaultPage({ readOnly, onOpen }: { readOnly: boolean; onOpen: (pa
           <Empty>No Claude Code, Codex or Vercel login on this computer.</Empty>
         ) : (
           view.logins.map((login) => <LoginRow key={`${login.tool}:${login.where}`} login={login} />)
+        )}
+      </Group>
+    </>
+  );
+}
+
+const APPROVED: Record<VaultUse["approved"], string> = { free: "free to use", owner: "you allowed it", lasting: "allowed for 15 minutes", denied: "not allowed" };
+
+/**
+ * The vault's own items and what used them. Asked for when the page opens;
+ * each change answers with the page again. On a phone it is for looking.
+ */
+function Kept({ readOnly }: { readOnly: boolean }) {
+  const [page, setPage] = useState<StorePage | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const act = (key: string, run: () => Promise<StorePage>) => {
+    setBusy(key);
+    setError(null);
+    run()
+      .then(setPage, (err: unknown) => setError(errorText(err)))
+      .finally(() => setBusy(null));
+  };
+  useEffect(() => {
+    api.vaultPage().then(setPage, (err: unknown) => setError(errorText(err)));
+  }, []);
+  if (!page) return error ? <Banner tone="bad">Could not read the vault's items: {error}</Banner> : null;
+  const where = page.store === "keychain" ? "the Mac's Keychain" : "a private file on this computer";
+  return (
+    <>
+      {error && <Banner tone="bad">{error}</Banner>}
+      <Group
+        title="Kept in the vault"
+        lead={
+          <>
+            What you pasted into the vault's dialog, kept in {where}. Agents use an item with <Mono>vault run</Mono>, which gives the command the value and the agent only its output, masked.
+          </>
+        }
+        foot="An item that asks opens a dialog each time a command would use it: Allow once, Allow for 15 minutes, or Deny. Removing an item leaves any env file it was written to as it is. Anything running as you can still read the Keychain directly; see docs/vault.md."
+      >
+        {page.items.length === 0 ? (
+          <Empty>Nothing yet. Kuru or an agent asks for a key and you paste it into the dialog that opens.</Empty>
+        ) : (
+          page.items.map((item) => {
+            const parts = [
+              item.env.length ? `also in ${item.env.map((e) => `${e.variable} in ${e.file}`).join(", ")}` : null,
+              item.lastUse ? `last used ${when(item.lastUse.at)} by ${item.lastUse.by}` : "never used",
+              `saved ${when(item.updatedAt)}${item.by ? ` for ${item.by}` : ""}`,
+            ].filter(Boolean);
+            return (
+              <Readout
+                key={item.name}
+                label={
+                  <>
+                    {item.label} <Mono>{item.name}</Mono>
+                  </>
+                }
+                value={item.use === "ask" ? "Asks each use" : "Free to use"}
+                tone={item.use === "ask" ? "busy" : "ok"}
+                hint={parts.join(" · ")}
+              >
+                {!readOnly && (
+                  <>
+                    <Btn disabled={busy !== null} onClick={() => act(`use:${item.name}`, () => api.setVaultUse(item.name, item.use === "ask" ? "free" : "ask"))}>
+                      {item.use === "ask" ? "Make it free" : "Ask each use"}
+                    </Btn>
+                    <DangerButton
+                      label="Remove"
+                      ask={`Remove ${item.name} from the vault?`}
+                      busy={busy === `rm:${item.name}`}
+                      busyLabel="Removing…"
+                      disabled={busy !== null}
+                      onConfirm={() => act(`rm:${item.name}`, () => api.removeVaultItem(item.name))}
+                    />
+                  </>
+                )}
+              </Readout>
+            );
+          })
+        )}
+      </Group>
+      <Group title="Recent uses" foot="Every command run with a vault item, newest first, the last fifty: who, which items, the command as it was written, where, and how it ended. No value is kept, and a value typed into a command is masked here too.">
+        {page.uses.length === 0 ? (
+          <Empty>No command has used the vault yet.</Empty>
+        ) : (
+          page.uses.map((use, i) => (
+            <Readout
+              key={`${use.at}:${i}`}
+              label={
+                <>
+                  {use.by} · {use.names.join(", ")}
+                </>
+              }
+              value={use.approved === "denied" ? "Not run" : use.code === null ? "Ended" : `Exit ${use.code}`}
+              tone={use.approved === "denied" ? "off" : use.code === 0 ? "ok" : "bad"}
+              hint={
+                <>
+                  {when(use.at)} · {APPROVED[use.approved]} · <Mono>{use.command}</Mono> in {use.cwd}
+                </>
+              }
+            />
+          ))
+        )}
+        {!readOnly && page.uses.length > 0 && (
+          <Row label="" hint="Empties the log on this computer.">
+            <DangerButton label="Clear" ask="Clear every recent use?" busy={busy === "clear"} busyLabel="Clearing…" onConfirm={() => act("clear", api.clearVaultUses)} />
+          </Row>
         )}
       </Group>
     </>

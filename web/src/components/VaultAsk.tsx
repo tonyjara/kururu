@@ -30,6 +30,9 @@ import type { FieldOutcome, UseAnswer, VaultAsk } from "../../../shared/vaultite
 import * as api from "../session";
 
 type Values = Extract<VaultAsk, { kind: "values" }>;
+
+/** "a shell" at the start of a sentence. */
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 type Use = Extract<VaultAsk, { kind: "use" }>;
 
 export function VaultAsks() {
@@ -219,7 +222,7 @@ function UseAsk({ ask, more }: { ask: Use; more: string | null }) {
     <div onKeyDown={(event) => event.stopPropagation()}>
       <h2 className="dialog-title">Use {ask.items.length === 1 ? "a secret" : `${ask.items.length} secrets`}?</h2>
       <p className="dialog-hint">
-        {ask.from} wants to run a command with {ask.items.map((i) => i.label).join(", ")}
+        {capital(ask.from)} wants to run a command with {ask.items.map((i) => i.label).join(", ")}
         {more ? ` · ${more}` : ""}.
       </p>
       <pre className="vault-command">{ask.command}</pre>

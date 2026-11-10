@@ -150,6 +150,32 @@ vault run --askpass deck/sudo -- sudo -A systemctl restart thing
   process that sets another agent's id is believed, which matters as much
   as the threat model says the Keychain does.
 
+## Approval
+
+Each item is `free` or `ask` (`UseRule`). An item starts at `ask` when its
+name or label says `sudo`, `prod`, `production` or `live` (`defaultUse`),
+else `free`; a caller may ask for `ask` but never make an item free; the
+owner decides with the switch in the dialog that saves it, and later in
+Settings → Vault.
+
+A `vault run` that names an `ask` item waits in `Vault.approve`
+(`server/src/vaultstore.ts`): the same floating dialog opens on every page,
+with who, which items, the command and the folder, and **Allow once**,
+**Allow for 15 min** and **Deny**. The CLI says it is waiting. Unanswered in
+five minutes, or its caller gone, it is denied and nothing runs (exit 77).
+Allow for 15 minutes is per agent and per item, held in memory and gone with
+a restart; a caller that is no agent kururu knows is not offered it, since
+there is nothing to hold it to. The log says which: `owner`, `lasting` or
+`denied`.
+
+## Settings → Vault
+
+Above the census, **Kept in the vault**: every item by label and name, where
+its value lives, the env files it was written to, when it was saved and for
+whom, its last use, its rule with a button to change it, and Remove (which
+leaves an env file as it is). Then **Recent uses**, the last fifty lines of
+the log, with Clear. On a phone the page is for looking, as the census is.
+
 ## `list_secrets` and `vault list`
 
 Every item by name and label, its rule, the env files it was written to and

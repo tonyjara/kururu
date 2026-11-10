@@ -20,7 +20,8 @@
  * the tests drive a whole ask with a store in memory and a scratch home.
  */
 import { randomUUID } from "node:crypto";
-import { defaultUse, ASK_MS, type AskFieldView, type AskRequest, type EnvTarget, type FieldOutcome, type UseRule, type VaultAsk, type VaultItemView } from "../../shared/vaultitems";
+import { defaultUse, ASK_MS, type AskFieldView, type AskRequest, type EnvTarget, type FieldOutcome, type UseAnswer, type UseRule, type VaultAsk, type VaultItemView } from "../../shared/vaultitems";
+import type { Approval } from "./vaultrun";
 import { readConfigFile, writeConfigFile } from "./config";
 import type { SecretStore } from "./keychain";
 import { envPath, tildePath, writeEnvVariable } from "./vaultfile";
@@ -30,6 +31,10 @@ export const VAULT_FILE = "vault.json";
 const ENV_KEPT = 5;
 /** How long a finished ask's outcomes can still be asked for, by a caller whose wait ran out first. */
 const DONE_KEPT_MS = 30 * 60_000;
+/** How long a command waits for the owner to allow an item before it is refused. */
+export const USE_ASK_MS = 5 * 60_000;
+/** "Allow for 15 minutes": per agent, per item, in memory. */
+export const LASTING_MS = 15 * 60_000;
 
 interface ItemMeta {
   label: string;
@@ -61,6 +66,14 @@ export interface VaultDeps {
   log?: (line: string) => void;
   /** The home folder paths are said against, `~/…`. Default the process's. */
   home?: string;
+}
+
+interface OpenUse {
+  view: Extract<VaultAsk, { kind: "use" }>;
+  agentId: string | null;
+  names: string[];
+  timer: Timer;
+  resolve: (approval: Approval) => void;
 }
 
 interface OpenAsk {
@@ -99,6 +112,9 @@ export class Vault {
   private items: Map<string, ItemMeta>;
   private readonly open = new Map<string, OpenAsk>();
   private readonly finished = new Map<string, { at: number; outcomes: FieldOutcome[] }>();
+  private readonly openUses = new Map<string, OpenUse>();
+  /** `${agentId} ${name}` → until, from "Allow for 15 minutes". Gone with a restart, on purpose. */
+  private readonly lasting = new Map<string, number>();
   private readonly now: () => number;
   private readonly setTimer: (fn: () => void, ms: number) => Timer;
   private readonly clearTimer: (timer: Timer) => void;
@@ -126,9 +142,9 @@ export class Vault {
     (this.deps.log ?? ((l) => console.log(l)))(`kururu: vault: ${line}`);
   }
 
-  /** The open asks, as every page is sent them. */
+  /** The open asks, as every page is sent them: a command waiting first, since something is held up on it. */
   asks(): VaultAsk[] {
-    return [...this.open.values()].map((a) => a.view);
+    return [...[...this.openUses.values()].map((u) => u.view), ...[...this.open.values()].map((a) => a.view)];
   }
 
   private announce(): void {
@@ -270,6 +286,65 @@ export class Vault {
     this.log(`ask ${id} answered: ${outcomes.map((o) => `${o.name} ${o.outcome}`).join(", ")}`);
     open.resolve(outcomes);
     return outcomes;
+  }
+
+  /**
+   * Whether a command may use these items. `free` when none of them asks;
+   * `lasting` when every one that asks was allowed to this agent for fifteen
+   * minutes and still is; otherwise a dialog on every page, and the owner's
+   * answer — `denied` after five minutes unanswered or when the caller hangs
+   * up. `note` tells the caller it is waiting.
+   */
+  approve(
+    run: { by: string; agentId: string | null; items: VaultItemView[]; command: string; cwd: string },
+    note: (line: string) => void,
+    signal?: AbortSignal,
+  ): Promise<Approval> {
+    const asking = run.items.filter((i) => i.use === "ask");
+    if (!asking.length) return Promise.resolve("free");
+    const now = this.now();
+    for (const [key, until] of this.lasting) if (until <= now) this.lasting.delete(key);
+    if (run.agentId && asking.every((i) => this.lasting.has(`${run.agentId} ${i.name}`))) return Promise.resolve("lasting");
+    const id = randomUUID().slice(0, 8);
+    return new Promise<Approval>((resolve) => {
+      const view: OpenUse["view"] = {
+        kind: "use",
+        id,
+        from: run.by,
+        items: asking.map((i) => ({ name: i.name, label: i.label })),
+        command: run.command,
+        cwd: run.cwd,
+        lasting: run.agentId !== null,
+        until: now + USE_ASK_MS,
+      };
+      const timer = this.setTimer(() => this.endUse(id, "denied", "nobody answered in time"), USE_ASK_MS);
+      this.openUses.set(id, { view, agentId: run.agentId, names: asking.map((i) => i.name), timer, resolve });
+      note(`waiting for the owner to allow ${asking.map((i) => i.name).join(", ")} (up to ${USE_ASK_MS / 60_000} minutes)`);
+      this.log(`${run.by} asks to use ${view.items.map((i) => i.name).join(", ")} (${id})`);
+      signal?.addEventListener("abort", () => this.endUse(id, "denied", "the caller went away"), { once: true });
+      this.announce();
+    });
+  }
+
+  private endUse(id: string, approval: Approval, why: string): void {
+    const open = this.openUses.get(id);
+    if (!open) return;
+    this.openUses.delete(id);
+    this.clearTimer(open.timer);
+    this.log(`use ${id} ${approval}: ${why}`);
+    this.announce();
+    open.resolve(approval);
+  }
+
+  /** The owner's answer to a command waiting to use items. */
+  allow(id: string, answer: UseAnswer): void {
+    const open = this.openUses.get(id);
+    if (!open) throw new Error("That ask is closed: it was answered elsewhere, ran out of time, or its command was stopped.");
+    if (answer === "lasting" && open.agentId) {
+      const until = this.now() + LASTING_MS;
+      for (const name of open.names) this.lasting.set(`${open.agentId} ${name}`, until);
+    }
+    this.endUse(id, answer === "deny" ? "denied" : "owner", answer === "deny" ? "the owner pressed Deny" : answer === "lasting" ? "the owner allowed it for 15 minutes" : "the owner allowed it once");
   }
 
   /** The owner's switch, from Settings. */

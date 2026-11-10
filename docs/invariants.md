@@ -152,7 +152,9 @@ owner. A command uses one through `vault run` (`server/src/vaultrun.ts`):
 the server runs it, the value in its environment or given to sudo by an
 askpass ticket, its output masked (`shared/mask.ts`), every use a line in
 `vault-uses.jsonl`; no route hands a caller a value but the askpass's, for a
-ticket only that run's environment holds. → [vault](vault.md)
+ticket only that run's environment holds. An item set to ask waits for the
+owner's Allow on every page (`Vault.approve`); unanswered or its caller
+gone, it is denied and nothing runs. → [vault](vault.md)
 
 ## The usage bar
 

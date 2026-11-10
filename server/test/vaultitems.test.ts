@@ -253,3 +253,78 @@ describe("an ask, opened and answered", () => {
     expect(view.kind === "values" && view.fields[0]!.use).toBe("ask");
   });
 });
+
+describe("approval", () => {
+  let now: number;
+  let timers: (() => void)[];
+  let shown: VaultAsk[][];
+  let vault: Vault;
+  const item = (name: string, use: "free" | "ask") => ({ name, label: name, use, store: "keychain" as const, env: [], createdAt: 0, updatedAt: 0, by: "", lastUse: null });
+  const run = (agentId: string | null, ...items: ReturnType<typeof item>[]) => ({ by: agentId ? `PYL-14 (${agentId})` : "a shell", agentId, items, command: "bun run smoke", cwd: "~/p" });
+
+  beforeEach(() => {
+    now = 1_000_000;
+    timers = [];
+    shown = [];
+    vault = new Vault({
+      store: memoryStore(),
+      changed: (asks) => shown.push(asks),
+      load: () => null,
+      save: () => {},
+      log: () => {},
+      now: () => now,
+      setTimer: (fn) => timers.push(fn),
+      clearTimer: () => {},
+    });
+  });
+
+  it("lets a free item through without asking anybody", async () => {
+    expect(await vault.approve(run("a12", item("a/free", "free")), () => {})).toBe("free");
+    expect(shown).toEqual([]);
+  });
+
+  it("asks the owner for an item that asks, and only for that one", async () => {
+    const notes: string[] = [];
+    const answer = vault.approve(run("a12", item("a/free", "free"), item("a/prod", "ask")), (n) => notes.push(n));
+    const ask = shown.at(-1)![0]!;
+    expect(ask.kind).toBe("use");
+    if (ask.kind !== "use") return;
+    expect(ask.items.map((i) => i.name)).toEqual(["a/prod"]);
+    expect(ask.lasting).toBe(true);
+    expect(notes[0]).toContain("waiting for the owner");
+    vault.allow(ask.id, "once");
+    expect(await answer).toBe("owner");
+    expect(shown.at(-1)).toEqual([]);
+    // Once is once: the next use asks again.
+    void vault.approve(run("a12", item("a/prod", "ask")), () => {});
+    expect(shown.at(-1)!.length).toBe(1);
+  });
+
+  it("allows an agent for fifteen minutes, that agent only, then asks again", async () => {
+    const first = vault.approve(run("a12", item("a/prod", "ask")), () => {});
+    vault.allow(shown.at(-1)![0]!.id, "lasting");
+    expect(await first).toBe("owner");
+    expect(await vault.approve(run("a12", item("a/prod", "ask")), () => {})).toBe("lasting");
+    void vault.approve(run("a13", item("a/prod", "ask")), () => {});
+    expect(shown.at(-1)!.length).toBe(1);
+    now += 15 * 60_000 + 1;
+    const later = vault.approve(run("a12", item("a/prod", "ask")), () => {});
+    expect(shown.at(-1)!.length).toBe(2);
+    // The newest of the two: a13's is still open beside it.
+    vault.allow(shown.at(-1)!.at(-1)!.id, "deny");
+    expect(await later).toBe("denied");
+  });
+
+  it("offers no fifteen minutes to a caller that is not an agent, and denies when nobody answers or the caller goes", async () => {
+    const hangup = new AbortController();
+    const gone = vault.approve(run(null, item("a/prod", "ask")), () => {}, hangup.signal);
+    const ask = shown.at(-1)![0]!;
+    expect(ask.kind === "use" && ask.lasting).toBe(false);
+    hangup.abort();
+    expect(await gone).toBe("denied");
+    const slow = vault.approve(run("a12", item("a/prod", "ask")), () => {});
+    timers.at(-1)!();
+    expect(await slow).toBe("denied");
+    expect(() => vault.allow(ask.id, "once")).toThrow(/closed/);
+  });
+});
