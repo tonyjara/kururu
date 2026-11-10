@@ -6,7 +6,10 @@
  * alive, when it'll trigger next, how often", so a row says one thing on its
  * right — the next run, how long the live one has been going, or what went
  * wrong — and a dot for the state. Everything else is the tooltip or the
- * sheet. Times are drawn in the schedule's zone with the viewer's own beside
+ * sheet. That includes the description, which the owner asked for "so we
+ * know the purpose": a second line under every name would double the
+ * section's height for words that are read once, so the row's tooltip
+ * carries it under the name and the sheet opens with it. Times are drawn in the schedule's zone with the viewer's own beside
  * them when the two differ, because "09:00" without a zone is the mistake the
  * plan was written to avoid (T3 Code's #18632).
  *
@@ -22,6 +25,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   automationText,
+  DESCRIPTION_MAX,
   dotOf,
   durationText,
   durationWords,
@@ -94,7 +98,7 @@ function rowFact(a: AutomationView, now: number): string {
 }
 
 function rowTitle(a: AutomationView): string {
-  const lines = [a.name, a.words || a.error || ""];
+  const lines = [a.name, a.description ?? "", a.words || a.error || ""];
   if (a.workspaceName) lines.push(`In ${a.workspaceName}, on ${a.home}`);
   if (a.next !== null) lines.push(`Next: ${slotText(a.next, a.zone)}`);
   if (!a.enabled && a.whyOff) lines.push(`Off: ${a.whyOff}`);
@@ -223,6 +227,7 @@ export function AutomationsSection({
 
 interface Form {
   name: string;
+  description: string;
   workspaceId: string;
   schedule: string;
   run: AutomationTask;
@@ -247,6 +252,7 @@ function formOf(view: AutomationView | null, workspaceId: string, launcher: stri
     const d = parsed.def;
     return {
       name: d.name,
+      description: d.description ?? "",
       workspaceId: view?.workspaceId ?? workspaceId,
       schedule: d.schedule,
       run: d.run,
@@ -264,6 +270,7 @@ function formOf(view: AutomationView | null, workspaceId: string, launcher: stri
   }
   return {
     name: view?.name ?? "",
+    description: view?.description ?? "",
     workspaceId: view?.workspaceId ?? workspaceId,
     schedule: view?.schedule || BLANK_SCHEDULE,
     run: "agent",
@@ -282,7 +289,12 @@ function formOf(view: AutomationView | null, workspaceId: string, launcher: stri
 
 /** The form as the file it is — or, if it cannot be one yet, why not. */
 function textOf(form: Form): { text: string; error: string | null } {
-  const lines = [`name: ${form.name.trim()}`, `schedule: ${form.schedule.trim()}`, `run: ${form.run}`];
+  // The file keeps a description on one line, so a line break typed into
+  // the box is a space by the time it is a key.
+  const description = form.description.replace(/\s+/g, " ").trim();
+  const lines = [`name: ${form.name.trim()}`];
+  if (description) lines.push(`description: ${description}`);
+  lines.push(`schedule: ${form.schedule.trim()}`, `run: ${form.run}`);
   if (form.run !== "shell" && form.launcher) lines.push(`launcher: ${form.launcher}`);
   if (form.dir.trim()) lines.push(`dir: ${form.dir.trim()}`);
   if (form.needs.trim()) lines.push(`needs: ${form.needs.trim()}`);
@@ -405,6 +417,7 @@ export function AutomationSheet({
             <Icon name="close" />
           </button>
         </header>
+        {view?.description && <p className="auto-purpose">{view.description}</p>}
         <div className="auto-body">
           <div className="auto-form">
             {view && !view.clock && <p className="auto-note">This server's clock is off — an isolated instance — so nothing fires on schedule here. Run now still works.</p>}
@@ -412,6 +425,17 @@ export function AutomationSheet({
             <label className="auto-field">
               <span>Name</span>
               <input className="dialog-input" value={form.name} maxLength={80} onChange={(e) => set("name", e.target.value)} placeholder="Pasapy crawl review" />
+            </label>
+            <label className="auto-field">
+              <span>Description</span>
+              <textarea
+                className="dialog-input auto-desc-text"
+                value={form.description}
+                rows={2}
+                maxLength={DESCRIPTION_MAX}
+                onChange={(e) => set("description", e.target.value)}
+                placeholder="What it is for: every second Monday, reviews the last two weeks of crawls and reports what to fix."
+              />
             </label>
             <label className="auto-field">
               <span>Workspace</span>

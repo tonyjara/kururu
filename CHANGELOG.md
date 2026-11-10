@@ -49,7 +49,9 @@ shows, so it is written once and read in three places — see
   it is within the catch-up window; runs never stack; every skip and miss is
   in the history with its reason. A failure notifies you and tells Kuru.
   The agent is closed two minutes after its turn, and Open conversation
-  brings it back. See `docs/plans/automations.md`.
+  brings it back. Each can carry a description of what it is for, shown at
+  the top of its sheet and in its row's tooltip. See
+  `docs/plans/automations.md`.
 - **Claude Fable 5.2** in the + menu's models, beside Fable 5.1, which
   stays. Its tokens are priced on the Usage page at Anthropic's list price
   ($8 in, $40 out per million, less than 5.1).

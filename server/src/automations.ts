@@ -206,6 +206,7 @@ export class Automations {
         return {
           key: row.key,
           name,
+          description: parsed.ok ? parsed.def.description : null,
           workspaceId: workspace?.id ?? null,
           workspaceName: workspace?.name ?? null,
           home: row.home,

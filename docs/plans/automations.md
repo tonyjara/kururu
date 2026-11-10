@@ -177,6 +177,7 @@ dependency. The body is the prompt, the command, or the card's body.
 ```markdown
 ---
 name: Pasapy crawl review
+description: Every second Monday, reviews the last two weeks of Pasapy's crawls with /crawl-maintenance: finds broken or silent sources and extraction bugs, and reports what to fix.
 schedule: every 2 weeks on mon at 09:00 America/Asuncion from 2026-11-23
 run: agent
 launcher: claude:claude-opus-5-5
@@ -192,6 +193,7 @@ tell: always
 | key | what | default |
 |---|---|---|
 | `name` | what every screen and Kuru call it | required |
+| `description` | what it is for, a sentence or two on one line (at most 400 characters); the row's tooltip and the top of the sheet | none |
 | `schedule` | one line, below | required |
 | `run` | `agent`, `shell` or `card` | `agent` |
 | `launcher` | an id from `LAUNCHERS` (`shared/launchers.ts`) | required for `agent` and `card` |
@@ -642,7 +644,7 @@ what the Dashboard is for.
 - **History:** one row per slot, newest first: when it was for and when it
   started, the result, the length, the cost, the report, Open
   conversation. Skipped and missed rows are grey and say why.
-- **Edit** is a form (name, schedule with the next five updating as you
+- **Edit** is a form (name, description, schedule with the next five updating as you
   type, task, launcher, folder, limits, tell, needs) with **Edit as text**
   showing the file. The form writes the same text the file holds.
 - **Move to…** lists this Mac, each node and each machine, and for each
@@ -661,7 +663,7 @@ first one needs them. The role's **Automations** section and
 | tool | what it does |
 |---|---|
 | `automations` | the list: each with its home, schedule in words, next run, last result. With `automation`, one with its last ten runs; with `run`, that run's words and report |
-| `set_automation` | create, or edit by name or key. Says what took effect and what is waiting for the user's press, and shows the next five runs |
+| `set_automation` | create, or edit by name or key, with its description among the fields. Says what took effect and what is waiting for the user's press, and shows the next five runs |
 | `run_automation` | run now. Returns the agent, so `wait_agent` and `read_agent` work on it |
 | `pause_automation` | off or on, with a reason that the row shows |
 | `move_automation` | to this node, another node or a machine. Previews first what the target lacks and what would be installed, as `lend_secrets` previews |
@@ -824,6 +826,13 @@ in an isolated instance (`docs/testing.md`). Where the code went its own way:
   terminal when there is one; there is no automation event in
   `NotifySettings` yet.
 - **Home** is `nodes.name()`, which is `mac` on this Mac.
+- **A description** (added the same day, after the owner's "I would love to
+  have a description there so we know the purpose of the automation") is
+  a key in the file like the others, so the database keeps it inside the
+  approved text, with no column of its own, and it travels with the file.
+  The sidebar row's tooltip carries it under the name rather than a second
+  line on every row; the sheet opens with it. Kuru's `set_automation` and a
+  CLI are phase 3's, and take it as a field when they come.
 - `/api/health` and `bun run status` are phase 2's, as listed there.
 
 ### Phase 2: the detail, the results, the limits

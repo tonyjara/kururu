@@ -2223,6 +2223,20 @@ a.machine-name:hover {
   resize: vertical;
   min-height: 48px;
 }
+/* What it is for, under the sheet's head and above the form and the
+   history both, since it is about the whole automation. */
+.auto-purpose {
+  flex: none;
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--dim);
+  border-bottom: var(--border) solid var(--line);
+  overflow-wrap: anywhere;
+}
+.auto-desc-text {
+  resize: vertical;
+  min-height: 40px;
+}
 .auto-row2 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

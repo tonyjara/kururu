@@ -43,6 +43,12 @@ export function isLiveRun(state: RunState): boolean {
 /** An automation's definition, as the file says it. */
 export interface AutomationDef {
   name: string;
+  /**
+   * What it is for, in a sentence or two of plain text: the purpose a name
+   * cannot carry, for whoever finds it in the sidebar months later. One line
+   * in the file, like every key. Null when it has none.
+   */
+  description: string | null;
   /** The schedule line as written; `parsed` is it read. */
   schedule: string;
   parsed: Schedule;
@@ -75,6 +81,8 @@ export const END_AFTER_MS = 2 * 60_000;
 /** The most a definition may hold, whole. */
 export const TEXT_MAX = 40_000;
 export const NAME_MAX = 80;
+/** A sentence or two; past this it is a prompt, and belongs in the body. */
+export const DESCRIPTION_MAX = 400;
 
 // ---------------------------------------------------------------------------
 // Durations and the file
@@ -126,7 +134,7 @@ export function validDir(dir: string): boolean {
 
 export type ParsedAutomation = { ok: true; def: AutomationDef } | { ok: false; error: string };
 
-const KEYS = new Set(["name", "schedule", "run", "launcher", "dir", "needs", "timeout", "max-usd", "month-usd", "catch-up", "tell", "permissions"]);
+const KEYS = new Set(["name", "description", "schedule", "run", "launcher", "dir", "needs", "timeout", "max-usd", "month-usd", "catch-up", "tell", "permissions"]);
 
 /**
  * The file, read. Refuses rather than guesses: an unknown key, a schedule
@@ -156,6 +164,12 @@ export function parseAutomation(text: string): ParsedAutomation {
   if (!name) return fail("it needs a name");
   if (name.length > NAME_MAX) return fail(`a name is at most ${NAME_MAX} characters`);
   if (/[\u0000-\u001f]/.test(name)) return fail("a name is one line of plain text");
+
+  const description = fields.get("description") || null;
+  if (description !== null) {
+    if (description.length > DESCRIPTION_MAX) return fail(`a description is at most ${DESCRIPTION_MAX} characters: a sentence or two`);
+    if (/[\u0000-\u001f]/.test(description)) return fail("a description is one line of plain text");
+  }
 
   const scheduleText = (fields.get("schedule") ?? "").replace(/\s+/g, " ");
   if (!scheduleText) return fail("it needs a schedule");
@@ -220,6 +234,7 @@ export function parseAutomation(text: string): ParsedAutomation {
     ok: true,
     def: {
       name,
+      description,
       schedule: scheduleText,
       parsed: parsed.schedule,
       run,
@@ -246,7 +261,9 @@ export type AutomationFields = Omit<AutomationDef, "parsed">;
  * the form or from a file.
  */
 export function automationText(def: AutomationFields): string {
-  const lines = [`name: ${def.name}`, `schedule: ${def.schedule}`, `run: ${def.run}`];
+  const lines = [`name: ${def.name}`];
+  if (def.description) lines.push(`description: ${def.description}`);
+  lines.push(`schedule: ${def.schedule}`, `run: ${def.run}`);
   if (def.launcher) lines.push(`launcher: ${def.launcher}`);
   if (def.dir) lines.push(`dir: ${def.dir}`);
   if (def.needs.length) lines.push(`needs: ${def.needs.join(", ")}`);
@@ -398,6 +415,8 @@ export interface RunView {
 export interface AutomationView {
   key: string;
   name: string;
+  /** What it is for, from the definition. Null when it has none, or the text no longer parses. */
+  description: string | null;
   workspaceId: string | null;
   workspaceName: string | null;
   /** The node it lives on. Always this one until automations can move. */

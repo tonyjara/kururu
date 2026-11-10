@@ -66,6 +66,19 @@ describe("the file", () => {
     expect(catchUpFor(def("---\nname: x\nschedule: every 5 minutes UTC\nrun: shell\n---\ntrue\n"))).toBe(0);
   });
 
+  it("keeps a description on its own line, after the name, and reads it back", () => {
+    const purpose = "Every second Monday, reviews the last two weeks of Pasapy's crawls with /crawl-maintenance: finds broken or silent sources and extraction bugs, and reports what to fix.";
+    const text = PASAPY.replace("schedule:", `description: ${purpose}\nschedule:`);
+    const d = def(text);
+    expect(d.description).toBe(purpose);
+    expect(automationText(d)).toBe(text);
+    expect(def(automationText(d))).toEqual(d);
+    // Written where the form or a file put it, it comes back in the one place.
+    expect(automationText(def(PASAPY.replace("tell: always", `tell: always\ndescription: ${purpose}`)))).toBe(text);
+    expect(def(PASAPY).description).toBeNull();
+    expect(def(PASAPY.replace("schedule:", "description:\nschedule:")).description).toBeNull();
+  });
+
   it("refuses in words rather than running a typo as something else", () => {
     const why = (text: string) => {
       const parsed = parseAutomation(text);
@@ -84,6 +97,8 @@ describe("the file", () => {
     expect(why(base("run: shell\ntell: sometimes"))).toContain("tell is");
     expect(why(base("run: shell", ""))).toContain("command");
     expect(why(base("run: shell\nrun: agent"))).toContain("twice");
+    expect(why(base(`run: shell\ndescription: ${"a".repeat(401)}`))).toContain("at most 400");
+    expect(why(base("run: shell\ndescription: one\tline"))).toContain("one line");
     expect(why("---\nname: x\nschedule: every 1 minutes UTC\nrun: shell\n---\ntrue\n")).toContain("schedule:");
   });
 });

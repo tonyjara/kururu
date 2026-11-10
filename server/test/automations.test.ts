@@ -83,6 +83,7 @@ describe("the clock", () => {
     clock.save("pk", "wk", null, SHELL);
     const view = clock.view("pk")[0]!;
     expect(new Date(view.next!).toISOString()).toBe("2026-11-10T12:05:00.000Z");
+    expect(view.description).toBeNull();
 
     w.clock.now = view.next! - 1;
     await clock.tick();
@@ -277,6 +278,24 @@ describe("the clock", () => {
     expect(clock.view("pk")[0]!.next).toBeNull();
     clock.setEnabled("pk", key, true, null);
     expect(new Date(clock.view("pk")[0]!.next!).toISOString()).toBe("2026-11-23T09:00:00.000Z");
+    store.close();
+  });
+
+  it("takes a description on an edit without moving the schedule or starting anything, and shows it", async () => {
+    const w = world(Date.parse("2026-11-10T12:00:00Z"));
+    const store = Store.open(path);
+    const clock = new Automations(w.deps(store));
+    const line = "---\nname: Fortnight\nschedule: every 2 weeks on mon at 09:00 UTC\nrun: shell\n---\ntrue\n";
+    const { key } = clock.save("pk", "wk", null, line);
+    const before = clock.view("pk")[0]!;
+    clock.save("pk", "wk", key, line.replace("schedule:", "description: Checks the disk every other Monday.\nschedule:"));
+    await clock.tick();
+    const after = clock.view("pk")[0]!;
+    expect(after.description).toBe("Checks the disk every other Monday.");
+    expect([after.anchor, after.next, after.enabled]).toEqual([before.anchor, before.next, true]);
+    expect(store.automations()[0]!.text).toContain("\ndescription: Checks the disk every other Monday.\n");
+    expect(w.opened).toHaveLength(0);
+    expect(store.automationRuns(key)).toHaveLength(0);
     store.close();
   });
 });
