@@ -134,6 +134,22 @@ nothing read that kururu would not read anyway, built when the page asks
 and never broadcast; `server/test/vaultview.test.ts` fails on a value that
 comes out. → [nodes](nodes.md#the-vault-page)
 
+## The vault's items
+
+**A vault value goes from the owner's field to the store and its env file,
+and never through a model.** Kuru's `ask_secret` and an agent's `vault ask`
+open a dialog on every page of this server; the value travels once, in
+`vault-answer`, to `Vault.answer` (`server/src/vaultstore.ts`), into the
+Keychain through `security -i` on stdin (`server/src/keychain.ts`) and, when
+the field says so, one variable of an env file under home
+(`server/src/vaultfile.ts`: resolve, check, realpath, check again, refuse;
+backed up first; `0600`). The caller hears a word per field. Nothing logs,
+broadcasts or returns a value; `vault.json` holds names and rules only, is
+never lent and is off the backup; `server/test/vaultitems.test.ts` greps
+everything that leaves for the values. The limit is stated, not hidden: an
+item made by `/usr/bin/security` is readable by any process running as the
+owner. → [vault](vault.md)
+
 ## The usage bar
 
 **The usage bar reads a Claude credential and never writes one** — the

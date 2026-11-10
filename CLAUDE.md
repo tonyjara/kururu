@@ -199,6 +199,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **Settings → Vault names the vault and never shows a value**;
   `server/test/vaultview.test.ts` fails on a value that comes out. →
   [more](docs/invariants.md#the-vault-page)
+- **A vault value goes from the owner's field to the Keychain and its env
+  file, never through a model** — `ask_secret` / `vault ask` open a dialog on
+  every page, the caller hears a word per field; an item is still readable by
+  any process running as the owner, and the docs say so. →
+  [vault](docs/vault.md)
 - **The usage bar reads a Claude credential and never writes one** — read at the
   fetch, never held, logged or refreshed; `server/src/usage.ts` is the only file
   that has seen it. → [more](docs/invariants.md#the-usage-bar)

@@ -113,7 +113,7 @@ function keys(deps: VaultDeps): VaultKey[] {
     const at = changed(file);
     // A record nobody has made yet is not a key that is missing.
     if (at === null) continue;
-    out.push({ id: file, label: NEVER_LABELS[file] ?? file, set: true, hint: null, where: where(file), changed: at, page: file === "access.json" ? null : "nodes", kind: null, never: why, heldFrom: null });
+    out.push({ id: file, label: NEVER_LABELS[file] ?? file, set: true, hint: null, where: where(file), changed: at, page: file === "access.json" || file === "vault.json" ? null : "nodes", kind: null, never: why, heldFrom: null });
   }
   return out;
 }

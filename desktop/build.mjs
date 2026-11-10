@@ -122,6 +122,9 @@ await bundle("server/src/agy-report-cli.ts", "dist/agyreport.mjs");
 // `slot`, the agents' door into the slot queue. Beside the server so `slots.ts`
 // can point `~/.local/state/kururu/bin/slot` at it, for the reason above.
 await bundle("server/src/slot-cli.ts", "dist/slot.mjs");
+// `vault`, the agents' door into the vault. Beside the server so `vaultbin.ts`
+// can point `~/.local/state/kururu/bin/vault` at it, for the reason above.
+await bundle("server/src/vault-cli.ts", "dist/vault.mjs");
 // Kokoro, which the server starts as a process of its own rather than loading:
 // see `server/src/kokoro.ts`. Beside the server because that is where
 // `voice.ts` looks, and inside `dist` so the app ships it with no new rule.

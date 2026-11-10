@@ -15,6 +15,14 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Paste keys into a dialog, not a chat.** When Kuru or an agent needs a
+  key, it opens a dialog on your screen — the window and the phone alike —
+  with a masked field per key and where each one goes: the Mac's Keychain,
+  and, when a program reads its settings from an env file, that one variable
+  in that file (backed up first, nothing else touched, kept private). You
+  paste and press Save; the agent is told "saved" and never sees the value.
+  Agents ask with `vault ask`, Kuru with `ask_secret`; `vault list` and
+  `list_secrets` name what is kept. See `docs/vault.md`.
 - **Claude Fable 5.2** in the + menu's models, beside Fable 5.1, which
   stays. Its tokens are priced on the Usage page at Anthropic's list price
   ($8 in, $40 out per million, less than 5.1).

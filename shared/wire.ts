@@ -57,6 +57,7 @@ import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
 import type { TerminalAppearance } from "./theme";
 import type { BarSettings } from "./statusbar";
+import type { UseAnswer, UseRule, VaultAsk } from "./vaultitems";
 
 /**
  * How to reach this server from a device that is not this machine — the answer
@@ -493,6 +494,14 @@ export type ServerMessage =
    * `shared/secrets.ts`.
    */
   | { type: "secrets"; secrets: SecretsView }
+  /**
+   * The vault's open asks: a dialog for the owner to paste values into, or a
+   * command waiting for them to allow an item. Every page of this node's is
+   * sent them, on connect and whenever one opens or closes, and draws them
+   * over everything; another node's watcher never is. No value is ever in
+   * one. See `shared/vaultitems.ts` and `docs/plans/vault-secrets.md`.
+   */
+  | { type: "vault-asks"; asks: VaultAsk[] }
   /**
    * Sent on connect and whenever the scan finds the list changed: every
    * database every workspace's env files name, with the password left out.
@@ -1610,6 +1619,23 @@ export type ClientMessage =
    */
   | { type: "set-openrouter-key"; id: number; key: string }
   | { type: "clear-openrouter-key" }
+  /**
+   * The owner's answer to a vault dialog: the values by field id, or null
+   * for Cancel, and the use rule they left each switch at. The only message
+   * that carries a vault value, and the server neither logs nor echoes it;
+   * replied to with the outcome per field. See `server/src/vaultstore.ts`.
+   */
+  | { type: "vault-answer"; id: number; ask: string; values: Record<string, string> | null; uses?: Record<string, UseRule> }
+  /** The owner's answer to a command waiting to use an item. Replied to with nothing. */
+  | { type: "vault-allow"; id: number; ask: string; answer: UseAnswer }
+  /** Settings → Vault: the items, their rules, recent uses. Replied to with a `VaultPage` (`shared/vaultitems.ts`). */
+  | { type: "vault-page"; id: number }
+  /** An item's rule, from its switch. Replied to with the page. */
+  | { type: "vault-set-use"; id: number; name: string; use: UseRule }
+  /** An item and its value gone. Replied to with the page. */
+  | { type: "vault-remove"; id: number; name: string }
+  /** The use log emptied. Replied to with the page. */
+  | { type: "vault-clear-uses"; id: number }
   /** The chain's order (provider ids, first first) and its page limit, either. Replied to with the status. */
   | { type: "set-web"; id: number; order?: string[]; pageLimit?: number }
   /**

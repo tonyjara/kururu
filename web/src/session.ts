@@ -60,6 +60,7 @@ import type { NodesView } from "../../shared/nodes";
 import type { MoveCheck, MoveDone, MovePlan, NewWorkspaceMade } from "../../shared/move";
 import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import type { VaultView } from "../../shared/vaultview";
+import type { FieldOutcome, UseAnswer, UseRule, VaultAsk, VaultPage } from "../../shared/vaultitems";
 import type { TerminalAppearance } from "../../shared/theme";
 import type { BarSettings } from "../../shared/statusbar";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
@@ -117,6 +118,8 @@ export interface KururuState {
   openrouter: OpenRouterStatus | null;
   /** The slot queue and the Mac's load, or null until the server has said. See `shared/slots.ts`. */
   slots: SlotsView | null;
+  /** The vault's open asks, drawn over everything by `VaultAsk.tsx`. Never a value. See `shared/vaultitems.ts`. */
+  vaultAsks: VaultAsk[];
   /** The web for the agents — its providers in order — or null until the server has said. Never a key. See `shared/web.ts`. */
   web: WebStatus | null;
   /** Where the backups stand, or null until the server has said. See `shared/backup.ts`. */
@@ -166,6 +169,7 @@ let state: KururuState = {
   secrets: EMPTY_SECRETS,
   openrouter: null,
   slots: null,
+  vaultAsks: [],
   web: null,
   backup: null,
   databases: [],
@@ -385,6 +389,9 @@ function connect(): void {
         break;
       case "slots":
         set({ slots: msg.slots });
+        break;
+      case "vault-asks":
+        set({ vaultAsks: Array.isArray(msg.asks) ? msg.asks : [] });
         break;
       case "web":
         set({ web: msg.web });
@@ -1319,6 +1326,37 @@ export interface MoveResult {
  */
 export function moveWorkspaceTo(workspaceId: string, nodeId: string, folder: string, lend?: LendAsk): Promise<MoveResult> {
   return request((id) => ({ type: "node-move", id, workspaceId, nodeId, folder, ...(lend ? { lend } : {}) })) as Promise<MoveResult>;
+}
+
+/**
+ * The owner's answer to a vault dialog: the values by field id, straight from
+ * the fields to the socket, or null for Cancel. Nothing here keeps them —
+ * not the draft store, not a log — and the reply is a word per field.
+ */
+export function answerVault(ask: string, values: Record<string, string> | null, uses: Record<string, UseRule>): Promise<FieldOutcome[]> {
+  return request((id) => ({ type: "vault-answer", id, ask, values, uses })) as Promise<FieldOutcome[]>;
+}
+
+/** The owner's answer to a command waiting to use a vault item. */
+export function allowVault(ask: string, answer: UseAnswer): Promise<unknown> {
+  return request((id) => ({ type: "vault-allow", id, ask, answer }));
+}
+
+/** Settings → Vault's own sections: the items kept, their rules, recent uses. */
+export function vaultPage(): Promise<VaultPage> {
+  return request((id) => ({ type: "vault-page", id })) as Promise<VaultPage>;
+}
+
+export function setVaultUse(name: string, use: UseRule): Promise<VaultPage> {
+  return request((id) => ({ type: "vault-set-use", id, name, use })) as Promise<VaultPage>;
+}
+
+export function removeVaultItem(name: string): Promise<VaultPage> {
+  return request((id) => ({ type: "vault-remove", id, name })) as Promise<VaultPage>;
+}
+
+export function clearVaultUses(): Promise<VaultPage> {
+  return request((id) => ({ type: "vault-clear-uses", id })) as Promise<VaultPage>;
 }
 
 /** Settings → Vault: everything this kururu can see and lend, by name and hint. Never a value. */

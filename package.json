@@ -28,6 +28,7 @@
     "backup": "bun server/src/backup-cli.ts",
     "share": "bun server/src/share-cli.ts",
     "slot": "bun server/src/slot-cli.ts",
+    "vault": "bun server/src/vault-cli.ts",
     "restore": "bun server/src/restore-cli.ts",
     "dist": "bun run build && electron-builder --projectDir desktop --mac",
     "dist:unsigned": "bun run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --projectDir desktop --mac",

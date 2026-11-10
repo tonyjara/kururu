@@ -289,6 +289,7 @@ export const NEVER_SHARED: readonly { file: string; why: string }[] = [
   { file: "nodes.json", why: "the roster, and on the parent each child's share token" },
   { file: GRANTS_FILE, why: "which node holds what: node ids that mean nothing after a new pairing" },
   { file: HELD_FILE, why: "what this child holds from the parent, by hint" },
+  { file: "vault.json", why: "the vault's own items, by name and rule, never a value: each value is in this machine's Keychain and is not lent" },
 ];
 
 /**

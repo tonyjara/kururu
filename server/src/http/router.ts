@@ -16,6 +16,7 @@ import { voiceRoutes } from "./voice";
 import { mascotRoutes } from "./mascot";
 import { fileRoutes } from "./files";
 import { slotRoutes } from "./slots";
+import { vaultRoutes } from "./vault";
 import { markRead, markRoutes } from "./marks";
 
 export async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -146,7 +147,7 @@ export interface Route {
  * it is refused here, loudly, before anything is served.
  */
 const ROUTES = new Map<string, Route>();
-for (const route of [...serverRoutes, ...agentRoutes, ...mcpRoutes, ...nodeRoutes, ...kuruRoutes, ...voiceRoutes, ...mascotRoutes, ...fileRoutes, ...slotRoutes, ...markRoutes]) {
+for (const route of [...serverRoutes, ...agentRoutes, ...mcpRoutes, ...nodeRoutes, ...kuruRoutes, ...voiceRoutes, ...mascotRoutes, ...fileRoutes, ...slotRoutes, ...vaultRoutes, ...markRoutes]) {
   if (ROUTES.has(route.path)) throw new Error(`two routes for ${route.path}`);
   ROUTES.set(route.path, route);
 }

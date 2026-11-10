@@ -4337,6 +4337,78 @@ html.pill-page #root {
   margin: 0 0 10px;
   font-size: var(--fs-base);
 }
+/* The vault's dialog (`VaultAsk.tsx`). Above every other dialog, since an
+   ask arrives on its own and may land while one of those is open; and the
+   scrim does not dismiss it, so it says nothing of its own here. */
+.vault-scrim {
+  z-index: 55;
+}
+.vault-dialog {
+  width: min(480px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.vault-field {
+  margin: 12px 0 0;
+}
+.vault-label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+.vault-row {
+  display: flex;
+  gap: 6px;
+}
+.vault-input {
+  flex: 1;
+  min-width: 0;
+}
+.vault-show {
+  flex: none;
+  padding: 4px 10px;
+}
+.vault-where,
+.vault-note {
+  margin: 4px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.vault-note {
+  margin-top: 12px;
+}
+.vault-use {
+  display: block;
+  margin: 4px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.vault-outcomes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: var(--fs-base);
+}
+.vault-failed {
+  color: var(--danger);
+}
+.vault-command {
+  margin: 8px 0 0;
+  padding: 8px;
+  background: var(--bg);
+  border: var(--border) solid var(--line);
+  border-radius: var(--radius-lg);
+  font: var(--fs-sm) var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.vault-use-actions {
+  flex-wrap: wrap;
+}
+
 .dialog-move-head {
   margin: 10px 0 4px;
   font-size: var(--fs-base);

@@ -63,6 +63,7 @@ import { StatusBar, WorkspaceToggle } from "./components/StatusBar";
 import { DrawerChips } from "./components/DrawerChips";
 import { VoicePill } from "./components/VoicePill";
 import { ReloadNotice } from "./components/ReloadNotice";
+import { VaultAsks } from "./components/VaultAsk";
 import { KuruDrawer } from "./components/KuruDrawer";
 import { closeKuru, kuruLive, leaveKuruSearch, openKuru, quoteInKuru, referCardIn, searchInKuru, toggleKuru, useKuruDrawer } from "./kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
@@ -1536,6 +1537,10 @@ export function App() {
 
       {/* Who reloaded the window and why, when an agent did. See `ReloadNotice.tsx`. */}
       <ReloadNotice />
+
+      {/* The vault's dialog: secrets asked for by Kuru or an agent, pasted
+          here instead of into a chat, on every page at once. See `VaultAsk.tsx`. */}
+      <VaultAsks />
 
       {/* The conversation with Kuru, over the panes on a desktop and the whole
           screen on a phone. Not dimmed behind, because you read Kuru's answer

@@ -61,6 +61,7 @@ import {
   sendState,
   sleeper,
   slots,
+  vault,
   snapshot,
   snapshots,
   state,
@@ -107,6 +108,9 @@ import { databasesOfWorkspace, workspaceDirs } from "./repostatus";
 import { Secrets } from "./secrets";
 import { Sleeper } from "./sleep";
 import { Slots, writeSlotCommand } from "./slots";
+import { machineStore } from "./keychain";
+import { Vault } from "./vaultstore";
+import { writeVaultCommand } from "./vaultbin";
 import { specsSnapshot } from "./specs";
 import { dataDir, dbPath, Store } from "./store";
 import { pollAccountUsage, pollOpenRouterAccount, pollServers, stopSweeps, wakeProcesses, web } from "./sweeps";
@@ -336,6 +340,7 @@ function admitClient(ws: WebSocket, watcher: string | null, deltas: boolean): vo
   send(ws, { type: "secrets", secrets: secrets.view() });
   send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
   send(ws, { type: "slots", slots: slots.view() });
+  send(ws, { type: "vault-asks", asks: vault.asks() });
   send(ws, { type: "web", web: web.status() });
   send(ws, { type: "voice", voice: voice.status() });
   send(ws, voice.hush());
@@ -576,6 +581,12 @@ export async function attach(port: Port): Promise<void> {
     moveWorkspace: (profileId, workspaceId, nodeId, folder) => mover.move(profileId, workspaceId, nodeId, folder, "harness"),
     lendOffer: (profileId, workspaceId, nodeId, folder) => lendOffer(profileId, workspaceId, nodeId, folder),
     lendSecrets: (profileId, workspaceId, nodeId, folder, ask) => lendSecrets(profileId, workspaceId, nodeId, folder, ask),
+    // Through the binding, which is filled in a little further down.
+    vault: {
+      ask: (req, from) => vault.ask(req, from),
+      wait: (id) => vault.wait(id),
+      list: () => vault.list(),
+    },
     kept: queueKeep,
   }));
   // The reports a remote agent's hooks cannot send, read off its screen.
@@ -628,6 +639,12 @@ export async function attach(port: Port): Promise<void> {
   }));
   writeSlotCommand();
   slots.start();
+  provide("vault", new Vault({
+    // The login Keychain on a Mac; 0600 files on a node with none. See `keychain.ts`.
+    store: machineStore("kururu-vault", join(configDir(), "vault")),
+    changed: (asks) => broadcast({ type: "vault-asks", asks }),
+  }));
+  writeVaultCommand();
   provide("voice", new Voice({
     broadcast,
     index: { load: () => store.loadMissed(), save: (list) => store.saveMissed(list) },

@@ -461,6 +461,45 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     ),
   },
   {
+    name: "ask_secret",
+    description:
+      `Ask the user to paste secrets — API keys, passwords, tokens — into a dialog on their screen (the Kururu window and the phone alike), instead of into this conversation. Each field's value goes straight to the Mac's Keychain as a vault item, and, when the field has env, into that one variable of an env file under their home folder (backed up first, only that variable replaced, kept 0600). You are told saved, skipped, cancelled or failed per field, and never a value: never ask the user to type a secret to you, and never read one back from the Keychain or an env file. Name items lower-case in up to four /-separated parts, project first: pylink/bancard-staging-private. Use one dialog for keys that belong together. Waits for the answer up to timeout_s (default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S}); if the user has not answered by then it returns the ask's id, and calling again with ask=<id> waits again (the dialog stays up for 15 minutes). Agents ask for themselves with \`vault ask\` and run a command with an item in its environment with \`vault run --secret NAME=VAR -- command\` (\`vault --help\`), from ~/.local/state/kururu/bin/vault.`,
+    inputSchema: obj(
+      {
+        title: str("What is being asked for, as the dialog's heading: \"Bancard staging keys for Pylink\"."),
+        reason: str("One or two sentences on why, for the user: what will use them."),
+        fields: {
+          type: "array",
+          description: "One per value, in the order the user should see them. At most 8.",
+          items: obj(
+            {
+              label: str("What the user sees beside the field: \"Private key\"."),
+              name: str("The vault item's name: pylink/bancard-staging-private."),
+              env: obj(
+                {
+                  file: str("The env file, ~/… under the home folder: ~/.config/pylink-local/env. Not under ~/.ssh, ~/.gnupg, ~/Library or kururu's own folders."),
+                  variable: str("The variable to set in it: BANCARD_PRIVATE_KEY."),
+                },
+                ["file", "variable"],
+              ),
+              use: { type: "string", enum: ["ask", "free"], description: "ask: the user approves each use by a command. Default: ask for a sudo password or a production key, free otherwise; the user can change it in the dialog." },
+            },
+            ["label", "name"],
+          ),
+        },
+        ask: str("The id of an ask still open from an earlier call, to wait for it again instead of opening a new one. With it, nothing else is needed."),
+        timeout_s: int(`How long to wait for the answer, in seconds. Default ${WAIT_DEFAULT_S}.`),
+      },
+      [],
+    ),
+  },
+  {
+    name: "list_secrets",
+    description:
+      "The vault's items on this Mac: each by name and label, whether using it is free or asks the user each time, the env files it was last written to, and when it was last used and by whom. Never a value. Use it to find the name to give `vault run`, or to see whether a key was saved already before asking the user again.",
+    inputSchema: obj({}),
+  },
+  {
     name: "search",
     description:
       "Full-text search over every card in this profile (titles and bodies, deleted ones included) and over the conversation history: what the user typed or said to you and what you answered, in every session, plus what each agent said when it finished a turn. Use it for \"when did we decide X\" and \"find the card about Y\" before asking the user. Accents are ignored; the last word matches as a prefix. Each hit says what it is, where, and the matching line, and a line the user pinned in the drawer says (pinned). scope=pinned lists the pinned lines, newest first, with or without words — for \"what did I pin\".",

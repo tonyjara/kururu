@@ -143,6 +143,7 @@ export const NEVER_LABELS: Readonly<Record<string, string>> = {
   "nodes.json": "The roster",
   "grants.json": "What each node was lent",
   "secrets-held.json": "What this node holds",
+  "vault.json": "The vault's list of items",
 };
 
 // ---------------------------------------------------------------------------

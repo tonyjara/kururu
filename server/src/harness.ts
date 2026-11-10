@@ -50,6 +50,7 @@ import { Terminal } from "@xterm/headless";
 
 import { addCard, boardLanes, cardCode, editCard, mintCardId, moveCard, NEEDS_COLUMN, runLive, type Board, type Card } from "../../shared/board";
 import { CHANNEL_NAMES, isChannelKind } from "../../shared/channels";
+import { adoptAskRequest, itemLine, outcomeLines, type AskRequest, type FieldOutcome, type VaultItemView } from "../../shared/vaultitems";
 import {
   HARNESS_NAME,
   HARNESS_SERVER,
@@ -302,6 +303,12 @@ export interface HarnessDeps {
   /** `lend_secrets`: what a workspace could lend a node, by hint, and lending it. See `secrets.ts`. */
   lendOffer?: (profileId: string, workspaceId: string, nodeId: string, folder: string | null) => Promise<Lendable>;
   lendSecrets?: (profileId: string, workspaceId: string, nodeId: string, folder: string | null, ask: LendAsk) => Promise<{ lent: string[]; to: string | null }>;
+  /** `ask_secret` and `list_secrets`: the vault's dialog and its items, never a value. See `vaultstore.ts`. */
+  vault?: {
+    ask: (req: AskRequest, from: string) => { id: string; done: Promise<FieldOutcome[]> };
+    wait: (id: string) => Promise<FieldOutcome[]> | null;
+    list: () => VaultItemView[];
+  };
 }
 
 type WaitState = "done" | "blocked" | "exited";
@@ -1440,6 +1447,44 @@ export class Harness {
       const { lent, to } = await this.deps.lendSecrets(profileId, workspaceId, node.id, folder, ask);
       const where = to ? ` Env files go into ${to} there.` : "";
       return ok(`Lent ${node.name} ${lent.join(", ")}: sealed to it and sent now, or when it next links.${where} Settings → Nodes on this Mac shows when it holds each, and takes each back.`);
+    },
+
+    ask_secret: async ({ args }) => {
+      const vault = this.deps.vault;
+      if (!vault) return fail("This kururu has no vault.");
+      const seconds = Math.min(WAIT_MAX_S, Math.max(1, int(args.timeout_s) ?? WAIT_DEFAULT_S));
+      let id = str(args.ask);
+      let labels = new Map<string, string>();
+      let done: Promise<FieldOutcome[]> | null;
+      if (id) {
+        done = vault.wait(id);
+        if (!done) return fail(`No ask ${id}: it ended more than half an hour ago, or the server restarted. Ask again.`);
+      } else {
+        const req = adoptAskRequest(args);
+        if ("error" in req) return fail(req.error);
+        try {
+          const opened = vault.ask(req, "Kuru");
+          id = opened.id;
+          done = opened.done;
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err));
+        }
+        labels = new Map(req.fields.map((f, i) => [String(i), f.label]));
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), seconds * 1000);
+      });
+      const outcomes = await Promise.race([done, timedOut]);
+      clearTimeout(timer);
+      if (!outcomes) return ok(`The dialog is up on the user's screen and not answered yet (ask ${id}). Call ask_secret with ask=${id} to keep waiting, or tell the user it is there.`);
+      return ok(outcomeLines(outcomes, labels));
+    },
+
+    list_secrets: () => {
+      const items = this.deps.vault?.list() ?? [];
+      if (!items.length) return ok("The vault keeps nothing yet. ask_secret puts something in it.");
+      return ok(items.map(itemLine).join("\n"));
     },
 
     search: ({ profileId, args }) => {
