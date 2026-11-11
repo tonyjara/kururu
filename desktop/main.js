@@ -1143,7 +1143,8 @@ talk.on("change", (state) => {
 /**
  * The screen pen, across the bridge. A session with the voice may be asked
  * for by the window or the pill (its pen button gives a recording a pen);
- * one without only by the window, whose box it fills. Only the session's
+ * one without only by a page with a Kuru box for it to fill, the window or
+ * the floating Kuru's chat. Only the session's
  * owner takes the bundle or drops it; the window and the pill — in either
  * of its forms — may press the pen, its tools, Done and ✕. The overlays'
  * own channel (`ink:*`) carries strokes only, checked in `ink.js` against
@@ -1151,7 +1152,10 @@ talk.on("change", (state) => {
  */
 ipcMain.handle("kururu:ink-start", (event, voice) => {
   if (voice === true) return ink.isOurs(event.sender) ? ink.start({ voice: true }) : ink.state();
-  if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id) return ink.state();
+  // A pen with no voice belongs to the page whose Kuru box its marks land
+  // in: the window's, or the floating Kuru's chat, which has the same box.
+  const fromWindow = Boolean(win && !win.isDestroyed() && event.sender.id === win.webContents.id);
+  if (!fromWindow && !float.isPanel(event.sender)) return ink.state();
   return ink.start({ voice: false, asker: event.sender });
 });
 ipcMain.handle("kururu:ink-state", () => ink.state());
@@ -1284,8 +1288,13 @@ ipcMain.on("kururu:float-menu", (event) => {
     { label: "Hide the Floating Kuru", click: () => float.setEnabled(false) },
   ]).popup({ window: float.logo });
 });
-ipcMain.on("kururu:float-grip", (event, phase) => {
-  if (float.isPanel(event.sender) && ["start", "move", "end"].includes(phase)) float.grip(phase);
+ipcMain.on("kururu:float-grip", (event, phase, edge) => {
+  if (!float.isPanel(event.sender) || !["start", "move", "end"].includes(phase)) return;
+  // A page from before the chat's width could be dragged names no edge, and means its height.
+  float.grip(phase, ["height", "width", "both"].includes(edge) ? edge : "height");
+});
+ipcMain.on("kururu:float-show", (event) => {
+  if (float.isPanel(event.sender)) float.show();
 });
 ipcMain.on("kururu:float-close", (event) => {
   if (float.isPanel(event.sender)) float.closePanel();

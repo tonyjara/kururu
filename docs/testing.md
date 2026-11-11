@@ -124,6 +124,17 @@ Kept short on purpose; the detail is in git history.
   capture before the release; and its events carry no `screenX`. Not
   pressed: a real mouse over another application, key focus (the harness
   stubs `show` and `focus`), a full-screen space, a second display.
+  The same evening, the same way, for the chat's width and its pencil: the
+  far side dragged 150 px wider with the logo's side where it was, the
+  corner changing both at once, the width held at 320 and at 960 and kept in
+  `desktop.json`, the waveform running the new width. With a stand-in for
+  the pen's helper that grants the screen and takes no picture (the hook
+  also forces `setIgnoreMouseEvents(true)`, since the pen's overlays ask for
+  the pointer), the pencil in the chat's box started a session with no
+  voice owned by the chat's page, its tools came up in the logo's row, and
+  Done ended it; words put into the box while the chat was shut opened it.
+  The logo's window at 80 px held its ring, its shadow and a count of 17
+  with room over.
 - **The built-in browser and its marking** (phases 0 and 1, 2026-11-06)
   were verified end to end in an isolated instance and removed on
   2026-11-07; what was checked is in this file on the `browser-annotate`

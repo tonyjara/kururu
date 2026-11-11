@@ -29,6 +29,9 @@ function adopt(raw: unknown): FloatState | null {
     // A number off another process: checked before it is used as a width.
     wave: typeof r.wave === "number" && Number.isFinite(r.wave) ? Math.max(60, Math.min(2000, r.wave)) : 132,
     role: r.role === "logo" || r.role === "panel" ? r.role : (state?.role ?? null),
+    wide: r.wide === true,
+    pen: r.pen === true,
+    logo: typeof r.logo === "number" && Number.isFinite(r.logo) ? Math.max(48, Math.min(240, r.logo)) : undefined,
   };
 }
 

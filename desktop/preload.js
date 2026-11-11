@@ -278,9 +278,9 @@ if (isPicker) {
      * told when that changes — the pill's page draws the voice as a waveform
      * beside the logo while it is on. The window switches it, from Settings.
      * The logo's page (`?float=logo`) says it was pressed, dragged or
-     * right-clicked; the chat's (`?float=panel`) drags its own far edge,
-     * closes itself, and asks for the window to be brought up for what only
-     * the window can show. `main.js` checks the sender of each, so the most
+     * right-clicked; the chat's (`?float=panel`) drags its own far edges,
+     * closes or opens itself, and asks for the window to be brought up for
+     * what only the window can show. `main.js` checks the sender of each, so the most
      * a served page in the window can do is flip the switch its Settings
      * already has.
      */
@@ -291,8 +291,11 @@ if (isPicker) {
       press: () => ipcRenderer.send("kururu:float-press"),
       drag: (phase) => ipcRenderer.send("kururu:float-drag", String(phase)),
       menu: () => ipcRenderer.send("kururu:float-menu"),
-      grip: (phase) => ipcRenderer.send("kururu:float-grip", String(phase)),
+      /** `edge` is `height`, `width` or `both`: which of the chat's far edges is being dragged. */
+      grip: (phase, edge) => ipcRenderer.send("kururu:float-grip", String(phase), typeof edge === "string" ? edge : "height"),
       close: () => ipcRenderer.send("kururu:float-close"),
+      /** The chat's page only: open the chat, for something that landed in its box while it was shut. */
+      show: () => ipcRenderer.send("kururu:float-show"),
       /** The window, brought up — at a card on its board when one is named. */
       go: (cardId) => ipcRenderer.send("kururu:float-go", typeof cardId === "string" ? cardId : null),
     },

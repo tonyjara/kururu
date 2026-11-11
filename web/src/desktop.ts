@@ -111,6 +111,16 @@ export interface FloatState {
   wave: number;
   /** Which of the floating Kuru's two pages asked, when one of them did (`state()` only). */
   role?: "logo" | "panel" | null;
+  /**
+   * What the app this page is drawn in can do for the chat, which a page
+   * newer than its app has to ask rather than assume: drag the chat's width
+   * as well as its height, and start a screen pen from the chat's box.
+   * Missing from an app from before either.
+   */
+  wide?: boolean;
+  pen?: boolean;
+  /** How big the logo's window is, a side, in CSS pixels: what the logo's page fills. Missing from an app whose logo was 64. */
+  logo?: number;
 }
 
 export interface DesktopFloat {
@@ -125,10 +135,12 @@ export interface DesktopFloat {
   drag(phase: "start" | "move" | "end"): void;
   /** The logo's page only: it was right-clicked. */
   menu(): void;
-  /** The chat's page only: its far edge is being dragged. */
-  grip(phase: "start" | "move" | "end"): void;
+  /** The chat's page only: one of its far edges is being dragged — its height's, its width's, or the corner between them. */
+  grip(phase: "start" | "move" | "end", edge?: "height" | "width" | "both"): void;
   /** The chat's page only: put it away. */
   close(): void;
+  /** The chat's page only: open it, for something that landed in its box while it was shut. Optional: an app from before it. */
+  show?(): void;
   /** The chat's page only: bring the window up, at a card on its board when one is named. */
   go(cardId?: string | null): void;
 }

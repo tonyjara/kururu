@@ -20,9 +20,12 @@ shows, so it is written once and read in three places — see
   page. Drag it anywhere; it stays where you leave it. Click it and the
   conversation opens against it — the same one as the drawer, with the same
   box, and the Needs you list a chip away — towards whichever side of the
-  screen has room; click again and it goes. Drag its far edge to make it
-  short enough to show only the last few messages. While it is on, the talk
-  key's pill is replaced by a waveform beside the logo. Off by default.
+  screen has room; click again and it goes. Drag its far edges or the
+  corner between them to make it shorter, taller, narrower or wider — short
+  enough to show only the last few messages, if you like — and it keeps the
+  size. The box's pencil draws on the screen from there too. While it is on,
+  the talk key's pill is replaced by a waveform beside the logo. Off by
+  default.
 - **A font and a size for kururu itself.** Settings → Fonts has an
   Interface section under the terminal's, for the face and the size of
   everything that is not a terminal: the sidebar, the boards, Kuru's drawer,

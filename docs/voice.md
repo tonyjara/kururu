@@ -886,11 +886,12 @@ something an update should put on a screen unasked.
 
 | piece | where | what |
 |---|---|---|
-| The windows | `desktop/float.js` | Two panels, both on every space and over full-screen apps. **The logo** is 64×64, clear, and can never take the focus, so pressing or dragging it takes no keys from the app in front. **The chat** is a second panel that can take them — it has a box to type in — without bringing the application forward, as a note window does. Two windows and not one that grows: a window that grew would have to move its origin and redraw the logo in the same frame, and a frame late is a logo that jumps. The chat's page is made with the logo's and kept hidden, so the first click is not a page load. |
-| The sums | `desktop/floatshape.js` | Where everything goes, as arithmetic with tests (`desktop/test/floatshape.test.js`). The logo's place is a share of a display, on the pill's reasoning. The chat is never remembered anywhere: it is put against the logo each time, **above or below, whichever side has more room**, its outer edge on the logo's, extending towards the middle of the display — so in any corner it opens into the screen. Only its height is kept. |
+| The windows | `desktop/float.js` | Two panels, both on every space and over full-screen apps. **The logo** is 80×80 — a 48 px mark with 16 px of clear room all round for its ring, its count and its shadow, which 8 px cut off — and can never take the focus, so pressing or dragging it takes no keys from the app in front. **The chat** is a second panel that can take them — it has a box to type in — without bringing the application forward, as a note window does. Two windows and not one that grows: a window that grew would have to move its origin and redraw the logo in the same frame, and a frame late is a logo that jumps. The chat's page is made with the logo's and kept hidden, so the first click is not a page load. |
+| The sums | `desktop/floatshape.js` | Where everything goes, as arithmetic with tests (`desktop/test/floatshape.test.js`). The logo's place is a share of a display, on the pill's reasoning. The chat is never remembered anywhere: it is put against the logo each time, **above or below, whichever side has more room**, its outer edge on the logo's, extending towards the middle of the display — so in any corner it opens into the screen. Only its height and its width are kept. |
 | The logo | `Float.tsx` `FloatLogo` (`/?float=logo`) | The profile's mascot on a disc of the chrome. It hops while Kuru thinks, wears a ring in the ink of what is happening (the accent while the chat is open, orange thinking or speaking, yellow asking, red while the microphone is open), and carries the count of what needs you on its corner. Not a draggable region, because that swallows the click with the drag: the page takes the press, tells a click from a drag by 4 px of travel, and the main process moves the window, reading the pointer from `screen`. A right-click offers the conversation, the window, and hiding it. |
 | The chat | `Float.tsx` `FloatPanel` (`/?float=panel`) | **`KuruDrawer` and `NeedsDrawer` themselves**, mounted as `App` mounts them, with the two chips in their header as the way between them — the conversation, the box with its references, files, quotes and dictation, the search, the pins and the Needs list are the window's, to the component. What differs is what a door does: a card, a terminal, a workspace or a file a reply named is said to the server as the window would say it, and then the window is brought up to show it (`kururu:float-go`). The lit chip, a drawer's ✕ and Escape put the chat away. |
-| The handle | `Float.tsx`, `FloatKuru.grip` | The chat's edge away from the logo, dragged: that edge follows the pointer and the logo's side stays. From 260 px up to whatever the side has. A conversation read at its newest line stays there while it is dragged, which is the point of making it short. |
+| The handles | `Float.tsx`, `FloatKuru.grip` | The chat's two edges away from the logo, and the corner between them, dragged: the edge follows the pointer and the logo's side stays. The height from 260 px up to whatever the side has; the width from 320 px (the drawer's own least) to 960, or to the edge of the display. A conversation read at its newest line stays there while it is dragged, which is the point of making it short. |
+| The pencil | `Float.tsx` `installInk`, `kururu:ink-start` | The box's screen pen works as it does in the window: a pen with no voice belongs to the page whose box its marks land in, and the chat's page has that box. Its tools are the pill's draw-only form, in the logo's row. Marks kept while the chat is shut — put away to draw on what was under it — open it (`kururu:float-show`). |
 | The waveform | `Float.tsx` `FloatWave`, in the pill's page | While this is on, **the pill is not shown**. The pill's window is docked to the logo's row (`TalkKey.dock`) and its page draws a waveform there instead: the microphone's level running towards the logo while it listens, Kuru's voice as a swell while a reply is said, and words only for what would go unnoticed — a clip the server is not taking, words that were not heard. Its ✕ is the pill's. With the chat shut it is 132 px beside the logo; with the chat open it runs the rest of the chat's width, so the bar and the logo together are the chat's edge. |
 
 **The pill is still the voice client.** Nothing about the microphone, the
@@ -916,18 +917,22 @@ Edges, said plainly:
   neither on there is no pill page, the talk key only exists in kururu's own
   window, and the pill drawn in that window is as it was.
 - **The screen pen's tools** are still the pill's draw-only form, now in the
-  logo's row beside the waveform, and cannot be dragged while docked. The
-  pencil in the chat's box is hidden: a pen with no voice starts from the
-  window, whose box its marks land in.
+  logo's row beside the waveform, and cannot be dragged while docked.
 - **The logo and the chat are in the pen's stills**, where the pill is left
-  out of them.
+  out of them, and with the pen down the ink is over both, as it is over the
+  window: lift the pen (Esc) to press either.
+- **A page can be newer than its app**, since the pages come from the
+  checkout's vite and the app is rebuilt by hand: what the chat's page may
+  ask of the app — a width to drag, a pen, how big the logo's window is — is
+  in `FloatState` (`wide`, `pen`, `logo`), and a page shows only what its app
+  says it can do.
 - **Like a note window, the chat never activates the app**, so a ⌘ shortcut it
   does not take itself goes to the application in front.
 
-Verified 2026-11-10 in a hidden, isolated copy of the app (`docs/testing.md`).
-Unpressed for real: a mouse on the logo over another application, the chat
-taking the keys when it opens, the windows over a full-screen app, and a
-display plugged in or pulled.
+Verified 2026-11-10 in a hidden, isolated copy of the app (`docs/testing.md`),
+and then used by the owner the same evening. Not pressed by anybody yet: a
+real pen stroke started from the chat (the test's helper took no pictures),
+the windows over a full-screen app, and a display plugged in or pulled.
 
 ## What it is not
 

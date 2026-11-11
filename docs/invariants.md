@@ -550,8 +550,10 @@ is still the one voice client. The chat behind the logo is `KuruDrawer` and
 open, so a hidden drawer never reads a reply as seen; never a voice client,
 its gestures going to the pill as the window's do; and anything it shows in
 the window is said to the server and the window brought up, never drawn
-twice. Only the logo's page may press or drag the logo and only the chat's
-may resize or close the chat, checked by sender in `main.js`. →
+twice. A screen pen with no voice may be started by the chat's page as by
+the window's, since each has a Kuru box for the marks. Only the logo's page
+may press or drag the logo and only the chat's may resize, open or close the
+chat, checked by sender in `main.js`. →
 [voice](voice.md#the-floating-kuru)
 
 ## The slot queue

@@ -23,6 +23,13 @@
  * window would say it, and then the window is asked for across the bridge
  * (`go`), since the thing being shown is there and not here.
  *
+ * **The box's pencil works here as it does in the window.** A screen pen
+ * with no voice belongs to the page whose box its marks land in, and this
+ * page has that box: it asks for the session, is told to send, posts the
+ * marks and puts their lines in (`installInk`). The pen's tools are where
+ * they always are, in the pill's draw-only form, which the floating Kuru
+ * keeps in the logo's row.
+ *
  * **The drawers are only mounted while the chat is open.** A reply stops
  * being unheard once it has been in view in an open drawer (`KURU_SEEN_MS`),
  * and a drawer left mounted in a hidden window would read every reply the
@@ -47,6 +54,7 @@ import { desktop, type FloatState, type TalkGesture, type VoiceGlobalState } fro
 import "../float.css";
 import { floatNow, useFloat } from "../float";
 import { useInterface } from "../fonts";
+import { installInk } from "../ink";
 import { kuruLive, leaveKuruSearch, openKuru, quoteInKuru, toggleKuru, useKuruDrawer, type KuruLive } from "../kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "../needs";
 import { arrangedNeeds, useNeedsView } from "../needsorder";
@@ -60,6 +68,8 @@ import { NeedsDrawer } from "./NeedsDrawer";
 import { QuoteToKuru } from "./Quote";
 import { Mascot } from "./Status";
 
+/** The logo's window, a side, in an app that does not say: what it was before it was given more room around the mark. */
+const LOGO_WINDOW = 64;
 /** How far a press on the logo travels before it is a drag and not a click — the pill's own slop. */
 const SLOP_PX = 4;
 /** How long the drawers stay mounted after the chat is shut: the window's fade, and a little. */
@@ -191,8 +201,10 @@ export function FloatLogo() {
   const clip = mascot ? (live === "thinking" ? mascot.working : (mascot.idle ?? mascot.working)) : null;
   const label = `${logoSays(live, phase)}${count > 0 ? ` · ${count} ${count === 1 ? "thing needs" : "things need"} you` : ""} — ${float?.open ? "close" : "open"} the conversation, or drag to move`;
 
+  // The window's own size, as the app says it: this page may be newer than the app, and the mark has to stand in the middle of the window that is there.
+  const size = float?.logo ?? LOGO_WINDOW;
   return (
-    <div className="float-logo-root">
+    <div className="float-logo-root" style={{ width: size, height: size }}>
       <button
         type="button"
         className={`float-logo float-logo-${live} float-voice-${phase} ${float?.open ? "float-logo-open" : ""} ${moving ? "" : "float-logo-still"}`}
@@ -271,6 +283,10 @@ export function FloatPanel() {
     setVoiceProfile(() => profileRef.current);
     setVoiceRemote(send, "idle");
     const stopKey = installTalkKey(() => voiceRef.current?.settings.talkKey ?? DEFAULT_VOICE.talkKey);
+    // The screen pen with no voice, from the box's pencil: this page owns
+    // the session as the window owns one it started, and the marks land in
+    // this box (`ink.ts`). A pen with a recording is the voice client's.
+    const stopInk = installInk();
     const follow = (state: VoiceGlobalState) => setVoiceRemote(send, state.phase);
     let stopGlobal = () => {};
     if (voiceBridge) {
@@ -279,6 +295,7 @@ export function FloatPanel() {
     }
     return () => {
       stopKey();
+      stopInk();
       stopGlobal();
       setVoiceRemote(null);
     };
@@ -304,6 +321,18 @@ export function FloatPanel() {
     const timer = setTimeout(() => bridge?.close(), 0);
     return () => clearTimeout(timer);
   }, [open, kuruDrawer.open, needsOpen, bridge]);
+
+  /**
+   * Words put into the box while the chat is shut — the marks of a pen this
+   * page started, kept when the pill's Done was pressed with the chat put
+   * away to draw on what was under it — open the chat, since a box nobody
+   * can see is marks nobody knows arrived. They wait in `kuru.ts` for the
+   * composer the opening mounts.
+   */
+  const waiting = kuruDrawer.words !== null;
+  useEffect(() => {
+    if (waiting && !open) bridge?.show?.();
+  }, [waiting, open, bridge]);
 
   /**
    * Mounted while open and through the fade out, then not — the header has
@@ -432,33 +461,35 @@ export function FloatPanel() {
   };
 
   /**
-   * The handle's drag, told to the main process as it happens. Whether one
-   * is under way is kept here and not asked of the pointer's capture, so
-   * that however it ends — the button up, the press cancelled, the capture
-   * taken away — the main process is told once that it has, and the height
-   * is written down.
+   * A handle's drag, told to the main process as it happens: the far
+   * horizontal edge for the height, the far vertical one for the width, the
+   * corner between them for both. Whether one is under way is kept here and
+   * not asked of the pointer's capture, so that however it ends — the button
+   * up, the press cancelled, the capture taken away — the main process is
+   * told once that it has, and the size is written down.
    */
-  const gripHeld = useRef(false);
+  const gripHeld = useRef<Edge | null>(null);
   const gripEnd = () => {
-    if (!gripHeld.current) return;
-    gripHeld.current = false;
-    bridge?.grip("end");
+    const edge = gripHeld.current;
+    if (!edge) return;
+    gripHeld.current = null;
+    bridge?.grip("end", edge);
   };
-  const grip = {
+  const gripFor = (edge: Edge) => ({
     onPointerDown: (event: React.PointerEvent) => {
       if (event.button !== 0) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      gripHeld.current = true;
-      bridge?.grip("start");
+      gripHeld.current = edge;
+      bridge?.grip("start", edge);
     },
     onPointerMove: () => {
-      if (gripHeld.current) bridge?.grip("move");
+      if (gripHeld.current) bridge?.grip("move", gripHeld.current);
     },
     onPointerUp: gripEnd,
     onPointerCancel: gripEnd,
     onLostPointerCapture: gripEnd,
-  };
+  });
 
   const side = float?.side ?? "above";
   const ready = snapshot && profile && mascot;
@@ -477,16 +508,33 @@ export function FloatPanel() {
   ) : null;
 
   return (
-    <div ref={root} className={`float-panel float-panel-${side} float-panel-${float?.reach ?? "left"} ${open ? "float-panel-open" : "float-panel-shut"} ${entering ? "float-panel-entering" : ""}`} onClick={onClick}>
-      {/* The edge away from the logo: the one that moves when the chat is made taller or shorter. */}
+    <div
+      ref={root}
+      className={`float-panel float-panel-${side} float-panel-${float?.reach ?? "left"} ${open ? "float-panel-open" : "float-panel-shut"} ${entering ? "float-panel-entering" : ""} ${float?.pen ? "float-panel-pen" : ""}`}
+      onClick={onClick}
+    >
+      {/* The edges away from the logo: the ones that move when the chat is
+          made taller, shorter, wider or narrower. The width's and the
+          corner's only in an app that can drag them. */}
       <div
         className="float-grip"
         role="separator"
         aria-orientation="horizontal"
-        aria-label="Resize the conversation"
+        aria-label="Make the conversation taller or shorter"
         title="Drag to make the conversation taller or shorter"
-        {...grip}
+        {...gripFor("height")}
       />
+      {float?.wide && (
+        <div
+          className="float-grip-side"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Make the conversation wider or narrower"
+          title="Drag to make the conversation wider or narrower"
+          {...gripFor("width")}
+        />
+      )}
+      {float?.wide && <div className="float-grip-corner" aria-hidden="true" title="Drag to resize the conversation" {...gripFor("both")} />}
       {shown && ready && kuruDrawer.open && (
         <KuruDrawer
           profile={profile}
@@ -538,6 +586,9 @@ export function FloatPanel() {
 }
 
 function nothing(): void {}
+
+/** Which of the chat's far edges a handle drags. */
+type Edge = "height" | "width" | "both";
 
 // ---------------------------------------------------------------------------
 // The waveform, in the pill's page
