@@ -77,6 +77,7 @@ import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
 import { AutomationsSection } from "./Automations";
+import { SectionToggle, useDisclosure } from "./SectionToggle";
 import { NameField } from "./NameField";
 import { Mascot, Status } from "./Status";
 import { hueStyle } from "./NodeChip";
@@ -2020,39 +2021,6 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
 }
 
 /**
- * Whether one of the sidebar's foot sections is open, remembered per device.
- *
- * Local rather than the server's, on the drawer's argument above: a disclosure
- * is a thing you do with your eyes, and a phone opening the dev servers to tap
- * one must not reach over and open them on the desktop. Remembered at all
- * because the sidebar is unmounted every time a phone puts it away, and a
- * section that shut itself each time would have to be opened each time.
- *
- * Storage can throw — a private window, blocked site data — and when it does
- * the section simply starts at its default.
- */
-function useDisclosure(key: string, initial: boolean): [boolean, () => void] {
-  const [open, setOpen] = useState(() => {
-    try {
-      const saved = localStorage.getItem(key);
-      return saved === null ? initial : saved === "1";
-    } catch {
-      return initial;
-    }
-  });
-  const toggle = () =>
-    setOpen((was) => {
-      try {
-        localStorage.setItem(key, was ? "0" : "1");
-      } catch {
-        // Not remembered; still toggled.
-      }
-      return !was;
-    });
-  return [open, toggle];
-}
-
-/**
  * Which workspaces' groups of agents are folded, remembered per device.
  *
  * A set of the folded rather than of the open, so that a workspace made on
@@ -2101,31 +2069,6 @@ function useFolded(
       }
     });
   return [folded, toggle, setMany];
-}
-
-/**
- * A section heading that is also its disclosure. The whole heading is the
- * target, and the caret is the drawer's — rotated shut rather than swapped —
- * so the two ways the sidebar folds something away look like one.
- */
-function SectionToggle({
-  open,
-  onToggle,
-  label,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  label: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <button className="side-toggle" onClick={onToggle} aria-expanded={open}>
-      <Icon name="caret" className={open ? "" : "drawer-caret-shut"} />
-      <span>{label}</span>
-      {children}
-    </button>
-  );
 }
 
 /**

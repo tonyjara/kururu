@@ -901,6 +901,14 @@ kbd {
   font-family: var(--mono);
   letter-spacing: 0;
 }
+/* A shut Automations heading's dot for its most pressing row, which takes the
+   count's place at the end and pushes the count after it. */
+.side-toggle-dot {
+  margin-left: auto;
+}
+.side-toggle-n-after {
+  margin-left: 0;
+}
 
 /**
  * The + in a heading stands *over* the column of colour chips below it, not

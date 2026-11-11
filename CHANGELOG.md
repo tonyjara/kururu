@@ -99,6 +99,12 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **Automations fold away.** The sidebar's Automations heading has the caret
+  Nodes and Dev servers have, and folds the same way, remembered on each
+  device. Shut, it shows how many there are, with a dot in front when one
+  has failed, needs an edit, is asking or is running. Its ⋯ and + work as
+  before.
+
 - **Panes are cards.** Every pane, its tabs included, sits on the window
   with room round it on all four sides and a rounded corner, instead of
   running flush to the window's top edge. The line between Kuru's drawer and

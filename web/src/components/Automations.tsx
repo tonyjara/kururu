@@ -31,6 +31,7 @@ import {
   durationWords,
   parseAutomation,
   TELLS,
+  type AutomationDot,
   type AutomationTask,
   type AutomationView,
   type RunView,
@@ -44,6 +45,7 @@ import { useKururu } from "../session";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { Menu, type MenuItem } from "./Menu";
+import { SectionToggle, useDisclosure } from "./SectionToggle";
 
 /** The viewer's own zone, for the time beside a slot. */
 const HERE = (() => {
@@ -124,6 +126,7 @@ export function AutomationsSection({
   const { longPress, swallowed } = useLongPress();
   const [menu, setMenu] = useState<{ key: string | null; x: number; y: number } | null>(null);
   const [said, setSaid] = useState<string | null>(null);
+  const [open, toggle] = useDisclosure("kururu.sidebar.automations", true);
   const list = snapshot?.automations;
   if (!list) return null;
 
@@ -164,53 +167,57 @@ export function AutomationsSection({
   return (
     <section className="side-section side-auto">
       <h2>
-        Automations
-        <button className="mini side-fold-all" onClick={(event) => setMenu({ key: null, x: event.clientX, y: event.clientY })} title="Pause all…" aria-label="Automations menu">
+        <SectionToggle open={open} onToggle={toggle} label="Automations">
+          {!open && <FoldedFacts list={list} />}
+        </SectionToggle>
+        <button className="mini" onClick={(event) => setMenu({ key: null, x: event.clientX, y: event.clientY })} title="Pause all…" aria-label="Automations menu">
           <Icon name="more" />
         </button>
         <button className="mini" onClick={() => onOpen(null)} title="New automation" aria-label="New automation">
           <Icon name="add" />
         </button>
       </h2>
-      <ul className="auto-list">
-        {list.length === 0 && <li className="muted sidebar-empty">Nothing on a schedule yet.</li>}
-        {list.map((a) => {
-          const dot = dotOf(a);
-          return (
-            <li key={a.key} className="auto-item">
-              <button
-                className="auto-row"
-                title={rowTitle(a)}
-                onClick={() => {
-                  if (swallowed()) return;
-                  onOpen(a.key);
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setMenu({ key: a.key, x: event.clientX, y: event.clientY });
-                }}
-                {...longPress((at) => setMenu({ key: a.key, ...at }))}
-              >
-                <span className={`auto-dot auto-dot-${dot}`} aria-label={dot} />
-                <span className="auto-name">{a.name}</span>
-                {!a.clock && <span className="auto-home">clock off</span>}
-                <span className={`auto-when ${dot === "failed" || dot === "broken" ? "auto-when-bad" : ""}`}>{rowFact(a, now)}</span>
-              </button>
-              <button
-                className="auto-more"
-                onClick={(event) => {
-                  const box = event.currentTarget.getBoundingClientRect();
-                  setMenu({ key: a.key, x: box.left, y: box.bottom + 4 });
-                }}
-                title="Run now, pause, edit…"
-                aria-label={`${a.name} menu`}
-              >
-                <Icon name="more" />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      {open && (
+        <ul className="auto-list">
+          {list.length === 0 && <li className="muted sidebar-empty">Nothing on a schedule yet.</li>}
+          {list.map((a) => {
+            const dot = dotOf(a);
+            return (
+              <li key={a.key} className="auto-item">
+                <button
+                  className="auto-row"
+                  title={rowTitle(a)}
+                  onClick={() => {
+                    if (swallowed()) return;
+                    onOpen(a.key);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setMenu({ key: a.key, x: event.clientX, y: event.clientY });
+                  }}
+                  {...longPress((at) => setMenu({ key: a.key, ...at }))}
+                >
+                  <span className={`auto-dot auto-dot-${dot}`} aria-label={dot} />
+                  <span className="auto-name">{a.name}</span>
+                  {!a.clock && <span className="auto-home">clock off</span>}
+                  <span className={`auto-when ${dot === "failed" || dot === "broken" ? "auto-when-bad" : ""}`}>{rowFact(a, now)}</span>
+                </button>
+                <button
+                  className="auto-more"
+                  onClick={(event) => {
+                    const box = event.currentTarget.getBoundingClientRect();
+                    setMenu({ key: a.key, x: box.left, y: box.bottom + 4 });
+                  }}
+                  title="Run now, pause, edit…"
+                  aria-label={`${a.name} menu`}
+                >
+                  <Icon name="more" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {said && (
         <button className="dev-said" onClick={() => setSaid(null)} title="Click to dismiss">
           {said}
@@ -218,6 +225,28 @@ export function AutomationsSection({
       )}
       {menu && items && <Menu at={menu} onClose={() => setMenu(null)} items={items} />}
     </section>
+  );
+}
+
+/**
+ * What a shut Automations heading still says: how many there are, as Dev
+ * servers says, and — before the count — one dot for the most pressing thing a
+ * row would have shown, so folding the section away never hides a failure or
+ * a run that is asking. Broken and failed outrank asking, which outranks
+ * running; a section where everything is quiet, paused or has found something
+ * shows the count alone, since none of those wants you now.
+ */
+const PRESSING: readonly AutomationDot[] = ["broken", "failed", "asking", "running"];
+
+function FoldedFacts({ list }: { list: readonly AutomationView[] }) {
+  const dots = list.map(dotOf);
+  const worst = PRESSING.find((dot) => dots.includes(dot));
+  const count = worst ? dots.filter((dot) => dot === worst).length : 0;
+  return (
+    <>
+      {worst && <span className={`auto-dot auto-dot-${worst} side-toggle-dot`} title={`${count} ${worst}`} aria-label={`${count} ${worst}`} />}
+      <span className={`side-toggle-n ${worst ? "side-toggle-n-after" : ""}`}>{list.length}</span>
+    </>
   );
 }
 
