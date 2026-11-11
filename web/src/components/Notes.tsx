@@ -61,6 +61,7 @@ import { cardPlace, cardReference } from "../../../shared/kuru";
 import { mascotFor, type AgentSnapshot, type MascotSet, type Profile, type Workspace } from "../../../shared/model";
 import { colorValue } from "../colors";
 import { drawDiagrams } from "../mermaid";
+import { readerLink } from "../readerlink";
 import {
   change,
   desktopNotes,
@@ -709,11 +710,32 @@ function NoteBody({
           {card.body}
         </p>
       ) : (
-        <article ref={article} className="md note-md" dangerouslySetInnerHTML={{ __html: html }} {...quotable(quoteRef, "body")} />
+        <article
+          ref={article}
+          className="md note-md"
+          dangerouslySetInnerHTML={{ __html: html }}
+          onClick={followNoteLink}
+          {...quotable(quoteRef, "body")}
+        />
       )}
       {error && html === null && <p className="note-error">{error}</p>}
     </div>
   );
+}
+
+/**
+ * A link in a card's body, which is drawn by the reader's renderer and so
+ * carries the same hazard: the page is kururu, and a link it followed would
+ * replace the app (`readerlink.ts`). A card has no folder for a relative link
+ * to be relative to, so only the web and mail are followed, out of the window.
+ */
+function followNoteLink(event: React.MouseEvent<HTMLElement>): void {
+  const link = (event.target as Element | null)?.closest?.("a");
+  if (!link) return;
+  const to = readerLink(link.getAttribute("href"), "");
+  if (to.kind === "out" && link.target === "_blank") return;
+  event.preventDefault();
+  if (to.kind === "out") window.open(to.href, "_blank", "noopener,noreferrer");
 }
 
 /**

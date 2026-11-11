@@ -25,7 +25,7 @@ import { fileRefOf } from "../filequote";
 import { drawDiagrams } from "../mermaid";
 import {
   anchorAt,
-  fragmentOf,
+  askFragment,
   headingSlugs,
   keepPlace,
   lineTop,
@@ -35,13 +35,15 @@ import {
   placeOf,
   resolvePlace,
   savedPlace,
+  takeFragment,
   takeJump,
   topOf,
   type Anchor,
   type Place,
   type Span,
 } from "../readerplace";
-import { nodeNameOf, useProjectRoots } from "../session";
+import { readerLink } from "../readerlink";
+import { nodeNameOf, openDoc, useProjectRoots } from "../session";
 import { DocPicker } from "./DocPicker";
 import { quotableFile } from "./Quote";
 
@@ -285,14 +287,10 @@ export function ReaderView({
     });
     resized.observe(body);
 
-    // A link to a heading in this document. The renderer gives headings no
-    // ids, so the browser's own fragment navigation finds nothing — and would
-    // write the fragment into the page's own URL, which is the app's.
-    const onClick = (event: MouseEvent) => {
-      const link = (event.target as Element | null)?.closest?.("a");
-      const fragment = link && body.contains(link) ? fragmentOf(link.getAttribute("href")) : null;
-      if (fragment === null) return;
-      event.preventDefault();
+    // A heading in this document, by a fragment. The renderer gives headings
+    // no ids, so the browser's own fragment navigation finds nothing — and
+    // would write the fragment into the page's own URL, which is the app's.
+    const goToFragment = (fragment: string) => {
       const headings = [...body.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")];
       const slugs = headingSlugs(headings.map((h) => (h.textContent ?? "").replace(/\s+/g, " ")));
       const want = fragment.toLowerCase();
@@ -303,6 +301,43 @@ export function ReaderView({
       put(top);
       state.anchor = anchorAt(spans(), top, end());
       remember(top);
+    };
+
+    // A heading another document's link asked for, now that it is drawn.
+    const askedFragment = takeFragment(drawnKey);
+    if (askedFragment !== null) goToFragment(askedFragment);
+
+    // Every link in the document, and none of them left to the browser: the
+    // page is kururu, and a link it followed would replace the app with the
+    // file — `readerlink.ts` has the whole argument. Only a link the server
+    // already sends out of the window (`target="_blank"`) is let through.
+    const onClick = (event: MouseEvent) => {
+      const link = (event.target as Element | null)?.closest?.("a");
+      if (!link || !body.contains(link)) return;
+      const href = link.getAttribute("href");
+      const to = readerLink(href, doc?.path ?? "");
+      if (to.kind === "out" && link.target === "_blank") return;
+      event.preventDefault();
+      switch (to.kind) {
+        case "anchor":
+          goToFragment(to.fragment);
+          return;
+        case "doc":
+          // The server checks the path, and a file that is not there is
+          // simply not opened: the reader keeps the document it has.
+          if (!doc) return;
+          if (to.fragment) askFragment(placeKey(doc.root, to.path), to.fragment);
+          openDoc(paneId, doc.root, to.path);
+          return;
+        case "file":
+        case "out":
+          // A new window, which the desktop hands to the system's browser
+          // (`main.js`'s window-open handler) and a phone opens as a tab.
+          window.open(to.href, "_blank", "noopener,noreferrer");
+          return;
+        case "none":
+          return;
+      }
     };
     body.addEventListener("click", onClick);
 
@@ -319,7 +354,7 @@ export function ReaderView({
       resized.disconnect();
       stopJump();
     };
-  }, [doc, drawnKey, sig]);
+  }, [doc, drawnKey, sig, paneId]);
 
   useEffect(() => {
     if (!path) return;

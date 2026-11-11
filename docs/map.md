@@ -248,6 +248,7 @@ in this folder.
 | `src/access.ts` | The token in the address, exchanged once for a cookie. Five lines |
 | `src/zoom.ts` | How big the reader's type is, per device |
 | `src/readerplace.ts` | Where you were in each document, per device: a block and how far into it, found again by heading when the file changed. Pure geometry, tested |
+| `src/readerlink.ts` | What a click on a link in a rendered document does — another document, a heading, a window outside, or nothing — so no link replaces the app. Pure, tested |
 | `src/place.ts` | Where the voice pill was dragged to, as a share of the window rather than pixels. Pure |
 | `src/float.ts` · `src/float.css` | The floating Kuru as a page sees it: on or off, whether its chat is open and which way it faces, as the main process last said. And its sheet, imported by `Float.tsx` rather than a section of `styles.css`, since only its own windows draw it |
 | `src/when.ts` | What a card's dates are called here: month names, and which day a week starts on |

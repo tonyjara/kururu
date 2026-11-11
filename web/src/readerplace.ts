@@ -358,3 +358,24 @@ export function onJump(listener: () => void): () => void {
   jumpListeners.add(listener);
   return () => jumpListeners.delete(listener);
 }
+
+/**
+ * A heading another document's link named — `contador.md#preguntas` — asked
+ * of whichever reader draws that document next. The jump's arrangement and for
+ * the jump's reason: the server opens the document and never hears of the
+ * heading, so the page that clicked leaves word here. Short-lived, so a link to
+ * a file that did not open does not move the same file opened by hand later.
+ */
+let fragment: { key: string; fragment: string; until: number } | null = null;
+
+export function askFragment(key: string, wanted: string): void {
+  fragment = wanted ? { key, fragment: wanted, until: Date.now() + JUMP_MS } : null;
+}
+
+/** The heading a document was asked to open at, taken so that only one reader acts on it. */
+export function takeFragment(key: string): string | null {
+  if (!fragment || fragment.key !== key) return null;
+  const { fragment: wanted, until } = fragment;
+  fragment = null;
+  return Date.now() <= until ? wanted : null;
+}

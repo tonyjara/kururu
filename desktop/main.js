@@ -786,6 +786,23 @@ function createWindow() {
     return { action: "deny" };
   });
 
+  /**
+   * And a link the page forgot to catch must not turn this window into the
+   * thing it pointed at. The page is the whole app: a link to a file in a
+   * document, followed, took the window to a JSON error and read as kururu
+   * crashing (2026-11-11). The reader classifies every link now
+   * (`web/src/readerlink.ts`); this is the floor under it, for whatever page
+   * draws a link next. Only the page's own navigations are seen here —
+   * `loadURL` and a reload are not — and an `/api/` path is never a page.
+   */
+  win.webContents.on("will-navigate", (event, url) => {
+    try {
+      if (/^https?:/i.test(url) && new URL(url).pathname.startsWith("/api/")) event.preventDefault();
+    } catch {
+      event.preventDefault();
+    }
+  });
+
   // Cut, Copy and Paste on a right-click in a text field, and Copy on selected
   // text; what each right-click gets is decided in `editmenu.js`.
   win.webContents.on("context-menu", (_event, params) => {

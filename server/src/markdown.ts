@@ -144,9 +144,23 @@ function safeAbsolute(url: string): boolean {
  * to produce the right path, not to be the thing that stops the wrong one.
  */
 function fileUrl(root: string, dir: string, target: string): string {
-  const rel = posix.normalize(target.startsWith("/") ? target.slice(1) : posix.join(dir, target));
+  // `sibling.md#part` is a file and a place in it, and the place is the URL's
+  // fragment, not a character of the file's name: a path with `#part` in it
+  // names a file that is not there. The same for a query. What is left is
+  // percent-encoded, as markdown-it leaves every link (`my%20notes.md`), and a
+  // path is the file's own name, so it is decoded before it is joined.
+  const cut = target.search(/[?#]/);
+  const hash = target.indexOf("#");
+  const fragment = hash >= 0 && hash < target.length - 1 ? target.slice(hash) : "";
+  let file = cut >= 0 ? target.slice(0, cut) : target;
+  try {
+    file = decodeURIComponent(file);
+  } catch {
+    // A stray `%` is a character of the name, as written.
+  }
+  const rel = posix.normalize(file.startsWith("/") ? file.slice(1) : posix.join(dir, file));
   const query = new URLSearchParams({ root, path: rel });
-  return `/api/file-raw?${query}`;
+  return `/api/file-raw?${query}${fragment}`;
 }
 
 export interface RenderedMarkdown {

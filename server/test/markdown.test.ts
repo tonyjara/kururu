@@ -115,6 +115,24 @@ describe("relative paths", () => {
    * here is that it stays a `/api/file-raw` URL, so it meets that check at all,
    * instead of becoming something the browser resolves for itself.
    */
+  it("keeps a link's fragment out of the path it names", async () => {
+    const html = await render("[b](bancard.md#preguntas)\n", "/project", "docs/legal/README.md");
+    expect(targets(html)).toEqual(["/api/file-raw?root=%2Fproject&amp;path=docs%2Flegal%2Fbancard.md#preguntas"]);
+  });
+
+  it("decodes an escaped name, so the path is the file's own", async () => {
+    const html = await render("[n](my%20notes.md)\n", "/project", "docs/README.md");
+    expect(html).toContain("path=docs%2Fmy+notes.md");
+  });
+
+  it("resolves a sibling and a parent link against the document", async () => {
+    const html = await render("[a](./a.md) [b](../b.md)\n", "/project", "docs/legal/README.md");
+    expect(targets(html)).toEqual([
+      "/api/file-raw?root=%2Fproject&amp;path=docs%2Flegal%2Fa.md",
+      "/api/file-raw?root=%2Fproject&amp;path=docs%2Fb.md",
+    ]);
+  });
+
   it("leaves an escaping path for files.ts to refuse", async () => {
     const html = await render("![k](../../../../etc/passwd)\n");
     expect(html).toContain("/api/file-raw?");

@@ -179,6 +179,15 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **Links between documents in the reader.** Clicking a link to another
+  markdown file — `bancard.md` in a README's table, `../plan.md`, or
+  `notes.md#a-heading` — opens it in the reader, beside the one you were
+  reading, at that heading if one was named. It used to replace the whole
+  window with an error, which looked like Kururu crashing. A link to any other
+  file in the project opens in your browser, a link to a file that is not
+  there does nothing, and no link in a document or a card can take the window
+  away from Kururu any more.
+
 - **The reader keeps your place.** Switching to another tab and back no longer
   puts a document back at its title: each one opens where you left it, after
   a tab switch, closed and opened again, or a window reload, kept per device as

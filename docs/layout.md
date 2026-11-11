@@ -140,6 +140,18 @@ for the reader that draws that document, since `open-made` gives the line to
 nvim only; a `#fragment` is matched against GitHub-style slugs of the
 headings, which the renderer gives no ids, and never reaches the app's URL.
 
+**No link in a document is the browser's to follow** (`web/src/readerlink.ts`):
+the page is the app, and a followed link replaces it. `markdown.ts` rewrites a
+relative target into `/api/file-raw?root&path#fragment`, resolved against the
+document and with the fragment kept out of the path, and the reader reads that
+back: a markdown file is `open-doc` in the same pane, with a short-lived word
+left for the heading it named; any other file is a new window, which the
+desktop hands to the system's browser; the web and mail leave the window;
+anything else does nothing. A file the server will not resolve is simply not
+opened. The desktop's `will-navigate` refuses an `/api/` path as the floor
+under every page, after a link to `bancard.md` took the window to a JSON error
+and read as kururu crashing (2026-11-11).
+
 `persist.ts` writes a pane's view tabs as `tabs` (the board and documents in
 order) and `showing`, and reads the older `reader`/`board` shape; `adoptReaders`
 turns a host blob's `reader.docs` into tabs, which is how an old server's
