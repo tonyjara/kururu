@@ -171,12 +171,14 @@ export function Pill() {
   const docked = float?.on === true ? float : null;
   const drawing = ink.state.on && (ink.state.tools === "draw" || docked !== null);
   const phase = DRAW_ONLY ? "idle" : ui.phase;
-  // Docked, the window is put to the pixel against the logo, so what is
-  // drawn in it is drawn at the window's own scale whatever the site is
-  // zoomed to, and its size is said in the screen's points (`usePageZoom`).
-  // The pill at its own place is left as it has always been.
-  const zoom = usePageZoom();
-  const scale = docked ? zoom : 1;
+  // The panel is sized in the screen's points to what this page says, so
+  // what is drawn in it is drawn at the window's own scale whatever the site
+  // is zoomed to, and its size is said in the screen's points
+  // (`usePageZoom`). Docked to the logo and at its own place alike: the pill
+  // at its own place was once left at the site's zoom, and at the 110% the
+  // owner's window is read at it was a tenth too big for its panel, its right
+  // end and its foot cut off by the window's edge (2026-11-11).
+  const scale = usePageZoom();
   const report = useRef(() => {});
   report.current = () => {
     const bridge = desktop()?.voice;
@@ -204,7 +206,7 @@ export function Pill() {
   }, [isDocked]);
 
   return (
-    <div className={`pill-page-root ${docked ? `pill-docked pill-docked-${docked.reach}` : ""}`} style={docked ? { zoom: 1 / scale } : undefined} ref={root}>
+    <div className={`pill-page-root ${docked ? `pill-docked pill-docked-${docked.reach}` : ""}`} style={scale !== 1 ? { zoom: 1 / scale } : undefined} ref={root}>
       <div className="pill-stack">
         {drawing && <DrawPill />}
         {DRAW_ONLY ? null : ui.phase === "idle" && here ? <PillHere /> : docked ? <FloatWave float={docked} /> : <VoicePill floating />}

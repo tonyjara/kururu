@@ -931,9 +931,11 @@ Edges, said plainly:
   have hidden until the next step. The app cannot set them back without
   setting the window back, so each page measures the zoom (`usePageZoom` in
   `float.ts`: the window's width outside over the page's inside) and puts
-  the inverse on its root, and the docked pill says its size in the
-  screen's points. The pill at its own place is untouched, and has the same
-  fault at any zoom but 100%: its window is sized in the page's pixels.
+  the inverse on its root, and the pill says its size in the screen's
+  points. The pill at its own place was left out of that at first, and on
+  2026-11-11 the owner marked it cut at its right end and its foot while
+  they talked, the window at 110%: its panel was sized in the page's pixels
+  too. It now does what the docked pill does, wherever it is.
 - **A page can be newer than its app**, since the pages come from the
   checkout's vite and the app is rebuilt by hand: what the chat's page may
   ask of the app — a width to drag, a pen, how big the logo's window is — is

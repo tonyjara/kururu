@@ -179,6 +179,11 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **The talk key's pill is whole at any zoom.** With the window zoomed in
+  (⌘+), the pill that shows while you talk was drawn too big for its own
+  window, and its right end and its bottom were cut off. It is now the same
+  size at every zoom, as the floating Kuru's logo and waveform already were.
+
 - **Links between documents in the reader.** Clicking a link to another
   markdown file — `bancard.md` in a README's table, `../plan.md`, or
   `notes.md#a-heading` — opens it in the reader, beside the one you were

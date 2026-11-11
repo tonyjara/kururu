@@ -217,7 +217,9 @@ async function inkWhatAt(global, under) {
   if (pill) {
     const b = pill.getContentBounds();
     if (global.x >= b.x && global.y >= b.y && global.x < b.x + b.width && global.y < b.y + b.height) {
-      const kururu = await pill.webContents.executeJavaScript(`typeof window.__kururuWhatAt === "function" ? window.__kururuWhatAt(${global.x - b.x}, ${global.y - b.y}) : null`);
+      // The page's points are the window's over the site's zoom, as the window's own are below.
+      const zoom = pill.webContents.getZoomFactor() || 1;
+      const kururu = await pill.webContents.executeJavaScript(`typeof window.__kururuWhatAt === "function" ? window.__kururuWhatAt(${(global.x - b.x) / zoom}, ${(global.y - b.y) / zoom}) : null`);
       if (kururu && typeof kururu === "object" && kururu.what !== "the window") return { kururu };
     }
   }

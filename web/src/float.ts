@@ -75,12 +75,13 @@ export function useFloat(): FloatState | null {
  * site, not per window: the logo's page and the pill's come from the same
  * address as the window's, so a window read at 110% makes them 110% too.
  * The chat is welcome to it — it is the drawer, in a box that fills its
- * window, and bigger type there is what was asked for. The logo and the
- * waveform are not: each is drawn to the pixel in a window made exactly its
- * size, so at 110% the mark is a tenth too big for its window and its right
- * side, its foot and its count are cut off by the window's edge — which is
- * what the owner saw (2026-11-10), and what more room round the mark only
- * hid until the next step of zoom.
+ * window, and bigger type there is what was asked for. The logo and the pill
+ * (the waveform, docked) are not: each is drawn to the pixel in a window made
+ * exactly its size, so at 110% the mark is a tenth too big for its window and
+ * its right side, its foot and its count are cut off by the window's edge —
+ * which is what the owner saw (2026-11-10), and what more room round the mark
+ * only hid until the next step of zoom. The pill at its own place was the
+ * same a day later, cut at its right end and its foot while the owner talked.
  *
  * The app cannot set these windows back to 100% without setting the window
  * back too, since the zoom is the site's. So the page measures it — a window
