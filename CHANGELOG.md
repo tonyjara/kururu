@@ -203,6 +203,15 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **A menu's list no longer opens just because the pointer passed over its
+  row.** Going down a card's right-click menu past Send to used to open its
+  list at once, over the rows you were heading for. A row's list now opens
+  when the pointer rests on it for a quarter of a second, or at once when you
+  click it or press → or Enter. On the way to an open list you can cut across
+  the rows under it without it closing, and with no room beside the menu the
+  list waits for a click instead of taking the menu's place. This holds in
+  every right-click menu in kururu.
+
 - **The talk key's pill is whole at any zoom.** With the window zoomed in
   (⌘+), the pill that shows while you talk was drawn too big for its own
   window, and its right end and its bottom were cut off. It is now the same

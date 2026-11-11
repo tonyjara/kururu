@@ -317,8 +317,14 @@ since no other node's window can open that board. No robot, no worktree. The one
 does not is the card menu's **Send to**, one row whose list is every
 workspace in the profile in the sidebar's order — beside the menu, on the side
 with room, or in the menu's place on a phone; it was a row per workspace until
-twenty of them buried the card's own verbs. `send-profile-card` moves
-the card onto that workspace's board in one change (`transferCard` — new number
+twenty of them buried the card's own verbs. Like every list a menu row opens
+(`Menu.tsx`, `web/src/menuaim.ts`), it opens when the pointer rests on its row
+for `OPEN_MS` (250 ms), or at once on a click, Enter or →, so going down the
+menu past it opens nothing; once open, a pointer heading for it may cross the
+rows below (the triangle from where it was to the list's near edge) and only
+one that turns away, or stops on a row for `AIM_MS`, closes it. A hover never
+draws a list in the menu's place: with no room beside, the row waits for a click.
+`send-profile-card` moves the card onto that workspace's board in one change (`transferCard` — new number
 there, same id, and its To do if it sat in a column the workspace does not
 have), making the board if the workspace had none. It rides the blob
 through `adopt()` and goes to disk beside the workspaces, counter included.

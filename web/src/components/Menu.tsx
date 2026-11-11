@@ -22,6 +22,17 @@
  * that has not admitted it, and the type says so (`MenuParent` holds
  * actions, not items).
  *
+ * **A pointer opens a list by resting on its row, not by passing it**
+ * (`OPEN_MS`, `web/src/menuaim.ts`). Opening on the first touch of the row
+ * meant that going down a card's menu past "Send to" put twenty workspaces
+ * over the rows you were heading for (the owner, 2026-11-11). A click, Enter
+ * or → still opens it at once. Once a list is open, a pointer on its way
+ * there is let cross the rows under its row (`aiming`) and only a pointer
+ * that has turned away, or stopped on one of them, closes it. And a hover
+ * never draws a list in the menu's place: that is the whole menu gone under
+ * a pointer that was only passing, so with no room beside, the row waits to
+ * be clicked.
+ *
  * **It takes the keyboard while it is open.** A list a mouse opens by hovering
  * has to be one a keyboard can open too, and a key can only open something it
  * reaches: so the menu focuses its own box on opening — no row lit, the way a
@@ -41,6 +52,8 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+
+import { AIM_MS, aiming, OPEN_MS, type Point, REST_PX } from "../menuaim";
 
 interface MenuRow {
   label: string;
@@ -96,13 +109,8 @@ export interface MenuAt {
 
 /** How far a box keeps from the window's edge, as `Popover` does. */
 const EDGE = 4;
-/**
- * How long the pointer may spend on another row before a list it opened
- * closes. The way from "Send to" to its list is a diagonal, and a diagonal
- * crosses the row below on its way; closing at once would close the list the
- * pointer was travelling to.
- */
-const LINGER_MS = 250;
+/** How many of the pointer's last places are kept for the aim; the oldest is where the line starts. */
+const TRAIL = 4;
 
 /** The rows of a list a key can land on, in order. */
 function stops(list: HTMLElement | null | undefined): HTMLButtonElement[] {
@@ -123,13 +131,28 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
   const box = useRef<HTMLDivElement>(null);
   const side = useRef<HTMLDivElement>(null);
   const rows = useRef<(HTMLButtonElement | null)[]>([]);
-  /** The row whose list is open, and whether it is drawn in the menu's place. */
-  const [open, setOpen] = useState<{ at: number; inPlace: boolean } | null>(null);
+  /**
+   * The row whose list is open, whether it is drawn in the menu's place, and
+   * whether a resting pointer opened it — which may only draw it beside.
+   */
+  const [open, setOpen] = useState<{ at: number; inPlace: boolean; hovered: boolean } | null>(null);
+  // The timers below outlive the render that set them, so they read this.
+  const openNow = useRef(open);
+  openNow.current = open;
   /** Where the list beside the menu goes; null while it is drawn unseen to be measured. */
   const [sideAt, setSideAt] = useState<MenuAt | null>(null);
   /** The row a key asked for, focused once the list it is in has been drawn. */
   const focusNext = useRef<"first" | number | null>(null);
+  /** Running while a pointer aiming at the open list has stopped on a row it was crossing. */
   const linger = useRef<ReturnType<typeof setTimeout>>(undefined);
+  /** The row the pointer is on while it is taken to be crossing it. */
+  const crossing = useRef<number | null>(null);
+  /** Running while the pointer rests on a row with a list: the row, and where the rest began. */
+  const intent = useRef<{ row: number; from: Point; timer: ReturnType<typeof setTimeout> } | null>(null);
+  /** The pointer's last few places over the menu, oldest first. */
+  const trail = useRef<Point[]>([]);
+  /** A row a resting pointer found no room beside, which waits to be clicked from then on. */
+  const noRoom = useRef<number | null>(null);
   // Read while rendering, before the box below takes the focus — and read
   // once, so a second pass of the effect does not take the box for it.
   const [before] = useState(() => document.activeElement);
@@ -138,6 +161,7 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
     box.current?.focus({ preventScroll: true });
     return () => {
       clearTimeout(linger.current);
+      clearTimeout(intent.current?.timer);
       // Only when the focus went with the menu. A row that opened a field —
       // Rename, Edit — has put it somewhere on purpose.
       const now = document.activeElement;
@@ -153,7 +177,7 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
   /**
    * The list beside the menu is drawn once unseen, measured, and then placed:
    * right of the menu if it fits, left if not, and in the menu's own place if
-   * it fits neither. Its first row lines up with the row it came from, unless
+   * it fits neither — or, when a resting pointer asked, not at all. Its first row lines up with the row it came from, unless
    * that would run it off the bottom; a list taller than the window scrolls.
    */
   useLayoutEffect(() => {
@@ -167,7 +191,11 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
       const { width, height } = el.getBoundingClientRect();
       const x =
         m.right + 2 + width <= window.innerWidth - EDGE ? m.right + 2 : m.left - 2 - width >= EDGE ? m.left - 2 - width : null;
-      if (x === null) return setOpen({ at: open.at, inPlace: true });
+      if (x === null) {
+        if (!open.hovered) return setOpen({ at: open.at, inPlace: true, hovered: false });
+        noRoom.current = open.at;
+        return setOpen(null);
+      }
       const lift = el.clientTop + parseFloat(getComputedStyle(el).paddingTop);
       setSideAt({ x, y: Math.max(EDGE, Math.min(r.top - lift, window.innerHeight - height - EDGE)) });
       return;
@@ -178,8 +206,11 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
     else if (typeof want === "number") rows.current[want]?.focus();
   }, [open, sideAt]);
 
-  const openList = (index: number, keyed: boolean) => {
+  const openList = (index: number, keyed: boolean, hovered = false) => {
     clearTimeout(linger.current);
+    markCrossing(null);
+    cancelIntent();
+    const open = openNow.current;
     if (open?.at === index) {
       if (keyed) stops(open.inPlace ? box.current?.querySelector<HTMLElement>(".menu-list") : side.current)[0]?.focus();
       return;
@@ -189,8 +220,9 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
     // A phone's layout gets it in place even where a list would squeeze in
     // beside: two boxes side by side fill that screen edge to edge. Read off
     // the mark `App` puts on the root, as the stylesheet does, so the one
-    // breakpoint stays stated once.
-    setOpen({ at: index, inPlace: document.documentElement.hasAttribute("data-narrow") });
+    // breakpoint stays stated once. A resting pointer, though, is only ever
+    // offered the list beside: see the module comment.
+    setOpen({ at: index, inPlace: !hovered && document.documentElement.hasAttribute("data-narrow"), hovered });
   };
   /** Out of a list, back onto the row that opened it. */
   const back = () => {
@@ -205,6 +237,8 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
 
   const keys = (event: React.KeyboardEvent, inSide: boolean) => {
     const key = event.key;
+    // The keys have taken over from the pointer, and a rest it began must not open a list behind them.
+    cancelIntent();
     const inList = inSide || !!open?.inPlace;
     if (key === "ArrowDown" || key === "ArrowUp" || key === "Home" || key === "End") {
       step(inSide ? side.current : box.current, key);
@@ -229,6 +263,76 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
   /** The pointer on a row: it takes the focus, so the keys go on from there. */
   const hover = (row: HTMLButtonElement) => row.focus({ preventScroll: true });
 
+  const cancelIntent = () => {
+    clearTimeout(intent.current?.timer);
+    intent.current = null;
+  };
+  /** Start (or start again) the rest on a row with a list, which opens it beside when it ends. */
+  const armIntent = (index: number, from: Point) => {
+    cancelIntent();
+    intent.current = { row: index, from, timer: setTimeout(() => openList(index, false, true), OPEN_MS) };
+  };
+  /** Mark the menu while the pointer is crossing rows, so the row under it is not lit as if chosen. */
+  const markCrossing = (index: number | null) => {
+    crossing.current = index;
+    if (box.current) box.current.toggleAttribute("data-aiming", index !== null);
+  };
+
+  /** Whether the pointer, now at `to`, is on its way into the list open beside. */
+  const aimingAt = (to: Point): boolean => {
+    const open = openNow.current;
+    const el = side.current;
+    const menu = box.current;
+    const from = trail.current[0];
+    if (!open || open.inPlace || !el || !menu || !from || el.style.visibility === "hidden") return false;
+    const list = el.getBoundingClientRect();
+    return aiming(from, to, list, list.left >= menu.getBoundingClientRect().left);
+  };
+
+  /**
+   * The pointer has arrived on a row and means it: the row takes the focus, a
+   * list open from another row closes, and a row with a list starts its rest.
+   */
+  const settle = (index: number, at: Point) => {
+    clearTimeout(linger.current);
+    markCrossing(null);
+    const row = rows.current[index];
+    if (row) hover(row);
+    const open = openNow.current;
+    if (open && !open.inPlace && open.at !== index) setOpen(null);
+    const item = items[index];
+    if (item && "items" in item && !item.disabled && open?.at !== index && noRoom.current !== index) armIntent(index, at);
+    else cancelIntent();
+  };
+
+  /** The pointer onto one of the menu's own rows. */
+  const enter = (index: number, at: Point) => {
+    const open = openNow.current;
+    if (open && !open.inPlace && open.at !== index && aimingAt(at)) {
+      markCrossing(index);
+      clearTimeout(linger.current);
+      linger.current = setTimeout(() => crossing.current !== null && settle(crossing.current, at), AIM_MS);
+      return;
+    }
+    settle(index, at);
+  };
+
+  /** Every move over the menu: the trail the aim is read from, a crossing that turns away, a rest that did not hold still. */
+  const move = (event: React.PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    const at = { x: event.clientX, y: event.clientY };
+    const index = crossing.current;
+    if (index !== null) {
+      if (aimingAt(at)) {
+        clearTimeout(linger.current);
+        linger.current = setTimeout(() => crossing.current !== null && settle(crossing.current, at), AIM_MS);
+      } else settle(index, at);
+    }
+    const resting = intent.current;
+    if (resting && Math.hypot(at.x - resting.from.x, at.y - resting.from.y) > REST_PX) armIntent(resting.row, at);
+    trail.current = [...trail.current, at].slice(-TRAIL);
+  };
+
   const aside =
     list && open && !open.inPlace ? (
       <div
@@ -239,7 +343,13 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
         style={sideAt ? { left: sideAt.x, top: sideAt.y } : { left: 0, top: 0, visibility: "hidden" }}
         onPointerDown={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.preventDefault()}
-        onPointerEnter={() => clearTimeout(linger.current)}
+        onPointerEnter={() => {
+          clearTimeout(linger.current);
+          markCrossing(null);
+          cancelIntent();
+          // What it did out there says nothing about where it goes next on the way back.
+          trail.current = [];
+        }}
         // A long list scrolls under the wheel, which the backdrop would
         // otherwise take as the layout moving and close everything.
         onWheel={(event) => event.stopPropagation()}
@@ -252,7 +362,16 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
     ) : null;
 
   return (
-    <Popover at={at} onClose={onClose} className="menu" role="menu" boxRef={box} onKeyDown={(event) => keys(event, false)} aside={aside}>
+    <Popover
+      at={at}
+      onClose={onClose}
+      className="menu"
+      role="menu"
+      boxRef={box}
+      onKeyDown={(event) => keys(event, false)}
+      onPointerMove={move}
+      aside={aside}
+    >
       {list && open?.inPlace ? (
         <>
           <button className="menu-item menu-back" role="menuitem" aria-label={`Back from ${list.label}`} onClick={back}>
@@ -280,18 +399,13 @@ export function Menu({ at, items, onClose }: { at: MenuAt; items: MenuItem[]; on
             rowRef={(el) => {
               rows.current[index] = el;
             }}
-            // A tap or a click opens a row's list and leaves it open; only
-            // Enter and Space arrive with no clicks counted, and they move
-            // into the list as Right does.
+            // A tap or a click opens a row's list at once and leaves it open;
+            // only Enter and Space arrive with no clicks counted, and they
+            // move into the list as Right does.
             onClick={(event) => ("items" in item ? openList(index, event.detail === 0) : pick(item))}
-            onHover={(row) => {
-              hover(row);
-              if ("items" in item) {
-                if (!item.disabled) openList(index, false);
-              } else if (open && !open.inPlace) {
-                clearTimeout(linger.current);
-                linger.current = setTimeout(() => setOpen(null), LINGER_MS);
-              }
+            onHover={(_, at) => enter(index, at)}
+            onLeave={() => {
+              if (intent.current?.row === index) cancelIntent();
             }}
           />
         ))
@@ -306,13 +420,15 @@ function Row({
   rowRef,
   onClick,
   onHover,
+  onLeave,
 }: {
   item: MenuItem;
   open?: boolean;
   rowRef?: (el: HTMLButtonElement | null) => void;
   onClick: (event: React.MouseEvent) => void;
   /** A mouse over the row; a finger has no hover and opens a list by tapping. */
-  onHover: (row: HTMLButtonElement) => void;
+  onHover: (row: HTMLButtonElement, at: Point) => void;
+  onLeave?: () => void;
 }) {
   const opens = "items" in item;
   const on = "items" in item ? undefined : item.on;
@@ -328,8 +444,9 @@ function Row({
       aria-expanded={opens ? open : undefined}
       onClick={onClick}
       onPointerEnter={(event) => {
-        if (event.pointerType === "mouse") onHover(event.currentTarget);
+        if (event.pointerType === "mouse") onHover(event.currentTarget, { x: event.clientX, y: event.clientY });
       }}
+      onPointerLeave={onLeave}
     >
       {/* Always rendered, so the labels line up whether or not anything in
           this menu is markable — a list that shifts sideways by a character
@@ -382,6 +499,7 @@ export function Popover({
   closeOnScroll = true,
   boxRef,
   onKeyDown,
+  onPointerMove,
   aside,
   children,
 }: {
@@ -393,6 +511,7 @@ export function Popover({
   /** The box, for a caller that focuses it; a box given keys can take the focus. */
   boxRef?: React.RefObject<HTMLDivElement | null>;
   onKeyDown?: (event: React.KeyboardEvent) => void;
+  onPointerMove?: (event: React.PointerEvent) => void;
   /** Drawn over the backdrop beside the box rather than in it — a menu row's list. */
   aside?: React.ReactNode;
   children: React.ReactNode;
@@ -456,6 +575,7 @@ export function Popover({
         role={role}
         tabIndex={onKeyDown ? -1 : undefined}
         onKeyDown={onKeyDown}
+        onPointerMove={onPointerMove}
         onPointerDown={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.preventDefault()}
       >

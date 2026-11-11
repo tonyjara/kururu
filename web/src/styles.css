@@ -5166,6 +5166,13 @@ html.pill-page #root {
   color: var(--text);
   outline: none;
 }
+/* A pointer on its way to an open list crosses the rows under the one that
+   opened it (`Menu`, `aiming`); they are not lit as it passes, since none of
+   them is where it is going and the open row is still the one that counts. */
+.menu[data-aiming] .menu-item:hover:not(.menu-item-open):not(:focus-visible) {
+  background: transparent;
+  color: var(--dim);
+}
 /* The mark that a row opens a list rather than doing something. */
 .menu-more {
   flex: none;
