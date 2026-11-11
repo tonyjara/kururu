@@ -1184,7 +1184,7 @@ export function dialDelay(failures: number): number {
   return Math.min(30_000, 1000 * 2 ** Math.min(failures, 5));
 }
 
-/** A time of day the way the sidebar says it, for "away since 23:10". */
+/** A time of day the way the Nodes popover says it, for "away since 23:10". */
 function clock(at: number): string {
   const d = new Date(at);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

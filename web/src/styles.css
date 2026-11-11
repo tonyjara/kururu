@@ -849,7 +849,6 @@ kbd {
    already says they are. They are small and fixed — a row a node and a handful
    of links — so when the window is short they are the wrong place to find
    room; the list of agents is. */
-.side-nodes,
 .side-dev {
   flex: none;
 }
@@ -1868,18 +1867,19 @@ kbd {
   opacity: 0.55;
 }
 
-/* The other nodes — see `Nodes` in Sidebar.tsx. Capped and scrolled, since
-   a node with a dozen workspaces must not push the agents away. A workspace is a name and its agents' marks on one line, the
-   workspace list's face with the agent list's marks. */
+/* The other nodes, in the bottom bar's popover — see `Nodes.tsx`. Capped
+   and scrolled, since a node with a dozen workspaces must not run the
+   popover off the top of the window. A workspace is a name and its agents'
+   marks on one line, the workspace list's face with the agent list's marks. */
 .node-list {
   list-style: none;
   margin: 0;
-  padding: 0 6px 4px;
+  padding: 0 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
-  max-height: 35vh;
+  max-height: 50vh;
 }
 .node-item {
   display: flex;
@@ -4174,6 +4174,23 @@ a.button {
   display: flex;
 }
 
+/* The nodes chip, after the machines and drawn as they are — see
+   `Nodes.tsx`. The frog in the bar's gray, the count of nodes linked, "1/2"
+   and the stale dot when one is away, and the accent's dot when something
+   on one needs you. On a phone the glyph and the dots, as the machines'. */
+.sb-nodes .sb-usage-chip {
+  gap: 5px;
+}
+.sb-nodes-n {
+  font-variant-numeric: tabular-nums;
+}
+:root[data-narrow] .sb-nodes-n {
+  display: none;
+}
+.sb-nodes .usage-pop {
+  width: 300px;
+}
+
 /* The OpenRouter chip, after the machines — see `OpenRouter.tsx`. The gray
    mark and the balance in its colour, at the bar's size rather than
    the sidebar's; whole dollars on a phone, so the workspace's name keeps its
@@ -4956,7 +4973,7 @@ html.pill-page #root {
   font-size: var(--fs-md);
 }
 /* A heading inside a pick list: another node's workspaces under its name,
-   in its hue, as the sidebar's Nodes section heads them. */
+   in its hue, as the bottom bar's Nodes popover heads them. */
 .dialog-group {
   display: flex;
   align-items: center;

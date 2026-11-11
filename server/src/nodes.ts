@@ -3,7 +3,7 @@
  * what each node tells the rest about itself.
  *
  * A child kururu on a box that stays on is only half useful until the Mac
- * can see it — its workspaces in the sidebar, its blocked agent in the
+ * can see it — its workspaces on the bottom bar, its blocked agent in the
  * Needs tray, its boards in the backup — and the child can say when the
  * Mac went away. This is the part that makes them see each other, and the
  * rules it keeps are `shared/nodes.ts`'s: the parent signs a roster, a key

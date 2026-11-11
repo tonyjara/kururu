@@ -121,7 +121,7 @@ export interface NodeWatchDeps {
   /**
    * What `C-a N`, `C-a P` and `C-a z` need to step across nodes: this
    * node's workspaces in order and which is active (`key` as `noteLocal` is
-   * told it), the nodes in the sidebar's order, and a way to switch locally.
+   * told it), the nodes in the order the Nodes popover draws them, and a way to switch locally.
    * Without it those keys walk this node's list alone, as they did before.
    */
   across?: {
@@ -1012,7 +1012,7 @@ export class NodeWatches {
 
   /**
    * `C-a N`, `C-a P` and `C-a z`, across nodes: the walk is this node's
-   * workspaces and then each node's, in the sidebar's order
+   * workspaces and then each node's, in the Nodes popover's order
    * (`stepAcross`), and the toggle goes back to a remote workspace as it
    * goes back to a local one. True when it was done here; false for the
    * local verb to do as ever, which is the whole of it when no node can be

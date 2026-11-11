@@ -1,7 +1,7 @@
 /**
  * The sidebar's foldable section heading and the per-device memory of whether
  * it is open, in a module of their own so that a section drawn outside
- * Sidebar.tsx — Automations — folds the same way Nodes and Dev servers do,
+ * Sidebar.tsx — Automations — folds the same way Dev servers does,
  * without Automations.tsx importing back the file that imports it.
  */
 import { useState, type ReactNode } from "react";

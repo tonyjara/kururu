@@ -8,7 +8,7 @@
  * workspace this is: the head of the top-left pane's strip. While the watch
  * is down the panes keep what their emulators hold, greyed, because a window
  * that empties itself when a lid closes is a window nobody can read; the
- * band says since when, in the sidebar's words (`web/src/nodes.ts`).
+ * band says since when, in the Nodes popover's words (`web/src/nodes.ts`).
  */
 import { useEffect, useState } from "react";
 import type { RemoteView } from "../../../shared/remote";

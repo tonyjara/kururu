@@ -2,7 +2,7 @@
 
 A **node** is any kururu. The Mac is the **parent**, a box set up by
 [`kururu child setup`](linux.md) is a **child**, and once the two are paired
-each draws the other: the Mac's sidebar and Needs drawer show the child's
+each draws the other: the Mac's bottom bar and Needs drawer show the child's
 workspaces, agents and asks, the Mac's backup carries the child's boards, and
 the child's own page says when the Mac went away. This is phase 2 of
 [the plan](plans/kururu-parent-child.md#phase-2--nodes-the-roster-the-mesh-the-mirror).
@@ -159,12 +159,18 @@ database, and the parent's are the parent's.
   - On a child: the parent's roster, read-only.
   - On a node in no roster: Add a computer, and the place to paste the
     Mac's command when this is the new computer.
-- **The sidebar's Nodes section:** each node's workspaces with the Needs
-  dot, greyed with "away since" when not up. On a node that can be watched
+- **The Nodes chip on the bottom bar** (`web/src/components/Nodes.tsx`,
+  beside the machines, behind its switch in Settings → Bottom bar): a frog
+  and how many nodes are linked — "1/2" and the stale dot when one is away,
+  the accent's dot when something on an up node needs you. Its popover, on
+  a hover or a tap, is what the sidebar's Nodes section was until
+  2026-11-10: each node's workspaces with the Needs dot, greyed with "away
+  since" when not up. On a node that can be watched
   (`NodeSummary.watchable`), a workspace's row puts it on this screen and
-  its agents' rows go to their terminals ([below](#remote-workspaces)); the
-  heading stays a link to the node's own page, for its Settings. An older
-  node's rows are links to it, with "update it" in the tooltip.
+  its agents' rows go to their terminals ([below](#remote-workspaces)), and
+  the parent's + makes a workspace there; the heading stays a link to the
+  node's own page, for its Settings. An older node's rows are links to it,
+  with "update it" in the tooltip.
 - **The Needs chip and drawer:** add each up node's needs and draw a band per
   node. An away node is not counted.
 - **The Share dialog:** each node's own QR code. On the parent that QR
@@ -1136,7 +1142,7 @@ with "ask_kuru omarchy". Nothing in this goes near the node's `/mcp`.
 **The keyboard and the edges** (phase 5).
 
 - **`C-a N` and `C-a P` walk this node's workspaces, then each node's**, in
-  the sidebar's order, and wrap (`workspacesAcross`, `stepAcross` in
+  the Nodes popover's order, and wrap (`workspacesAcross`, `stepAcross` in
   `shared/remote.ts`). A node is in the walk on the terms its Needs are:
   up, and new enough to be watched. The relay takes the two verbs
   (`NodeWatches.step`) rather than letting them through to this node's

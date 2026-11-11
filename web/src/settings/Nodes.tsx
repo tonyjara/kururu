@@ -293,7 +293,7 @@ function OpenLink({ node }: { node: NodeStatus }) {
 
 /**
  * What a node is to this window. Its workspaces, its agents and what needs
- * you there are on the sidebar and in the Needs drawer, and a click puts
+ * you there are in the bottom bar's Nodes popover and in the Needs drawer, and a click puts
  * them here; the node's own page, from the tray, the picker or the roster
  * above, is for its Settings. Typing over the link costs what ssh to the
  * same box costs, which is the distance between the two computers and not
@@ -310,7 +310,7 @@ function InThisWindow({ view }: { view: NodesView }) {
       {shown.length > 0 && (
         <>
           <P>
-            {names(shown)}'s workspaces are under Nodes in the sidebar, and open here with this Mac's beside them: their panes, their boards, their files.{" "}
+            {names(shown)}'s workspaces are under the frog on the bottom bar, and open here with this Mac's beside them: their panes, their boards, their files.{" "}
             <Mono>C-a w</Mono> lists them, and <Mono>C-a N</Mono> and <Mono>C-a P</Mono> step onto them after this Mac's own.
           </P>
           <P>

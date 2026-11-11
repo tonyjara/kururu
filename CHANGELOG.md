@@ -102,8 +102,17 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **Other computers moved to the bottom bar.** The sidebar's Nodes section
+  is gone; a frog beside the machines on the bottom bar stands for it, with
+  how many of your other kururus are linked ("1/2" and a grey dot when one
+  is away) and a dot when something on one needs you. Hover or tap it for
+  each one's workspaces and agents: a click puts a workspace on screen or
+  goes to an agent's terminal, the + makes a workspace there, and the name
+  opens its own page. `C-a w`, `C-a N` and `C-a P` reach them as before.
+  It can be switched off in Settings → Bottom bar.
+
 - **Automations fold away.** The sidebar's Automations heading has the caret
-  Nodes and Dev servers have, and folds the same way, remembered on each
+  Dev servers has, and folds the same way, remembered on each
   device. Shut, it shows how many there are, with a dot in front when one
   has failed, needs an edit, is asking or is running. Its ⋯ and + work as
   before.

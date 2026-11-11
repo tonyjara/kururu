@@ -564,7 +564,7 @@ export type WorkspacePlace = { here: string } | { there: { node: string; workspa
 
 /**
  * The workspaces `C-a N` and `C-a P` walk, and `C-a w` lists: this node's
- * in its own order, then each node's as the sidebar draws them, which is
+ * in its own order, then each node's as the bar's Nodes popover draws them, which is
  * the order `nodes` arrives in. A node is in the walk on the terms its
  * Needs are (`nodeNeeds`): up, and new enough to be watched. An away node's
  * workspaces are its last summary's, and stepping onto one would put a

@@ -1,10 +1,10 @@
 /**
  * The words and shapes the four drawings of another node share: the
- * sidebar's section, the Needs drawer's band, the Share dialog's codes and
+ * bottom bar's Nodes popover, the Needs drawer's band, the Share dialog's codes and
  * Settings → Nodes.
  *
  * Apart from those four so that a node's state is said one way wherever it
- * is said — "away since 23:10" in the sidebar and "away since 11:10 PM" in
+ * is said — "away since 23:10" on the bar and "away since 11:10 PM" in
  * Settings would be two clocks reading one fact. Nothing here decides
  * anything; the rules are `shared/nodes.ts`'s and the server's.
  */

@@ -2,7 +2,7 @@
  * Which of the bottom bar's chips are drawn — Settings → Bottom bar.
  *
  * The bar grew a chip at a time (the allowances, this Mac's load, the
- * machines, OpenRouter) and every one was right for somebody, but not every
+ * machines, the nodes, OpenRouter) and every one was right for somebody, but not every
  * one for everybody: a person who already watches their Mac's load in another
  * tool reads the load chip as noise at the edge of the eye. So each one that
  * is *information* gets a switch, and the ones that are controls or modes —
@@ -22,7 +22,7 @@
  */
 
 /** A chip that can be switched off, in the order the bar draws them. */
-export type BarItem = "claude" | "codex" | "agy" | "load" | "machines" | "openrouter" | "watched" | "agents";
+export type BarItem = "claude" | "codex" | "agy" | "load" | "machines" | "nodes" | "openrouter" | "watched" | "agents";
 
 /** Every switchable chip, in bar order, with the words Settings shows beside its switch. */
 export const BAR_ITEMS: ReadonlyArray<{ id: BarItem; label: string; hint: string }> = [
@@ -31,6 +31,7 @@ export const BAR_ITEMS: ReadonlyArray<{ id: BarItem; label: string; hint: string
   { id: "agy", label: "Antigravity", hint: "Antigravity's quota, as agy last reported it." },
   { id: "load", label: "This Mac", hint: "Load, free memory and the slot queue. Hiding it changes nothing behind it." },
   { id: "machines", label: "Machines", hint: "Your other computers, in the colour of the worst load." },
+  { id: "nodes", label: "Nodes", hint: "The other kururus, their workspaces and what needs you there." },
   { id: "openrouter", label: "OpenRouter", hint: "Your balance, once a key is set." },
   { id: "watched", label: "Watched by", hint: "On a node: which window can type into its terminals." },
   { id: "agents", label: "Agent count", hint: "How many agents are running, and how many are working." },

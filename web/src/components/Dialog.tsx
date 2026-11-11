@@ -49,7 +49,7 @@ export interface PickItem {
    * The heading it is listed under, for a list of two kinds of thing — `C-a
    * w`'s workspaces of this computer and then each node's. Items with one
    * come after the ones without, grouped as given; `nodeId` tints the
-   * heading in that node's hue, as its sidebar heading is.
+   * heading in that node's hue, as its heading in the bar's Nodes popover is.
    */
   group?: { name: string; nodeId?: string };
 }

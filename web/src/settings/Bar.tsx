@@ -14,7 +14,7 @@ import { BAR_ITEMS, barShows, withBarItem, type BarItem, type BarSettings } from
 import * as api from "../session";
 import { Group, Toggle } from "./ui";
 
-const LEFT: ReadonlySet<BarItem> = new Set(["claude", "codex", "agy", "load", "machines", "openrouter"]);
+const LEFT: ReadonlySet<BarItem> = new Set(["claude", "codex", "agy", "load", "machines", "nodes", "openrouter"]);
 
 export function BarPage({ bar }: { bar: BarSettings }) {
   const row = (item: (typeof BAR_ITEMS)[number]) => (

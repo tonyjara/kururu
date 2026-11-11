@@ -1,8 +1,8 @@
 /**
  * Another node's name, in its own hue: what every remote thing on this
  * screen wears so it is never mistaken for one of this machine's — the
- * band over a remote workspace's panes, each of its tabs, the sidebar's
- * heading for it.
+ * band over a remote workspace's panes, each of its tabs, its heading
+ * in the bottom bar's Nodes popover.
  *
  * The machines chip's shape (`.remote-mark`), with the hue added, because
  * the two say the same kind of fact — this is somewhere else — and differ

@@ -17,7 +17,8 @@
  * is the left end's gauges — the Claude and Codex allowances (`Usage.tsx`),
  * this Mac's load and its slot queue (`Load.tsx`), the machines
  * (`Machines.tsx`) and the OpenRouter balance (`OpenRouter.tsx`),
- * down from the sidebar on 2026-10-18:
+ * down from the sidebar on 2026-10-18, and the other nodes (`Nodes.tsx`),
+ * which followed on 2026-11-10:
  * things of a different kind, whose detail opens upwards over the panes
  * rather than the drawers.
  *
@@ -41,13 +42,15 @@
  * things a keyboard does for free.
  */
 import type { ReactNode } from "react";
-import { countsAsAgent, type AgentSnapshot } from "../../../shared/model";
+import { countsAsAgent, type AgentSnapshot, type MascotSet } from "../../../shared/model";
 import { barShows, type BarSettings } from "../../../shared/statusbar";
 import { LoadChip } from "./Load";
 import { MachinesChip } from "./Machines";
+import { NodesChip } from "./Nodes";
 import { OpenRouterChip } from "./OpenRouter";
 import { UsageChips } from "./Usage";
 import { useKururu } from "../session";
+import type { DialogState } from "./Dialog";
 
 interface Props {
   agents: readonly AgentSnapshot[];
@@ -84,8 +87,14 @@ interface Props {
   onLastPane: () => void;
   /** The two drawers' chips, on a phone; null where they are at the top. */
   chips: ReactNode;
-  /** A page of Settings, from the machines or OpenRouter chip's popover. */
-  onSettings: (page: "machines" | "specs" | "openrouter") => void;
+  /** A page of Settings, from the machines, nodes or OpenRouter chip's popover. */
+  onSettings: (page: "machines" | "specs" | "nodes" | "openrouter") => void;
+  /** What the nodes chip's rows draw their agents with. */
+  mascots: MascotSet;
+  /** Which node's workspace is on this screen, if one is, for its row in the nodes chip. */
+  remoteOn: { nodeId: string; workspaceKey: string } | null;
+  /** The dialog the nodes chip's + asks a new workspace's folder in. */
+  onPrompt: (state: DialogState) => void;
   /** Settings → Usage, from an allowance's chip. */
   onUsage: () => void;
   /**
@@ -109,6 +118,9 @@ export function StatusBar({
   chips,
   onSettings,
   onUsage,
+  mascots,
+  remoteOn,
+  onPrompt,
   bar,
 }: Props) {
   const running = agents.filter(countsAsAgent);
@@ -126,6 +138,12 @@ export function StatusBar({
           Hidden, it is only not drawn: the queue admits by the load as it did. */}
       {barShows(bar, "load") && <LoadChip />}
       {barShows(bar, "machines") && <MachinesChip onSettings={onSettings} />}
+      {/* The other kururus, a frog and how many are linked, and their
+          workspaces in the popover. They were a section of the sidebar
+          until 2026-11-10. See `Nodes.tsx`. */}
+      {barShows(bar, "nodes") && (
+        <NodesChip mascots={mascots} remoteOn={remoteOn} onPrompt={onPrompt} onSettings={() => onSettings("nodes")} />
+      )}
       {barShows(bar, "openrouter") && <OpenRouterChip onSettings={() => onSettings("openrouter")} />}
       {/* Flexes whatever is on either side of it, so with every gauge off the
           right end still stands at the right edge. */}

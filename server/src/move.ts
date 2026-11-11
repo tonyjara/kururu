@@ -169,7 +169,7 @@ export class Mover {
   }
 
   /**
-   * A new workspace on another node, from its heading in the sidebar: the
+   * A new workspace on another node, from its + in the bottom bar's Nodes popover: the
    * node's word on the folder as the field is typed — its guess, made of
    * the name, when there is none yet. The same check a move makes, read by
    * `newFolderOk`, which lets a folder that is not a checkout through.

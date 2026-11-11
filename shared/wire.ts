@@ -916,7 +916,7 @@ export type ClientMessage =
   | { type: "switch-workspace"; workspaceId: string }
   /**
    * Put another node's workspace on this screen, by key — a row under the
-   * node's heading in the sidebar, which is drawn from the node's summary and
+   * node's heading in the bottom bar's Nodes popover, which is drawn from the node's summary and
    * so knows the key, not the counter id the node's own snapshot would give.
    * Answered by this server and never forwarded as it is; see
    * `server/src/nodewatch.ts`. A local `switch-workspace` puts this node's

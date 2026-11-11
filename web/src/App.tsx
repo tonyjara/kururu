@@ -1670,6 +1670,9 @@ export function App() {
         resizeMode={resizeMode}
         onSettings={setSettings}
         onUsage={() => setSettings("usage")}
+        mascots={snapshot.mascots}
+        remoteOn={remote ? { nodeId: remote.node.id, workspaceKey: remote.workspaceKey } : null}
+        onPrompt={setDialog}
         bar={snapshot.appearance.bar}
         /* The toggle and the chips come down here on a phone only: its
            sidebar is a screen, so there is no header on show to hold them. */
