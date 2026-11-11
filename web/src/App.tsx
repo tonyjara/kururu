@@ -66,7 +66,7 @@ import { useWindowFrame, WindowButtons } from "./components/WindowButtons";
 import { ReloadNotice } from "./components/ReloadNotice";
 import { VaultAsks } from "./components/VaultAsk";
 import { KuruDrawer } from "./components/KuruDrawer";
-import { closeKuru, kuruLive, leaveKuruSearch, openKuru, quoteInKuru, referCardIn, searchInKuru, toggleKuru, useKuruDrawer } from "./kuru";
+import { closeKuru, kuruLive, leaveKuruSearch, listenForGifts, openKuru, quoteInKuru, referCardIn, searchInKuru, toggleKuru, useKuruDrawer } from "./kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "./needs";
 import { arrangedNeeds, useNeedsView } from "./needsorder";
 import { NeedsDrawer } from "./components/NeedsDrawer";
@@ -573,6 +573,8 @@ export function App() {
    * on it.
    */
   useEffect(() => desktop()?.onOpenKuru?.((focus, toggle) => (toggle ? toggleKuru(focus) : openKuru(focus))), []);
+  /** What this page handed the floating Kuru's chat and came back, the chat having gone in between: into this drawer after all. */
+  useEffect(() => listenForGifts(), []);
 
   /**
    * A note window asking for its card on its board: a workspace's in its
@@ -601,7 +603,11 @@ export function App() {
    * profile, as `cardAsked` is.
    */
   const referNote = (cardId: string, quote: CardQuote | null = null) => {
-    if (profile) referCardIn(profile, cardId, api.nodeNameOf, quote);
+    if (!profile) return;
+    // With the floating Kuru's chat open the main process tells this page
+    // without bringing it up, so a reference this drawer keeps (`kuruTarget`)
+    // asks for the window, which a note's reference always got.
+    if (referCardIn(profile, cardId, api.nodeNameOf, quote) === "here" && !document.hasFocus()) desktop()?.float?.go();
   };
   /**
    * Part of a card, a message or a file quoted from this page — a board's card,

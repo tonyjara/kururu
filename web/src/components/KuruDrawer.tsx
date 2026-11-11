@@ -158,7 +158,7 @@ import { TAP_MS, type OutboxState, type VoiceSettings } from "../../../shared/vo
 import { chipsIn, filesStillIn, piecesOf, type Chip } from "../../../shared/chips";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
 import { clearInkNote, hasPen, pencil, useInk } from "../ink";
-import { kuruLive, kuruWorking, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive } from "../kuru";
+import { handToKuru, kuruBoxUsed, kuruLive, kuruWorking, replyInKuru, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive, type KuruQuoting } from "../kuru";
 import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, writeFolds, type Folds } from "../kurufold";
 import { foldInline, replyTree } from "../kurumd";
 import { useKuruSearch } from "../kurusearch";
@@ -282,12 +282,13 @@ export function KuruDrawer({
   /**
    * A line's reply arrow was pressed: the composer quotes it, and has the
    * keyboard — and starts `@node ` for another node's line, so the reply goes
-   * to the Kuru that knows it. A counter, so the same line twice asks twice.
+   * to the Kuru that knows it. A hand-off like a card's reference
+   * (`replyInKuru`), so with the floating Kuru's chat open it is the chat's
+   * box that quotes it.
    */
-  const [replyAsk, setReplyAsk] = useState<{ quoting: Quoting; n: number } | null>(null);
   const replyTo = useCallback((item: NodeKuruItem & (YouItem | KuruReply | NoticeItem)) => {
     const ref = replyRefOf(item, ownId(item), Date.now());
-    if (ref) setReplyAsk((was) => ({ quoting: { node: item.node, at: item.at, ref }, n: (was?.n ?? 0) + 1 }));
+    if (ref) replyInKuru({ node: item.node, at: item.at, ref });
   }, []);
   /**
    * The words a quote of a line's words is written after — the reference
@@ -1153,7 +1154,7 @@ export function KuruDrawer({
 
       <Live live={live} working={working} profileId={profile.id} mascot={mascot} onTerminal={onTerminal} />
 
-      <Composer profileId={profile.id} onEditing={onEditing} peers={kuruPeers} replyAsk={replyAsk} />
+      <Composer profileId={profile.id} onEditing={onEditing} peers={kuruPeers} />
 
       {/* The edge you drag, on the sidebar's and the tree's terms: last in the
           tree and absolutely positioned, so it sits over the border rather
@@ -1384,12 +1385,8 @@ function ownId(item: NodeKuruItem): string {
   return item.node === null ? item.id : item.id.slice(item.id.indexOf("/") + 1);
 }
 
-/** What the composer is replying to: the line's reference, whose conversation it is in (null for this node's), and when it was said, for the time the reference is sent with. */
-interface Quoting {
-  node: string | null;
-  at: number;
-  ref: ReplyRef;
-}
+/** What the composer is replying to (`KuruQuoting`, kept beside the hand-offs since a reply arrow is one). */
+type Quoting = KuruQuoting;
 
 /** Who a quote is from, as the drawer says it: your own lines are yours, and another node's Kuru is that node's. */
 function quoteWho(who: string, node: string | null): string {
@@ -2166,14 +2163,11 @@ function Composer({
   profileId,
   onEditing,
   peers,
-  replyAsk,
 }: {
   profileId: string;
   onEditing: (editing: boolean) => void;
   /** The other nodes' Kurus, which `@name` at the start of a message is for. */
   peers: PeerKuru[];
-  /** A line's reply arrow: quote it, address its node, and take the keyboard. */
-  replyAsk: { quoting: Quoting; n: number } | null;
 }) {
   const [text, setText] = useState(() => readDraft(profileId));
   const [caret, setCaret] = useState<number | null>(null);
@@ -2212,13 +2206,16 @@ function Composer({
     writeQuoting(profileId, next);
   };
   const names = peers.map((peer) => peer.node.name);
-  useEffect(() => {
-    if (!replyAsk) return;
-    quote(replyAsk.quoting);
-    const node = replyAsk.quoting.node;
-    // Whatever was already being written stays, addressed to where the line
-    // is: another node's line puts `@node` in front, this node's takes off
-    // an address to another, which would carry the reply away from it.
+  /**
+   * A line's reply arrow, handed here (`replyInKuru`): quote it, address its
+   * node, and take the keyboard. Whatever was already being written stays,
+   * addressed to where the line is: another node's line puts `@node` in
+   * front, this node's takes off an address to another, which would carry
+   * the reply away from it.
+   */
+  const replyHere = (quoting: Quoting) => {
+    quote(quoting);
+    const node = quoting.node;
     setText((was) => {
       const at = typedAddress(was, names);
       const rest = at ? was.slice(at.to).replace(/^[,:]?\s*/, "") : was;
@@ -2231,8 +2228,27 @@ function Composer({
       el.focus();
       requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length));
     }
-    // Only a new ask, not a re-render, moves the cursor.
-  }, [replyAsk?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
+  /**
+   * One draft, whichever box it is typed in. The window's drawer and the
+   * floating Kuru's chat are pages of one origin and keep the draft, the
+   * reply it answers and its files in the same `localStorage` entries; each
+   * box reads them when it mounts, and follows the other's writes here, so
+   * a card handed to the chat goes in after what was half-typed in the
+   * drawer, and the drawer shows it afterwards, rather than the two boxes
+   * writing over each other's copy. A `storage` event is only ever another
+   * page's write, so this never echoes its own.
+   */
+  useEffect(() => {
+    const follow = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage || event.key === null) return;
+      if (event.key === DRAFT_KEY + profileId) setText(event.newValue ?? "");
+      else if (event.key === QUOTING_KEY + profileId) setQuoting(readQuoting(profileId));
+      else if (event.key === FILES_KEY + profileId) setFiles(readFiles(profileId));
+    };
+    window.addEventListener("storage", follow);
+    return () => window.removeEventListener("storage", follow);
+  }, [profileId]);
   const address = typedAddress(text, names);
   const toPeer = address ? peers.find((peer) => peer.node.name === address.node) : undefined;
   const query = caret === null || closedOn === text ? null : addressQuery(text, caret);
@@ -2328,7 +2344,8 @@ function Composer({
     if (!words || took.current === words.n) return;
     took.current = words.n;
     takeKuruWords(words.n);
-    putIn(words.text, words.line);
+    if (words.reply) replyHere(words.reply);
+    if (words.text) putIn(words.text, words.line, words.paths ?? []);
     // Only new words, not a re-render, touch the draft.
   }, [words?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   /**
@@ -2360,7 +2377,8 @@ function Composer({
       const escaped = paths.filter((path): path is string => !!path).map(escapePath);
       const words = escaped.join(" ");
       if (!words) return;
-      if (shown.current === profileId) putIn(words, false, escaped);
+      // Handed on like a card's reference: into this box, or the floating Kuru's chat while it is open.
+      if (shown.current === profileId) handToKuru({ text: words, paths: escaped });
       else {
         const was = readDraft(profileId);
         const next = insertWords(was, was.length, was.length, words).text;
@@ -2554,7 +2572,7 @@ function Composer({
           })}
         </ul>
       )}
-      <div className={`kuru-box ${over ? "kuru-box-drop" : ""}`} title={boxSays ?? peerSays ?? undefined}>
+      <div className={`kuru-box ${over ? "kuru-box-drop" : ""}`} title={boxSays ?? peerSays ?? undefined} onPointerDownCapture={kuruBoxUsed} onKeyDownCapture={kuruBoxUsed}>
         <div className="kuru-write">
           <ChipField
             ref={field}

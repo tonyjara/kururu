@@ -32,6 +32,8 @@ function adopt(raw: unknown): FloatState | null {
     wide: r.wide === true,
     pen: r.pen === true,
     logo: typeof r.logo === "number" && Number.isFinite(r.logo) ? Math.max(48, Math.min(240, r.logo)) : undefined,
+    give: r.give === true,
+    chatAt: typeof r.chatAt === "number" && Number.isFinite(r.chatAt) ? r.chatAt : 0,
   };
 }
 
@@ -42,7 +44,16 @@ function take(raw: unknown): void {
   for (const listener of listeners) listener();
 }
 
-/** Asked once, on the first reader, and listened to for as long as the page lives: a page has one main process. */
+/**
+ * Asked once, on the first reader, and listened to for as long as the page
+ * lives: a page has one main process. Exported for a reader that is not a
+ * component — the window's `kuruTarget`, which has to know the chat is open
+ * when nothing on screen draws the floating Kuru.
+ */
+export function followFloat(): void {
+  ask();
+}
+
 function ask(): void {
   if (asked) return;
   asked = true;

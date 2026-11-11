@@ -903,6 +903,30 @@ page is never a voice client: it takes no clip for Kuru and plays no reply, its
 gestures (Escape while Kuru speaks, a reply's Stop) go to the pill across the
 bridge as the window's do, and only the box's own mic dictates in it.
 
+**While the chat is open, what is handed to Kuru goes into it** (the owner,
+2026-11-11). "Reference in Kuru" on a card, a quote of a card, a line or a
+file, a reader's file, a note's reference, the pen's marks, a dropped or
+pasted file and a reply arrow all go through one function, `handToKuru` in
+`web/src/kuru.ts`, and no call site writes into a box itself. It asks
+`kuruTarget`: the chat whenever it is open, unless the window's drawer is open
+too and its box was pressed or typed in after the chat last had the keyboard
+(`FloatState.chatAt`, the main process's, on the same clock). Typing, not
+focus, because a window brought forward gives the focus back to the box it
+was in. For the chat, the window's page sends the gift
+(`kururu:float-give`, taken from the window only), the main process opens the
+chat if it shut a moment before, sends it to the chat's page
+(`kururu:float-gift`, kept by the preload until the page listens) and gives
+the chat the keyboard; the chat's page puts it in at its cursor exactly as
+the drawer does. A gift the chat cannot take goes back to the window's box. A
+note window's reference is written by the window's page, which is no longer
+brought up for it while the chat is open (and asks to be when it keeps one);
+with no window it is written by the chat's page. With the chat shut, or in an
+app from before `give`, everything goes where it always went. **There is one
+draft:** both boxes keep it, its reply and its files in the same
+`localStorage` entries and follow each other's writes (the `storage` event),
+so a gift goes in after what was half-typed in the other box, and a message
+sent from one empties both.
+
 **The drawers are mounted only while the chat is open.** A reply stops being
 unheard once it has been in view in an open drawer, and a drawer left mounted
 in a hidden window would read every reply as it arrived with nobody looking.

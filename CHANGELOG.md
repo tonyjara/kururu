@@ -15,6 +15,15 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **With the floating Kuru's chat open, what you hand Kuru goes there.**
+  Reference in Kuru on a card, a quote from a card, a note, a document or the
+  conversation, a file from the reader, the pen's marks, a dropped or pasted
+  file and a reply arrow all land in the floating chat's box, which comes
+  forward with the cursor in it, instead of opening the drawer in the window.
+  If you were just typing in the window's drawer, it stays there. The two
+  boxes share one draft, so nothing half-typed in one is lost to the other.
+  With the chat shut, nothing changes. Needs the app rebuilt.
+
 - **Every workspace has a root folder.** Set it in Settings → Workspaces,
   typed or with Choose… in the desktop app, and every new terminal, split,
   nvim, LazyGit, agent, card run and automation in that workspace starts

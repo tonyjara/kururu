@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { addCard, emptyBoard, emptyProfileBoard } from "../../shared/board";
 import { splitCardRefs, type CardRef } from "../../shared/kuru";
 import type { Profile, Workspace } from "../../shared/model";
-import { closeKuru, insertInKuru, kuruDrawerNow, openKuru, referCardIn, referItem, takeKuruWords } from "../src/kuru";
+import type { FloatState } from "../src/desktop";
+import { adoptGift, closeKuru, insertInKuru, kuruDrawerNow, openKuru, pickKuruTarget, referCardIn, referItem, replyInKuru, takeKuruWords } from "../src/kuru";
 
 const ref: CardRef = { code: "ACM-16", title: "Design the checkout page for the phone", place: "w8", cardId: "c3f9a1e07b2d4" };
 
@@ -60,14 +61,14 @@ describe("referCardIn", () => {
     const fromMenu = kuruDrawerNow().words!;
     takeKuruWords(fromMenu.n);
     closeKuru();
-    expect(referCardIn(profile, "c0123456789ab", names)).toBe(true);
+    expect(referCardIn(profile, "c0123456789ab", names)).toBe("here");
     expect(kuruDrawerNow().open).toBe(true);
     expect(kuruDrawerNow().words?.text).toBe(fromMenu.text);
     expect(fromMenu.text).toBe(`[card NYT-1 "Pick the 'launch' date" (profile/c0123456789ab)]`);
   });
 
   it("writes a workspace card's with the workspace it is on now", () => {
-    expect(referCardIn(profile, "c0123456789ac", names)).toBe(true);
+    expect(referCardIn(profile, "c0123456789ac", names)).toBe("here");
     const text = kuruDrawerNow().words!.text;
     expect(text).toBe('[card ACM-1 "Fix the login" (w3/c0123456789ac)]');
     expect(splitCardRefs(text)).toEqual([{ ref: { code: "ACM-1", title: "Fix the login", place: "w3", cardId: "c0123456789ac" } }]);
@@ -75,12 +76,12 @@ describe("referCardIn", () => {
 
   it("names another node's workspace by the node, as the board does", () => {
     const only = { ...profile, workspaces: [workspace("n:n0a1b2c3d4e5f:w9", "Shop")] } as Profile;
-    expect(referCardIn(only, "c0123456789ac", names)).toBe(true);
+    expect(referCardIn(only, "c0123456789ac", names)).toBe("here");
     expect(kuruDrawerNow().words?.text).toBe('[card SHO-1 "Fix the login" (omarchy:w9/c0123456789ac)]');
   });
 
   it("puts nothing in for a card that is not in the profile", () => {
-    expect(referCardIn(profile, "c999999999999", names)).toBe(false);
+    expect(referCardIn(profile, "c999999999999", names)).toBeNull();
     expect(kuruDrawerNow().open).toBe(false);
     expect(kuruDrawerNow().words).toBeNull();
   });
@@ -130,5 +131,66 @@ describe("insertInKuru", () => {
     expect(kuruDrawerNow().open).toBe(true);
     expect(kuruDrawerNow().asked).toBe(before + 1);
     expect(kuruDrawerNow().focus).toBeNull();
+  });
+});
+
+/**
+ * Which box a hand-off goes into: the floating Kuru's chat whenever it is
+ * open, unless the window's drawer is open too and was written in after the
+ * chat had the keyboard; and this page's drawer whenever there is no chat to
+ * hand to.
+ */
+describe("pickKuruTarget", () => {
+  const open: FloatState = { on: true, open: true, side: "above", reach: "left", wave: 132, role: null, give: true, chatAt: 1000 };
+
+  it("is the chat while it is open", () => {
+    expect(pickKuruTarget(open, true, false, 0)).toBe("float");
+    expect(pickKuruTarget(open, true, true, 500)).toBe("float");
+  });
+
+  it("is the window's drawer when its box was written in after the chat had the keyboard", () => {
+    expect(pickKuruTarget(open, true, true, 2000)).toBe("here");
+    // A drawer since shut is not being written in.
+    expect(pickKuruTarget(open, true, false, 2000)).toBe("float");
+  });
+
+  it("is here with the chat shut, the floating Kuru off, or no bridge to say any of it", () => {
+    expect(pickKuruTarget(null, true, false, 0)).toBe("here");
+    expect(pickKuruTarget({ ...open, open: false }, true, false, 0)).toBe("here");
+    expect(pickKuruTarget({ ...open, on: false }, true, false, 0)).toBe("here");
+  });
+
+  it("is here in an app or a bridge from before the chat could be handed anything", () => {
+    expect(pickKuruTarget({ ...open, give: undefined }, true, false, 0)).toBe("here");
+    expect(pickKuruTarget(open, false, false, 0)).toBe("here");
+  });
+
+  it("is always here in the chat's own page", () => {
+    expect(pickKuruTarget({ ...open, role: "panel" }, true, false, 0)).toBe("here");
+  });
+});
+
+describe("handing to Kuru without a floating Kuru", () => {
+  it("puts a reply in this drawer's box, opening it", () => {
+    const quoting = { node: null, at: 5, ref: { who: "Kuru", when: "18:42", quote: "Shall I?", id: "t12" } };
+    replyInKuru(quoting);
+    expect(kuruDrawerNow().open).toBe(true);
+    expect(kuruDrawerNow().words?.reply).toEqual(quoting);
+    expect(kuruDrawerNow().words?.text).toBe("");
+  });
+});
+
+describe("adoptGift", () => {
+  it("keeps words, a line, paths and a reply as they are", () => {
+    const gift = { text: "[card A]", line: true, paths: ["/tmp/a.png"], reply: { node: "omarchy", at: 7, ref: { who: "Kuru", when: "9:01", quote: "q", id: null } } };
+    expect(adoptGift(gift)).toEqual(gift);
+  });
+
+  it("refuses what is not a gift, and drops what is not a path or a reply", () => {
+    expect(adoptGift(null)).toBeNull();
+    expect(adoptGift({ text: 3 })).toBeNull();
+    expect(adoptGift({ text: "" })).toBeNull();
+    expect(adoptGift({ text: "w", paths: ["", 4, "/a"], reply: { node: 1, at: 0, ref: {} } })).toEqual({ text: "w", line: false, paths: ["/a"] });
+    expect(adoptGift({ text: "w", reply: { node: null, at: Number.NaN, ref: { who: "a", when: "b", quote: "c", id: null } } })).toEqual({ text: "w", line: false });
   });
 });

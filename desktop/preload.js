@@ -80,6 +80,15 @@ if (isPicker) {
   ipcRenderer.on("kururu:refer-card", (_event, cardId, quote) => {
     if (ipcRenderer.listenerCount("kururu:refer-card") === 1 && typeof cardId === "string") pendingRefer = { cardId, quote };
   });
+  /**
+   * Gifts for Kuru's box (`kururu:float-gift`) that landed before the page
+   * listened: the chat's page loading while the window handed it a card. All
+   * of them, in order, since each is something the user pointed at.
+   */
+  const pendingGifts = [];
+  ipcRenderer.on("kururu:float-gift", (_event, gift) => {
+    if (ipcRenderer.listenerCount("kururu:float-gift") === 1 && pendingGifts.length < 20) pendingGifts.push(gift);
+  });
   /** Listen on a channel from main, and hand back the way to stop. */
   const relayOn = (channel, listener) => {
     const relay = (_event, ...args) => listener(...args);
@@ -289,9 +298,11 @@ if (isPicker) {
      * The logo's page (`?float=logo`) says it was pressed, dragged or
      * right-clicked; the chat's (`?float=panel`) drags its own far edges,
      * closes or opens itself, and asks for the window to be brought up for
-     * what only the window can show. `main.js` checks the sender of each, so the most
-     * a served page in the window can do is flip the switch its Settings
-     * already has.
+     * what only the window can show. The window hands the chat what goes to
+     * Kuru's box while it is open (`give`), which the chat's page hears
+     * (`onGift`). `main.js` checks the sender of each, so the most a served
+     * page in the window can do is flip the switch its Settings already has,
+     * or put words in a box the user is shown.
      */
     float: {
       state: () => ipcRenderer.invoke("kururu:float-state"),
@@ -307,6 +318,14 @@ if (isPicker) {
       show: () => ipcRenderer.send("kururu:float-show"),
       /** The window, brought up — at a card on its board when one is named. */
       go: (cardId) => ipcRenderer.send("kururu:float-go", typeof cardId === "string" ? cardId : null),
+      /** The window's page only: something for Kuru's box, handed to the chat, which comes forward with the keyboard in it. */
+      give: (gift) => ipcRenderer.send("kururu:float-give", gift && typeof gift === "object" ? gift : null),
+      /** A gift for this page's box: the chat's, from the window; the window's own, back, when the chat had gone. */
+      onGift: (listener) => {
+        const off = relayOn("kururu:float-gift", (gift) => listener(gift));
+        while (pendingGifts.length > 0) listener(pendingGifts.shift());
+        return off;
+      },
     },
     notes: {
       popOut: (ask) => ipcRenderer.invoke("kururu:note-pop", ask && typeof ask === "object" ? ask : {}),

@@ -23,7 +23,10 @@ import { useSyncExternalStore } from "react";
 import { cardCode } from "../../shared/board";
 import { cardPlace, cardReference, quoteReference, type CardQuote, type CardRef, type KuruConversation } from "../../shared/kuru";
 import type { AgentSnapshot, Profile } from "../../shared/model";
+import type { ReplyRef } from "../../shared/reply";
 import type { MenuItem } from "./components/Menu";
+import { desktop, type FloatState } from "./desktop";
+import { floatNow, followFloat } from "./float";
 import { closeNeeds } from "./needs";
 import { locateCard } from "./notes";
 
@@ -80,7 +83,7 @@ export interface KuruDrawerState {
    * so a drawer closed and opened again does not put them in twice, and they
    * wait here when the drawer was closed, for the composer it mounts.
    */
-  words: { text: string; n: number; line?: boolean } | null;
+  words: (KuruGift & { n: number }) | null;
   /** The search was asked for from the keyboard: the drawer opens it and takes this down. */
   search: boolean;
 }
@@ -149,17 +152,152 @@ export function leaveKuruSearch(): boolean {
 }
 
 /**
- * Open the drawer with words put into its composer at the cursor, unsent,
- * and the keyboard in the box — so what was pointed at is the start of a
- * sentence the user goes on typing. `line` puts them in as a line of their
- * own (`insertLine`), which is how a quote and its comment go in, so that
- * several stack up as one message's lines.
+ * What the composer is replying to: the line's reference, whose conversation
+ * it is in (null for this node's), and when it was said, for the time the
+ * reference is sent with. The drawer's, and here because a reply arrow is
+ * one of the hand-offs below and may land in another page's box.
  */
-export function insertInKuru(text: string, line = false): void {
+export interface KuruQuoting {
+  node: string | null;
+  at: number;
+  ref: ReplyRef;
+}
+
+/**
+ * Something handed to Kuru's box, unsent: words at the cursor (`line` for a
+ * line of their own, which is how a quote and its comment, or a pen's
+ * marks, stack up as one message's lines), the paths among them that a drop
+ * or a paste put there and the box draws as files, or a line of the
+ * conversation to reply to. Plain data, since it may cross to another page.
+ */
+export interface KuruGift {
+  text: string;
+  line?: boolean;
+  paths?: string[];
+  reply?: KuruQuoting;
+}
+
+/**
+ * When this page's box was last pressed or typed in — the one fact
+ * `kuruTarget` needs from the window that the main process cannot know. Not
+ * when it last took the focus: a window brought forward gives the focus back
+ * to the box it was in, and a click on the window to reach a card's menu
+ * would count as writing in its drawer.
+ */
+let boxAt = 0;
+
+export function kuruBoxUsed(): void {
+  boxAt = Date.now();
+}
+
+/**
+ * Which of the two boxes a hand-off goes into: this page's drawer, or the
+ * floating Kuru's chat (`desktop/float.js`), which is the same drawer in a
+ * window of its own over every application.
+ *
+ * The chat whenever it is open (the owner, 2026-11-11: "When the floating
+ * Kuru window is open, everything that hands something to Kuru should land
+ * there"), with one exception: the window's own drawer is open too and its
+ * box had the keyboard after the chat did, which is somebody writing there
+ * — and the chat's focus time is the main process's (`chatAt`), on the same
+ * clock as this page's. Here, always, in the chat's own page (it is the
+ * chat), in a browser or on the phone (there is no chat), and in an app from
+ * before the chat could be handed anything (`give` missing), which keeps
+ * everything as it was when the floating Kuru is shut.
+ */
+export function kuruTarget(): "here" | "float" {
+  return pickKuruTarget(floatNow(), Boolean(desktop()?.float?.give), state.open, boxAt);
+}
+
+/** `kuruTarget`'s rule on what it read, pure: the main process's word on the chat, whether this bridge can give, and this drawer's. */
+export function pickKuruTarget(float: FloatState | null, canGive: boolean, drawerOpen: boolean, boxUsedAt: number): "here" | "float" {
+  if (!float || !float.on || !float.open || !float.give || !canGive || float.role === "panel") return "here";
+  if (drawerOpen && boxUsedAt > (float.chatAt ?? 0)) return "here";
+  return "float";
+}
+
+/**
+ * The one door every hand-off to Kuru goes through: a card's "Reference in
+ * Kuru", a quote of a card, a file or a line, a reader's file, a note's
+ * reference, the pen's marks, a dropped or pasted file and a reply arrow.
+ * It picks the box (`kuruTarget`) and puts the gift there — into this
+ * page's drawer, opened if it was shut, or across to the chat, which the
+ * main process brings forward with the keyboard in its box. Nothing calls
+ * the drawer's box directly for any of these, so a new hand-off is one call
+ * and lands wherever the others do. Says which box it chose.
+ *
+ * There is only one draft either way: both boxes keep it in the same
+ * `localStorage` entry (the pages share an origin) and each follows the
+ * other's writes (`KuruDrawer`'s composer), so what was half-typed in one is
+ * in the other and the gift is put in after it, never over it.
+ */
+export function handToKuru(gift: KuruGift): "here" | "float" {
+  if (kuruTarget() === "float") {
+    desktop()?.float?.give?.(gift);
+    return "float";
+  }
+  takeGift(gift);
+  return "here";
+}
+
+/**
+ * A gift put into this page's own drawer whatever the target: `handToKuru`'s
+ * own half, and what the chat's page does with one the main process brings
+ * it — which has been decided already, and must not be sent on again.
+ */
+export function takeGift(gift: KuruGift): void {
   closeNeeds();
-  const words = { text, n: ++wordsAsked, line };
+  const words = { ...gift, n: ++wordsAsked };
   // Open already, the list stays where it was being read: only the box changes.
   set(state.open ? { ...state, words } : { open: true, focus: null, asked: state.asked + 1, words, search: state.search });
+}
+
+/**
+ * Gifts from the main process, for as long as the page lives: the chat's
+ * page gets what the window handed over, and a page whose gift found no
+ * chat to take it (shut a moment before) gets its own back. Adopted as
+ * another process's word: only the shapes a gift can have.
+ */
+export function listenForGifts(): () => void {
+  // `kuruTarget` reads the main process's word on the chat, which a page hears only once something asks for it.
+  followFloat();
+  const bridge = desktop()?.float;
+  if (!bridge?.onGift) return () => {};
+  return bridge.onGift((raw) => {
+    const gift = adoptGift(raw);
+    if (gift) takeGift(gift);
+  });
+}
+
+export function adoptGift(raw: unknown): KuruGift | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.text !== "string") return null;
+  const gift: KuruGift = { text: r.text, line: r.line === true };
+  if (Array.isArray(r.paths)) gift.paths = r.paths.filter((path): path is string => typeof path === "string" && path.length > 0).slice(0, 200);
+  const q = r.reply as Partial<KuruQuoting> | undefined;
+  const ref = q?.ref as Partial<ReplyRef> | undefined;
+  if (q && ref && typeof q.at === "number" && Number.isFinite(q.at) && (q.node === null || typeof q.node === "string")) {
+    if (typeof ref.who === "string" && typeof ref.when === "string" && typeof ref.quote === "string" && (ref.id === null || typeof ref.id === "string")) {
+      gift.reply = { node: q.node, at: q.at, ref: { who: ref.who, when: ref.when, quote: ref.quote, id: ref.id } };
+    }
+  }
+  if (!gift.text && !gift.reply) return null;
+  return gift;
+}
+
+/**
+ * Words put into Kuru's box at the cursor, unsent, and the keyboard in the
+ * box — so what was pointed at is the start of a sentence the user goes on
+ * typing. `line` puts them in as a line of their own (`insertLine`).
+ */
+export function insertInKuru(text: string, line = false): void {
+  handToKuru({ text, line });
+}
+
+/** A line of the conversation replied to: the box quotes it, addressed to its node, with the keyboard. */
+export function replyInKuru(reply: KuruQuoting): void {
+  handToKuru({ text: "", reply });
 }
 
 /** The composer has put the words in: they are not to be put in again. */
@@ -190,8 +328,8 @@ export function referItem(ref: CardRef, then?: () => void): MenuItem {
  * over a selection (`Quote.tsx`): the card's reference as its menu writes
  * it, the quote and the comment, as a line of their own in the box.
  */
-export function quoteInKuru(cardRef: string, quote: CardQuote): void {
-  insertInKuru(quoteReference(cardRef, quote), true);
+export function quoteInKuru(cardRef: string, quote: CardQuote): "here" | "float" {
+  return handToKuru({ text: quoteReference(cardRef, quote), line: true });
 }
 
 /**
@@ -200,14 +338,15 @@ export function quoteInKuru(cardRef: string, quote: CardQuote): void {
  * page, and a note window's, which reaches this window across the bridge as
  * the id alone. Looked for wherever the card is in the profile on screen, so
  * a card sent to a workspace since its note was popped out is referred to
- * where it is now. False for a card that is not there, and nothing is put in.
+ * where it is now. Null for a card that is not there, and nothing is put
+ * in; otherwise which box it went into (`handToKuru`).
  * `nameOf` is `cardPlace`'s, a node's name for a workspace of another node.
  * With a `quote` — a note window's selection, which crosses the bridge with
  * the id — it is that part of the card, quoted with its comment.
  */
-export function referCardIn(profile: Profile, cardId: string, nameOf: (nodeId: string) => string | null, quote: CardQuote | null = null): boolean {
+export function referCardIn(profile: Profile, cardId: string, nameOf: (nodeId: string) => string | null, quote: CardQuote | null = null): "here" | "float" | null {
   const found = locateCard(profile, cardId);
-  if (!found) return false;
+  if (!found) return null;
   const { card, workspace } = found;
   const ref = cardReference({
     code: cardCode(workspace ? workspace.name : profile.name, card.number),
@@ -215,9 +354,7 @@ export function referCardIn(profile: Profile, cardId: string, nameOf: (nodeId: s
     place: cardPlace(workspace ? workspace.id : null, nameOf),
     cardId: card.id,
   });
-  if (quote) quoteInKuru(ref, quote);
-  else insertInKuru(ref);
-  return true;
+  return quote ? quoteInKuru(ref, quote) : handToKuru({ text: ref });
 }
 
 /** The chip, the harness key, and the pill: one press opens, the next closes. */

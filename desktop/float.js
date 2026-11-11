@@ -131,6 +131,12 @@ class FloatKuru extends EventEmitter {
      * @type {{ tall: boolean, wide: boolean, offY: number, offX: number } | null}
      */
     this.gripping = null;
+    /**
+     * When the chat last had the keyboard, opened or clicked into, in
+     * `Date.now()`: the window's page weighs it against its own drawer's box
+     * to say which one a card's reference goes into (`kuruTarget`).
+     */
+    this.chatAt = 0;
     this.fadeTimer = null;
     this.saveTimer = null;
     this.watchingDisplays = false;
@@ -162,6 +168,10 @@ class FloatKuru extends EventEmitter {
       logo: LOGO,
       wide: true,
       pen: true,
+      // And that what is handed to Kuru in the window can be put in the
+      // chat's box (`give`), and when the chat last had the keyboard.
+      give: true,
+      chatAt: this.chatAt,
     };
   }
 
@@ -445,6 +455,11 @@ class FloatKuru extends EventEmitter {
       revived = Date.now();
       this.loadPanel();
     });
+    panel.on("focus", () => {
+      if (this.panel !== panel) return;
+      this.chatAt = Date.now();
+      this.changed();
+    });
     panel.on("closed", () => {
       if (this.panel !== panel) return;
       this.panel = null;
@@ -498,6 +513,34 @@ class FloatKuru extends EventEmitter {
    */
   show() {
     if (!this.open) this.openPanel();
+  }
+
+  /**
+   * Something handed to Kuru from the window — a card's reference, a quote,
+   * a file, the pen's marks, a reply — for the chat's box, which the page
+   * there puts in at its cursor (`takeGift` in `web/src/kuru.ts`). The chat
+   * comes forward and takes the keyboard, so the gift is the start of a
+   * sentence typed where it landed. Opened if it was shut a moment before
+   * the window decided; false when there is no chat to be had (off, or no
+   * logo), and the window keeps its gift.
+   *
+   * Sent once the page is there: a chat window just made is still loading,
+   * and the preload keeps a gift that lands before the page listens.
+   */
+  give(gift) {
+    if (!this.enabled || !this.logo || this.logo.isDestroyed()) return false;
+    if (!this.open) this.openPanel();
+    const panel = this.panel;
+    if (!panel || panel.isDestroyed()) return false;
+    const contents = panel.webContents;
+    const send = () => {
+      if (!panel.isDestroyed()) contents.send("kururu:float-gift", gift);
+    };
+    if (contents.isLoading()) contents.once("did-finish-load", send);
+    else send();
+    panel.moveTop();
+    panel.focus();
+    return true;
   }
 
   /** The chat's window against the logo, at the size it was dragged to or as much of it as there is that way. */

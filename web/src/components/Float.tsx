@@ -44,6 +44,7 @@
  * logo together run the chat's edge.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { adoptQuote, type CardQuote } from "../../../shared/kuru";
 import { mascotFor } from "../../../shared/model";
 import { needsOf, type Need } from "../../../shared/needs";
 import { nodesNeedCount } from "../../../shared/nodes";
@@ -55,7 +56,7 @@ import "../float.css";
 import { floatNow, useFloat, usePageZoom } from "../float";
 import { useInterface } from "../fonts";
 import { installInk } from "../ink";
-import { kuruLive, leaveKuruSearch, openKuru, quoteInKuru, toggleKuru, useKuruDrawer, type KuruLive } from "../kuru";
+import { kuruLive, leaveKuruSearch, listenForGifts, openKuru, quoteInKuru, referCardIn, toggleKuru, useKuruDrawer, type KuruLive } from "../kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "../needs";
 import { arrangedNeeds, useNeedsView } from "../needsorder";
 import * as api from "../session";
@@ -424,6 +425,25 @@ export function FloatPanel() {
   const { order } = useNeedsView(profile?.key ?? null);
   const queue = useMemo(() => (needs ? arrangedNeeds(needs, order) : null), [needs, order]);
   const linked = nodes?.nodes ?? [];
+
+  /**
+   * What is handed to Kuru in the window while this chat is open — a card's
+   * reference, a quote, a file, the pen's marks, a reply (`handToKuru`) — put
+   * into this box, which the main process has given the keyboard.
+   */
+  useEffect(() => listenForGifts(), []);
+  /**
+   * A note window's "Reference in Kuru" while this chat is open and there is
+   * no window to write it (`referCard` in `desktop/main.js`): written here,
+   * from this page's own snapshot, by the card menu's own words.
+   */
+  const [referAsked, setReferAsked] = useState<{ cardId: string; quote: CardQuote | null } | null>(null);
+  useEffect(() => desktop()?.notes?.onReferCard?.((cardId, quote) => setReferAsked({ cardId, quote: adoptQuote(quote) })), []);
+  useEffect(() => {
+    if (!referAsked || !profile) return;
+    setReferAsked(null);
+    referCardIn(profile, referAsked.cardId, api.nodeNameOf, referAsked.quote);
+  }, [referAsked, profile]);
 
   /** The window, brought up for something said to the server a moment ago — or for a card, which it finds by its id. */
   const go = useCallback((cardId: string | null = null) => bridge?.go(cardId), [bridge]);

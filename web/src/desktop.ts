@@ -127,6 +127,10 @@ export interface FloatState {
   pen?: boolean;
   /** How big the logo's window is, a side, in CSS pixels: what the logo's page fills. Missing from an app whose logo was 64. */
   logo?: number;
+  /** The chat can be handed what goes to Kuru's box (`give`). Missing from an app from before it. */
+  give?: boolean;
+  /** When the chat last had the keyboard — opened or clicked into — in the main process's `Date.now()`; 0 for never. */
+  chatAt?: number;
 }
 
 export interface DesktopFloat {
@@ -147,8 +151,16 @@ export interface DesktopFloat {
   close(): void;
   /** The chat's page only: open it, for something that landed in its box while it was shut. Optional: an app from before it. */
   show?(): void;
-  /** The chat's page only: bring the window up, at a card on its board when one is named. */
+  /** The chat's page, or the window's: bring the window up, at a card on its board when one is named (the window's own ask names none). */
   go(cardId?: string | null): void;
+  /**
+   * The window's page: something for Kuru's box, for the chat — which comes
+   * forward with the keyboard in its box (`handToKuru` in `kuru.ts`).
+   * Optional: an app from before it.
+   */
+  give?(gift: unknown): void;
+  /** A gift for this page's own box: the chat's, from the window, or the window's own back when there was no chat to take it. */
+  onGift?(listener: (gift: unknown) => void): () => void;
 }
 
 /** The screen pen's session as main holds it. */

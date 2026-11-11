@@ -960,7 +960,38 @@ function showCard(cardId) {
  * written into the box after the card's reference and sent by nobody.
  */
 function referCard(cardId, quote) {
+  // With the floating Kuru's chat open, the reference is the chat's
+  // (`kuruTarget` in web/src/kuru.ts), and the window is not brought up for
+  // it: the window's page writes it as ever, unseen, and hands it on, or
+  // asks to be brought up (`kururu:float-go`) when it keeps it. With no
+  // window to write it, the chat's page writes it from its own snapshot.
+  if (float.open && float.panel && !float.panel.isDestroyed()) {
+    if (win && !win.isDestroyed()) tellWindow(false, "kururu:refer-card", cardId, quoteOf(quote));
+    else float.panel.webContents.send("kururu:refer-card", cardId, quoteOf(quote));
+    return;
+  }
   tellWindow(openWindow(), "kururu:refer-card", cardId, quoteOf(quote));
+}
+
+/**
+ * Something handed to Kuru from the window's page, for the chat's box
+ * (`kururu:float-give`), kept to the plain shapes a gift has — words, the
+ * paths among them, a reply's reference — at no more than a box would ever
+ * be handed. Null for anything else. The chat's page adopts it again
+ * (`adoptGift`), since it is a page's word either way.
+ */
+function giftOf(gift) {
+  if (!gift || typeof gift !== "object" || typeof gift.text !== "string") return null;
+  const out = { text: gift.text.slice(0, 100000), line: gift.line === true };
+  if (Array.isArray(gift.paths)) out.paths = gift.paths.filter((path) => typeof path === "string" && path.length > 0 && path.length < 4096).slice(0, 200);
+  const reply = gift.reply;
+  if (reply && typeof reply === "object" && reply.ref && typeof reply.ref === "object") {
+    const { who, when, quote, id } = reply.ref;
+    if (typeof who === "string" && typeof when === "string" && typeof quote === "string" && (id === null || typeof id === "string") && typeof reply.at === "number" && Number.isFinite(reply.at) && (reply.node === null || typeof reply.node === "string")) {
+      out.reply = { node: reply.node, at: reply.at, ref: { who: who.slice(0, 200), when: when.slice(0, 50), quote: quote.slice(0, 20000), id } };
+    }
+  }
+  return out.text || out.reply ? out : null;
 }
 
 /**
@@ -1360,9 +1391,28 @@ ipcMain.on("kururu:float-close", (event) => {
   if (float.isPanel(event.sender)) float.closePanel();
 });
 ipcMain.on("kururu:float-go", (event, cardId) => {
+  const fromWindow = Boolean(win && !win.isDestroyed() && event.sender.id === win.webContents.id);
+  if (fromWindow) {
+    // The window's page asking for itself: a note's reference it kept for its own drawer, told it without being brought up.
+    openWindow();
+    return;
+  }
   if (!float.isPanel(event.sender)) return;
   if (typeof cardId === "string" && cardId) showCard(cardId);
   else openWindow();
+});
+/**
+ * The window's page handing something to Kuru while the chat is open: into
+ * the chat's box, which comes forward with the keyboard. Only the window
+ * gives — the chat puts its own gifts in its own box, and no other page has
+ * a Kuru to hand to — and a gift the chat cannot take (switched off, or its
+ * logo gone, since the page decided) goes back to the window's own box.
+ */
+ipcMain.on("kururu:float-give", (event, raw) => {
+  if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id) return;
+  const gift = giftOf(raw);
+  if (!gift) return;
+  if (!float.give(gift)) event.sender.send("kururu:float-gift", gift);
 });
 float.on("change", (state) => {
   for (const window of BrowserWindow.getAllWindows()) {
