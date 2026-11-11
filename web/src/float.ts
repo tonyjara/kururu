@@ -11,7 +11,7 @@
  * Null without the bridge — a browser, the phone, or a window of a kururu
  * from before it — which every caller reads as "there is no floating Kuru".
  */
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { desktop, type FloatState } from "./desktop";
 
 let state: FloatState | null = null;
@@ -66,4 +66,47 @@ export function useFloat(): FloatState | null {
     },
     () => state,
   );
+}
+
+/**
+ * How far this page is zoomed, 1 for not at all.
+ *
+ * The window's ⌘+ is Chromium's page zoom, and Chromium keeps a zoom per
+ * site, not per window: the logo's page and the pill's come from the same
+ * address as the window's, so a window read at 110% makes them 110% too.
+ * The chat is welcome to it — it is the drawer, in a box that fills its
+ * window, and bigger type there is what was asked for. The logo and the
+ * waveform are not: each is drawn to the pixel in a window made exactly its
+ * size, so at 110% the mark is a tenth too big for its window and its right
+ * side, its foot and its count are cut off by the window's edge — which is
+ * what the owner saw (2026-11-10), and what more room round the mark only
+ * hid until the next step of zoom.
+ *
+ * The app cannot set these windows back to 100% without setting the window
+ * back too, since the zoom is the site's. So the page measures it — a window
+ * with no frame is as wide outside, in the screen's points, as its page is
+ * inside in the page's own pixels, times the zoom — and whoever draws to the
+ * pixel undoes it with the inverse on its root (`zoom` in CSS). A change of
+ * zoom changes the page's width in its own pixels, so it arrives as a
+ * resize.
+ */
+function pageZoom(): number {
+  if (typeof window === "undefined") return 1;
+  // The visual viewport's width where there is one: it is not rounded to a whole pixel, and a twelfth of a pixel in 73 is a point at the far edge.
+  const zoom = window.outerWidth / (window.visualViewport?.width || window.innerWidth);
+  // Checked before it is used: a window still being made can have no width either way.
+  if (!Number.isFinite(zoom) || zoom < 0.2 || zoom > 6) return 1;
+  // Whole per-milles, so the measure's own rounding is not a new number on every resize.
+  return Math.round(zoom * 1000) / 1000;
+}
+
+export function usePageZoom(): number {
+  const [zoom, setZoom] = useState(pageZoom);
+  useEffect(() => {
+    const again = () => setZoom(pageZoom());
+    again();
+    window.addEventListener("resize", again);
+    return () => window.removeEventListener("resize", again);
+  }, []);
+  return zoom;
 }

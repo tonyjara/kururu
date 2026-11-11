@@ -42,7 +42,7 @@ import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
 import { installInk, installShiftPen, useInk } from "../ink";
 import { installReload } from "../reload";
-import { useFloat } from "../float";
+import { useFloat, usePageZoom } from "../float";
 import { FloatWave } from "./Float";
 import { DrawPill, VoicePill } from "./VoicePill";
 
@@ -171,6 +171,12 @@ export function Pill() {
   const docked = float?.on === true ? float : null;
   const drawing = ink.state.on && (ink.state.tools === "draw" || docked !== null);
   const phase = DRAW_ONLY ? "idle" : ui.phase;
+  // Docked, the window is put to the pixel against the logo, so what is
+  // drawn in it is drawn at the window's own scale whatever the site is
+  // zoomed to, and its size is said in the screen's points (`usePageZoom`).
+  // The pill at its own place is left as it has always been.
+  const zoom = usePageZoom();
+  const scale = docked ? zoom : 1;
   const report = useRef(() => {});
   report.current = () => {
     const bridge = desktop()?.voice;
@@ -178,13 +184,13 @@ export function Pill() {
     // The stack, which is the voice's pill, the pen's, or both while a
     // recording is made during a pen session that is not its own.
     const box = root.current?.querySelector(".pill-stack")?.getBoundingClientRect();
-    bridge.report({ phase, width: box?.width ?? 0, height: box?.height ?? 0, key, locating: here, drawing });
+    bridge.report({ phase, width: (box?.width ?? 0) * scale, height: (box?.height ?? 0) * scale, key, locating: here, drawing });
   };
   useLayoutEffect(() => {
     report.current();
     // The pen's tools come and go with its session, its label counts the marks, and the panel is sized to them.
     // And docked to the floating Kuru it is the waveform's box, which is as wide as the chat it runs along.
-  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.marks, ink.state.ending, ink.state.voice, docked?.wave, docked?.reach]);
+  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.marks, ink.state.ending, ink.state.voice, docked?.wave, docked?.reach, scale]);
   // Docked, the box also changes for a reason that is none of those: the
   // waveform gives way to words when the server will not take a clip. The
   // window beside the logo has to be exactly what is drawn, so it is watched.
@@ -198,7 +204,7 @@ export function Pill() {
   }, [isDocked]);
 
   return (
-    <div className={`pill-page-root ${docked ? `pill-docked pill-docked-${docked.reach}` : ""}`} ref={root}>
+    <div className={`pill-page-root ${docked ? `pill-docked pill-docked-${docked.reach}` : ""}`} style={docked ? { zoom: 1 / scale } : undefined} ref={root}>
       <div className="pill-stack">
         {drawing && <DrawPill />}
         {DRAW_ONLY ? null : ui.phase === "idle" && here ? <PillHere /> : docked ? <FloatWave float={docked} /> : <VoicePill floating />}

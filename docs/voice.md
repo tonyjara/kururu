@@ -921,6 +921,19 @@ Edges, said plainly:
 - **The logo and the chat are in the pen's stills**, where the pill is left
   out of them, and with the pen down the ink is over both, as it is over the
   window: lift the pen (Esc) to press either.
+- **The window's ⌘+ reaches these pages, and two of them undo it.** It is
+  Chromium's page zoom, which is kept per site and not per window, and all of
+  kururu's pages are one site. The chat keeps it: it is the drawer, in a box
+  that fills its window. The logo and the docked waveform are drawn to the
+  pixel in windows made exactly their size, so at 110% each was a tenth too
+  big for its window and cut off on the right and at the foot — what the
+  owner marked on 2026-11-10, and what more room round the mark would only
+  have hidden until the next step. The app cannot set them back without
+  setting the window back, so each page measures the zoom (`usePageZoom` in
+  `float.ts`: the window's width outside over the page's inside) and puts
+  the inverse on its root, and the docked pill says its size in the
+  screen's points. The pill at its own place is untouched, and has the same
+  fault at any zoom but 100%: its window is sized in the page's pixels.
 - **A page can be newer than its app**, since the pages come from the
   checkout's vite and the app is rebuilt by hand: what the chat's page may
   ask of the app — a width to drag, a pen, how big the logo's window is — is

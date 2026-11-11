@@ -134,7 +134,11 @@ Kept short on purpose; the detail is in git history.
   voice owned by the chat's page, its tools came up in the logo's row, and
   Done ended it; words put into the box while the chat was shut opened it.
   The logo's window at 80 px held its ring, its shadow and a count of 17
-  with room over.
+  with room over. And with the window zoomed (`setZoomFactor` on the main
+  window's page, which zooms every page of the site) to 90%, 110% and 125%:
+  the logo's mark measured 16 to 64 points in its 80-point window at each,
+  with a count of 99+ inside it, and the docked waveform 8 to 140 in its
+  148, where before the fix both ran off the right and the foot.
 - **The built-in browser and its marking** (phases 0 and 1, 2026-11-06)
   were verified end to end in an isolated instance and removed on
   2026-11-07; what was checked is in this file on the `browser-annotate`

@@ -52,7 +52,7 @@ import { longWaits } from "../../../shared/slots";
 import { DEFAULT_VOICE, type OutboxEntry } from "../../../shared/voice";
 import { desktop, type FloatState, type TalkGesture, type VoiceGlobalState } from "../desktop";
 import "../float.css";
-import { floatNow, useFloat } from "../float";
+import { floatNow, useFloat, usePageZoom } from "../float";
 import { useInterface } from "../fonts";
 import { installInk } from "../ink";
 import { kuruLive, leaveKuruSearch, openKuru, quoteInKuru, toggleKuru, useKuruDrawer, type KuruLive } from "../kuru";
@@ -147,6 +147,7 @@ export function FloatLogo() {
   const { snapshot, connected, kuru, nodes, slots } = useKururu();
   useInterface(snapshot);
   const float = useFloat();
+  const zoom = usePageZoom();
   const phase = useVoicePhase();
   const held = useRef<{ x: number; y: number; moved: boolean } | null>(null);
 
@@ -203,8 +204,9 @@ export function FloatLogo() {
 
   // The window's own size, as the app says it: this page may be newer than the app, and the mark has to stand in the middle of the window that is there.
   const size = float?.logo ?? LOGO_WINDOW;
+  // And at the window's own scale, whatever the site is zoomed to: `usePageZoom` has why.
   return (
-    <div className="float-logo-root" style={{ width: size, height: size }}>
+    <div className="float-logo-root" style={{ width: size, height: size, zoom: 1 / zoom }}>
       <button
         type="button"
         className={`float-logo float-logo-${live} float-voice-${phase} ${float?.open ? "float-logo-open" : ""} ${moving ? "" : "float-logo-still"}`}
