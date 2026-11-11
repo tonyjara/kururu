@@ -106,9 +106,9 @@ export interface PaneState {
    */
   reader?: ReaderState;
   /**
-   * The agents' pane: where kururu put the last agent it started on its own,
-   * and where the next one goes while it still sits on the edge the profile
-   * asked for — see `shared/agentpane.ts`. At most one per workspace
+   * The agents' pane: where kururu put the last terminal nobody pointed at a
+   * pane, and where the next one goes while it is still in the lower half —
+   * see `shared/halves.ts`. At most one per workspace
    * (`markAgentsPane`), and only ever true: absent is the ordinary pane. It
    * moves with the pane's contents, because a swap or a drag moves what the
    * pane *is*, and a split leaves it on the half that kept the tabs.
@@ -488,10 +488,11 @@ export function split(
 /**
  * Divide the whole layout rather than one pane of it: everything there is
  * keeps its arrangement on one side, and `fresh` gets the full width on the
- * other — below by default, above with `before`. It is the agents' pane
- * being made where there was none (`shared/agentpane.ts`), and the reason it
- * is the root and not a pane is the picture asked for: a strip of agents
- * under everything, not under whichever pane happened to be at the bottom.
+ * other — below by default, above with `before`. It is a half being made
+ * where there was none (`shared/halves.ts`), and the reason it is the root
+ * and not a pane is the picture asked for: a strip of terminals under
+ * everything, or of documents over it, not beside whichever pane happened
+ * to be at that edge.
  */
 export function wrapLayout(node: LayoutNode, splitId: string, fresh: PaneNode, before = false): LayoutNode {
   return { type: "split", id: splitId, dir: "col", ratio: 0.5, a: before ? fresh : node, b: before ? node : fresh };

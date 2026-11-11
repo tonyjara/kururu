@@ -41,7 +41,6 @@ import {
 } from "../../shared/layout";
 import { keymapFrom } from "../../shared/keys";
 import { mascotFor, type AgentSnapshot } from "../../shared/model";
-import { DEFAULT_AGENT_PLACEMENT } from "../../shared/agentpane";
 import { kuruRunningOn } from "../../shared/harness";
 import { adoptQuote, type CardQuote } from "../../shared/kuru";
 import { Dialog, type DialogState } from "./components/Dialog";
@@ -1295,14 +1294,17 @@ export function App() {
           take();
           return applyZoom(zoom.step);
         }
-        // An empty pane has no pty to own the key, and is the button that opens one.
+        // An empty pane has no pty to own the key, and is the button that opens
+        // one — in it, so it is named: a new tab that names no pane goes to
+        // the lower half (`shared/halves.ts`), and this one was pointed at.
         if (
+          onScreen &&
           emptyPaneFocused(onScreen) &&
           !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey &&
           keyName(event) === "enter"
         ) {
           take();
-          void api.newTab();
+          void api.newTab({ paneId: onScreen.focusedPaneId });
           return;
         }
         // Everything else belongs to the pty, and xterm is downstream of here.
@@ -1729,7 +1731,6 @@ export function App() {
           autoSwap={profile.autoSwap}
           agentsKururuMcpOnly={profile.agentsKururuMcpOnly === true}
           kuruOn={kuruRunningOn(profile.harness, agents)}
-          agentPlacement={profile.agentPlacement ?? DEFAULT_AGENT_PLACEMENT}
           workspaces={profile.workspaces}
           activeWorkspaceId={profile.activeWorkspaceId}
           projects={projects}

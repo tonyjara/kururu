@@ -73,7 +73,6 @@ function workspace(board: Board | null, tabs: string[] = []): Workspace {
     group: null,
     board,
     machine: null,
-    agentPlacement: null,
   };
 }
 

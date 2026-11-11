@@ -102,10 +102,12 @@ export function nodeVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
       void replyAsync(ws, msg.id, async () => {
         if (nodes.role() === "child") throw new Error("A child does not lend logins; its parent does.");
         if (typeof msg.profileId !== "string" || msg.profileId !== workspaces.active.id) throw new Error("Open this from the profile whose login you are lending.");
-        // In the focused pane, as the profile's login: the tab's environment
+        // In the lower half, as the profile's login: the tab's environment
         // is the profile's, so the token minted is that account's. Local even
         // in a workspace pinned to a machine: the login is this Mac's.
-        const agent = await openTerminal(workspaces.focusedPaneId, { command: "claude setup-token", kind: "shell", local: true });
+        const pane = workspaces.paneFor("lower");
+        if (!pane) throw new Error("There is no pane to open it in.");
+        const agent = await openTerminal(pane, { command: "claude setup-token", kind: "shell", local: true });
         return { id: agent.id };
       });
       return true;

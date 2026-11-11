@@ -24,7 +24,6 @@
 import type { RunView } from "../../shared/automation";
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
-import type { AgentPlacement } from "../../shared/agentpane";
 import type { Action } from "../../shared/keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "../../shared/model";
 import type {
@@ -1200,11 +1199,12 @@ export function splitWithFile(root: string, path: string, paneId: string, dir: "
 }
 
 /**
- * Read a markdown file from the tree, as a tab of the focused pane — see
- * `show-doc` — and `focus` is for the window that can only see one pane.
+ * Read a markdown file in the upper half — see `show-doc` — and `focus` is
+ * for the window that can only see one pane. `from` is the reader a link was
+ * clicked in, which keeps the document when it is in the upper half.
  */
-export function showDoc(root: string, path: string, focus?: boolean): void {
-  send({ type: "show-doc", root, path, focus });
+export function showDoc(root: string, path: string, focus?: boolean, from?: string): void {
+  send({ type: "show-doc", root, path, focus, ...(from ? { paneId: from } : {}) });
 }
 
 /** Every nvim in the workspace on screen, nearest first. May be empty. */
@@ -1992,11 +1992,6 @@ export function setAutoSwap(profileId: string, on: boolean): void {
 /** Whether a profile's Claude agents load only kururu's MCP servers. Read at each launch, so it changes the next agent started, not the ones running. */
 export function setAgentsKururuMcpOnly(profileId: string, on: boolean): void {
   send({ type: "set-agents-kururu-mcp-only", profileId, on });
-}
-
-/** Where a card's and Kuru's agents open, for a profile — or for one workspace of it, where null goes back to the profile's. */
-export function setAgentPlacement(profileId: string, placement: AgentPlacement | null, workspaceId?: string): void {
-  send({ type: "set-agent-placement", profileId, placement, ...(workspaceId ? { workspaceId } : {}) });
 }
 
 export function setWorkspaceMobile(profileId: string, workspaceId: string, on: boolean): void {

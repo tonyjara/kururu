@@ -144,7 +144,8 @@ headings, which the renderer gives no ids, and never reaches the app's URL.
 the page is the app, and a followed link replaces it. `markdown.ts` rewrites a
 relative target into `/api/file-raw?root&path#fragment`, resolved against the
 document and with the fragment kept out of the path, and the reader reads that
-back: a markdown file is `open-doc` in the same pane, with a short-lived word
+back: a markdown file is `show-doc` into the upper half — the same reader when
+it is there ([the two halves](#the-two-halves)) — with a short-lived word
 left for the heading it named; any other file is a new window, which the
 desktop hands to the system's browser; the web and mail leave the window;
 anything else does nothing. A file the server will not resolve is simply not
@@ -179,10 +180,10 @@ tab never moves to another workspace. `adoptBoardPanes` turns a blob's board
 the only verb that makes one — and rides the host's blob and `persist.ts` like
 the rest of the workspace, which is why none of this cost an edit to the pty
 host. The doors: `C-a K` and a pane menu's **Open the board** show the one you
-have or make one beside that pane; the new-tab menu's **Board** puts it *in*
-that pane; a workspace row's menus — the ⋯ and the right-click — switch there
-and show the one it has where it is, or with none open make it a tab in the
-pane last used there (decided on the server, against the layout it holds). On disk a card keeps its run's history but not
+have where it is or make one in the upper half ([the two
+halves](#the-two-halves)); the new-tab menu's **Board** puts it *in* that
+pane; a workspace row's menus — the ⋯ and the right-click — switch there and
+do what the key does (decided on the server, against the layout it holds). On disk a card keeps its run's history but not
 its `agentId`: that is a process, and a cold start reads a run with no process
 behind it as `ended`.
 
@@ -190,15 +191,14 @@ behind it as `ended`.
 launcher up by id, exactly as the new-tab menu does, and `withPrompt` in
 `shared/launchers.ts` single-quotes the card onto the command line — the one
 place text somebody typed reaches `sh -c`. The agent lands in the workspace's
-agents' pane ([below](#the-agents-pane)), never as a tab in the board's, since
-a new tab is shown and would take the board away from the person pressing the
-robot; it is renamed after the card, and the focus goes back to the board. Any
+lower half ([below](#the-two-halves)), under the board the robot was pressed
+on; it is renamed after the card, and the focus goes back to the board. Any
 workspace of the profile, not only the one on screen — the harness runs a card
 from anywhere, and for a version the profile's board drew every workspace's
 board over the window — and so for resume, the worktree's terminal and the dev
 server's ↻ too: off screen the terminal goes into that workspace's layout
-(`openTerminalAt`) and nothing is focused. The worktree's shell still goes
-beside the board (`paneBesideBoard`): it is a shell, opened to be typed in.
+(`openTerminalAt`) and nothing is focused. The worktree's shell goes to the
+lower half too: it is a terminal.
 
 **The automation moves a card on an edge, and only out of the column it put it
 in.** `noteRun` runs for every agent on every host snapshot and compares
@@ -423,8 +423,8 @@ disk, which the user chose over a `cp` in every project's setup line.
 holds tracked files and the env files and nothing else — no `node_modules` — and the
 project's setup command (Settings → Workspaces) is prefixed onto the agent's
 command with `&&`, so an install that fails leaves its output on screen and no
-agent behind it. It runs on a fresh checkout only. The robot is pressed from
-wherever the pane beside the board is, which may be an earlier card's worktree;
+agent behind it. It runs on a fresh checkout only. The robot starts from
+wherever `cwdPaneIn`'s pane is, which may be an earlier card's worktree;
 `mainRoot` resolves that back to the repository it was linked from, so the next
 card is cut from `main` and not from the last card.
 
@@ -703,8 +703,8 @@ on its row in the Needs you drawer** — where a card in Review or a turn that
 ended unseen is usually a document to read before it is anything else; the
 drawer takes the agent's list while it has a terminal and the card's after.
 A research doc, a plan, a script you asked for: one click opens it, Markdown
-in the reader as a tab of the focused pane, anything else in a new nvim tab
-there at the line the agent named (`nvim +N`), in the agent's workspace —
+in the reader in the upper half, anything else in a new nvim tab in the lower
+half at the line the agent named (`nvim +N`), in the agent's workspace —
 switched to first, as clicking the row does. On a phone a tap opens the reader
 and puts the sheet away. Two links at most, and most rows have none.
 
@@ -864,55 +864,86 @@ applications. It would be a second page mode (as `?pill` is), a window type
 in `desktop/main.js` with its own saved bounds, and a bridge in the preload,
 and it reaches nobody until the app is rebuilt.
 
-## The agents' pane
+## The two halves
 
-**The agents kururu starts itself go to one pane, along one edge — the
-bottom, unless the profile says otherwise.** A card's robot, a card run or
-resumed (by hand or by Kuru) and Kuru's `start_agent` ask `agentPaneIn`. They
-used to ask `paneBesideBoard`, which put an agent in the pane focus came
-from, else any other beside the board, and with no board open in the focused
-pane itself. Each was a fair answer to "where is nobody reading", and together
-they scattered: five cards later a workspace was one pane of everything,
-agents tabbed in with the nvim somebody was using. The person who asked for
-this keeps the top half for what they read and the bottom half for agents,
-so that is the default. An agent from a pane's + menu is not one of these: it
-was put somewhere by hand, and goes there.
+**Anything that runs in a terminal opens in the lower half of the workspace;
+everything else opens in the upper half** (`shared/halves.ts`). The owner
+asked for it in those words on 2026-11-11. Lower: an agent from a card's
+robot, a card run or resumed, Kuru's `start_agent`, an automation's run, a
+shell (`C-a c`, a workspace row's LazyGit, Kuru's `open_shell` with or
+without `run`), a card's dev server and its worktree shell, a machine's
+shell, nvim opened on a file (a link under an agent's row, the tree's "New
+nvim in a tab"), `claude setup-token`, Kuru's own session. Upper: the board
+(`C-a K`, a pane menu's **Open the board**, a workspace row's menus), a
+document from the tree, from a link in Kuru's drawer or under an agent's row
+or on a card, from Kuru's `show_file`, and from a link inside another
+document. A terminal dropped on another workspace's row goes to that
+workspace's lower half. Whoever opens it — a click, a key, Kuru, an
+automation — it is the same rule, asked through one function on the server
+(`paneForIn`, with `paneFor` for what somebody on screen asked for).
 
-**Which pane is the bottom one is geometry, not the tree**
-(`shared/agentpane.ts`), since one picture has many trees and the person
-sees the picture. A pane is on the bottom when it touches the bottom edge and
-has something above it; a pane that runs the full height is the bottom of
-nothing. Among those: the one marked `forAgents` — kururu marks the pane it
-put the last agent in, one per workspace (`markAgentsPane`), and the mark
-moves with the pane's contents through a swap or a drag and survives a cold
-start — else the widest, since a strip along the bottom is the bottom pane
-and a corner is not, then the tallest, then reading order. A pane showing the
-board or a document is passed over, for the old reason: a new tab is shown.
-With nothing left, the whole layout is wrapped in a split (`wrapLayout`):
-everything there keeps its arrangement on top and the agents get the full
-width below. An empty workspace is wrapped too and keeps an empty top half,
-rather than taking the only pane. A mark on a pane dragged off the edge is
-passed over rather than followed — the setting says where agents go, and the
-mark only says which of the panes there.
+It replaced three rules, each fair on its own: agents kururu started went to
+an "agents' pane" along an edge Settings chose (bottom, top, or off); shells,
+`open_shell`, the worktree's terminal and Kuru's session went beside the
+board (`paneBesideBoard`: the pane focus came from, else any other, else a
+split off the board); and a file from the tree, a drawer link and the
+board's key went to the focused pane, whatever it showed. Together a document
+landed in front of the agent being watched and a shell in front of the
+document being read. The setting (`Profile.agentPlacement`,
+`Workspace.agentPlacement`, `set-agent-placement`) is gone with them, and a
+session file that still has the word drops it.
 
-**Where the agent starts did not move with its tab, and nor did the
-keyboard.** `cwdPaneIn` is the old rule's pane without its split, and the
-directory is read off that: following the agents' pane would start the next
-card in whatever checkout the last card's agent ran in, a worktree included.
-On screen `giveFocusBack` hands focus to the board when the robot's board is
-open, else back to the pane that had it; off screen nothing is focused, as
-before. A card's dev server lines up where it always did and falls back to
-the agents' pane rather than to a split off the board, so the server and its
-agent end up as two tabs of one pane, the agent showing.
+**What a gesture on a pane asks for still goes in that pane.** Its + menu
+(an agent, a shell, nvim, LazyGit, **Board**), its new-tab button, Enter in it
+while it is empty (which now names the pane it was pressed in), a tab or a
+file dropped on it, a split, and the pane menu's **Reader**, which follows
+that pane's editor beside it. The person picked the pane; the rule is for
+when nobody did.
 
-**A choice per profile, which a workspace may override.**
-`Profile.agentPlacement` is `bottom`, `top` or `off` — off being
-`paneBesideBoard`, unchanged — in Settings → Agents; `Workspace.agentPlacement`
-says otherwise for one workspace (null is "as the profile"), in Settings →
-Workspaces. Both are preferences and go to disk; `set-agent-placement` refuses
-a word that is not one of the three. A workspace pinned to a machine needs
-nothing of its own: where a tab goes is this Mac's layout, whatever its
-command line runs.
+**Which panes are a half is geometry, not the tree,** since one picture has
+many trees and the person sees the picture. A pane is in the lower half when
+it touches the bottom edge and has something above it, and in the upper half
+when it touches the top edge and has something below it. So a layout
+rearranged by hand is read as it looks: the top row is the upper half and the
+bottom row the lower, whatever is in them — agents dragged to the top are in
+the upper half, and the next agent still goes to the bottom row. A pane that
+runs the full height is in neither half: two panes side by side have no
+halves yet, and the first thing opened that needs one wraps the whole layout
+(`wrapLayout`), everything there keeping its arrangement on one side and the
+new half getting the full width, upper above lower.
+
+**A workspace of one pane counts as the half of what it is showing.** A lone
+shell is the lower half, so the next agent joins it as a tab rather than
+pushing it to the top; a lone document or board is the upper. Empty, it is
+either, and the first thing opened fills it — the old rule split an empty
+workspace and left an empty top half, which was a pane waiting for nothing.
+
+**Among the panes of a half:** the one you are in, when it is there (the
+reader a link was clicked in counts as "the one you are in" for its link,
+`show-doc`'s `paneId`); then, for a terminal, the pane marked `forAgents` —
+kururu marks the pane each terminal went to, one per workspace
+(`markAgentsPane`), the mark moves with the pane's contents through a swap or
+a drag, survives a cold start, and is passed over once its pane leaves the
+lower half; then one already showing that half's kind (a terminal or nothing
+below; a document, then nothing or the board, above), so a document joins the
+reader rather than covering the board beside it; then the widest, since a
+strip along an edge is a half and a corner is not; then the tallest, then
+reading order. What a pane shows never rules it out: a document dragged into
+the lower half gets the next agent in front of it, a tab away, rather than a
+third row.
+
+**Where an agent starts did not move with its tab, and nor did the
+keyboard.** `cwdPaneIn` is the old beside-the-board rule's pane without its
+split, and the directory is read off that: following the lower half's pane
+would start the next card in whatever checkout the last card's agent ran in,
+a worktree included. Placing a tab never moves focus; on screen
+`giveFocusBack` hands a card's robot focus back to the board, off screen
+nothing is focused, and `show-doc`'s `focus` is for the phone, which draws
+one pane. A restarted dev server goes back to the pane it was in.
+
+**From the Dashboard**, which holds neither terminals nor documents, a verb
+that names no pane leaves the Dashboard for the workspace it was opened over
+and places the tab there, since what was opened is meant to be seen.
 
 ## Dragging
 
@@ -1138,7 +1169,7 @@ showing is the only name that gives way.
 2026-10-18. Until then the ⋯ was what is done *in* a workspace and the
 right-click what is done *to* one — a line nobody reaching for a verb could
 see, so the two doors seemed to disagree. The order: **Open board**; **Open
-LazyGit**, a tab in the workspace's focused pane in its main checkout
+LazyGit**, a tab in the workspace's lower half in its main checkout
 (`new-tab` with `workspaceId` and `lazygit`, the folder found by the server —
 on a pinned workspace, on the machine); **Databases** when the env files name
 one; a disabled line saying where the main checkout stands, which was the git

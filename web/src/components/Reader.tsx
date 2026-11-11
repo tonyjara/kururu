@@ -43,7 +43,7 @@ import {
   type Span,
 } from "../readerplace";
 import { readerLink } from "../readerlink";
-import { nodeNameOf, openDoc, useProjectRoots } from "../session";
+import { nodeNameOf, showDoc, useProjectRoots } from "../session";
 import { DocPicker } from "./DocPicker";
 import { quotableFile } from "./Quote";
 
@@ -324,10 +324,12 @@ export function ReaderView({
           return;
         case "doc":
           // The server checks the path, and a file that is not there is
-          // simply not opened: the reader keeps the document it has.
+          // simply not opened: the reader keeps the document it has. Into
+          // the upper half, as every document opened goes — this reader
+          // when it is there, which is where a reader usually is.
           if (!doc) return;
           if (to.fragment) askFragment(placeKey(doc.root, to.path), to.fragment);
-          openDoc(paneId, doc.root, to.path);
+          showDoc(doc.root, to.path, false, paneId);
           return;
         case "file":
         case "out":

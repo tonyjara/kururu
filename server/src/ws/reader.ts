@@ -65,7 +65,7 @@ export function readerVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage):
       // `open-doc`'s check, for the same reason: a path that does not resolve is
       // a click that does nothing, not a reader blanked by a refusal.
       if (!resolveInRoot(msg.root, msg.path)) return true;
-      const shown = workspaces.showDoc(msg.root, msg.path);
+      const shown = workspaces.showDoc(msg.root, msg.path, typeof msg.paneId === "string" ? msg.paneId : undefined);
       if (shown && msg.focus) workspaces.focusPane(shown);
       return true;
     }

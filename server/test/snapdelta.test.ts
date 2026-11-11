@@ -19,7 +19,6 @@ function workspace(id: string, board: Board | null): Workspace {
     mascotId: null,
     board,
     machine: null,
-    agentPlacement: null,
   } as unknown as Workspace;
 }
 

@@ -124,8 +124,8 @@ export function cardRunPrompt(workspace: { mobile: boolean }, card: Card, local:
 }
 
 /**
- * Hand a card to an agent: a terminal in the workspace's agents' pane
- * (`agentPaneIn` — the bottom one, unless the profile says otherwise),
+ * Hand a card to an agent: a terminal in the workspace's lower half
+ * (`paneForIn`, `shared/halves.ts`), joining the pane the last one went to,
  * running the chosen launcher with the card as its first message.
  *
  * Any workspace of the profile on screen, not only the workspace on screen,
@@ -196,7 +196,7 @@ export async function runCardAt(
   const boardPane = paneWithAgent(workspace.layout, BOARD_TAB)?.id;
   const focused = onScreen ? workspaces.focusedPaneId : null;
   // Where it starts is read off the pane it always was; where its tab goes
-  // is the agents' pane, decided below — see `cwdPaneIn`.
+  // is the lower half, decided below — see `cwdPaneIn`.
   const fromPane = workspaces.cwdPaneIn(profileId, workspaceId);
   if (!fromPane) throw new Error("nowhere to put the agent");
   /*
@@ -278,7 +278,7 @@ export async function runCardAt(
     : { cwd, command, kind: "agent" as const };
   // Last, after everything that can refuse, so that a refusal leaves no
   // empty agents' pane behind it.
-  const target = workspaces.agentPaneIn(profileId, workspaceId);
+  const target = workspaces.paneForIn(profileId, workspaceId, "lower");
   if (!target) throw new Error("nowhere to put the agent");
   const agent = onScreen
     ? await openTerminal(target, options)
@@ -307,7 +307,7 @@ export async function runCardAt(
 }
 
 /**
- * Pick a card's last conversation back up, in a terminal beside the board —
+ * Pick a card's last conversation back up, in a terminal in the lower half —
  * the robot's other row, for a card whose agent has gone.
  *
  * It starts where the run started, because that is where the CLI filed the
@@ -379,7 +379,7 @@ async function resumeCardAt(
   const options = remote
     ? { command: await agentOn(remote.machine, remote.workspaceName, remote.dir, launcher.cli, command), kind: "agent" as const }
     : { cwd, command: launcher.cli === "opencode" ? command : command + resumeExtras(launcher, profileId), kind: "agent" as const };
-  const target = workspaces.agentPaneIn(profileId, workspaceId);
+  const target = workspaces.paneForIn(profileId, workspaceId, "lower");
   if (!target) throw new Error("nowhere to put the agent");
   const agent = onScreen
     ? await openTerminal(target, options)
@@ -471,7 +471,7 @@ async function checkoutFor(
   if (!repo) return null;
   /*
    * The *main* repository's settings, which is not always the one the walk
-   * found: the pane beside the board may be an earlier card's agent, and its
+   * found: the pane an agent starts from may be an earlier card's agent's, and its
    * worktree is a repository too. Cutting a card from another card's branch
    * is never what anybody meant.
    */
@@ -626,16 +626,17 @@ export async function mergeCard(workspaceId: string, cardId: string, resolve?: M
 }
 
 /**
- * A shell in the card's worktree, beside the board — for whatever the four
- * verbs above do not cover. Any workspace of the profile on screen, for
- * `runCard`'s reason; off screen it lands beside that workspace's board, and
- * the profile's board takes the person to it.
+ * A shell in the card's worktree, in the lower half as every terminal goes
+ * (`shared/halves.ts`) — for whatever the four verbs above do not cover. Any
+ * workspace of the profile on screen, for `runCard`'s reason; off screen it
+ * lands in that workspace's lower half, and the profile's board takes the
+ * person to it.
  */
 export async function openWorktree(workspaceId: string, cardId: string): Promise<{ agentId: string }> {
   const profileId = workspaces.active.id;
   const { worktree } = worktreeOf(workspaceId, cardId);
   if (!worktreePresent(worktree.path)) throw new Error("the worktree is not there any more");
-  const target = workspaces.paneBesideBoardIn(profileId, workspaceId);
+  const target = workspaces.paneForIn(profileId, workspaceId, "lower");
   if (!target) throw new Error("nowhere to put the terminal");
   const agent =
     workspaceId === workspaces.activeWorkspace.id

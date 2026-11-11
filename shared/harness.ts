@@ -288,7 +288,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "start_agent",
     description:
-      "Start a coding agent in a workspace, in a terminal of its own in the workspace's agents' pane (the bottom one, unless the user chose otherwise), with an opening prompt. Prefer add_card with run=true when the work is a task worth tracking; use this for a quick question or a one-off. Returns the new agent's id. Without machine, a workspace pinned to a machine starts it there, in the workspace's folder, inside tmux; any other workspace starts it on this Mac in the workspace's current directory. On a machine its status is read off its screen and it has no transcript here.",
+      "Start a coding agent in a workspace, in a terminal of its own in the workspace's lower half, where every terminal opens, with an opening prompt. Prefer add_card with run=true when the work is a task worth tracking; use this for a quick question or a one-off. Returns the new agent's id. Without machine, a workspace pinned to a machine starts it there, in the workspace's folder, inside tmux; any other workspace starts it on this Mac in the workspace's current directory. On a machine its status is read off its screen and it has no transcript here.",
     inputSchema: obj(
       {
         workspace: WORKSPACE,
@@ -373,7 +373,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "add_card",
     description:
-      "Add a card to a workspace's board, and with run=true hand it straight to an agent in a terminal in the workspace's agents' pane — the same as the user pressing the robot. The title is the task in one sentence; the body is the detail. isolate=true gives the agent a git worktree of its own. Without a workspace, the card goes on the profile's board, where nothing runs; column=needs puts it in Needs you, for the user to do, where it also shows in their Needs drawer marked as put there by Kuru. With node, the card goes on that node's board; run is refused there, because a run starts an agent and only that node's Kuru starts its agents — ask_kuru it to run the card.",
+      "Add a card to a workspace's board, and with run=true hand it straight to an agent in a terminal in the workspace's lower half — the same as the user pressing the robot. The title is the task in one sentence; the body is the detail. isolate=true gives the agent a git worktree of its own. Without a workspace, the card goes on the profile's board, where nothing runs; column=needs puts it in Needs you, for the user to do, where it also shows in their Needs drawer marked as put there by Kuru. With node, the card goes on that node's board; run is refused there, because a run starts an agent and only that node's Kuru starts its agents — ask_kuru it to run the card.",
     inputSchema: obj(
       {
         workspace: str("A workspace id; on another node, the workspace's name. Omit for the profile's board."),

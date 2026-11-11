@@ -288,7 +288,6 @@ function workspace(id: string, name: string, agentIds: string[], over: Partial<W
     group: null,
     board: null,
     machine: null,
-    agentPlacement: null,
     ...over,
   } as Workspace;
 }

@@ -7,7 +7,6 @@
  * switch had `return`.
  */
 import type { WebSocket } from "ws";
-import { isAgentPlacement } from "../../../shared/agentpane";
 import { bindKey } from "../../../shared/keys";
 import { adoptLaunch } from "../../../shared/launchers";
 import { adoptMascot } from "../../../shared/model";
@@ -122,18 +121,6 @@ export function lookVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
     case "set-agents-kururu-mcp-only":
       if (typeof msg.profileId !== "string") return true;
       workspaces.setAgentsKururuMcpOnly(msg.profileId, msg.on === true);
-      return true;
-
-    case "set-agent-placement":
-      // Refused rather than defaulted, `set-profile-column-color`'s line: a word
-      // that is not one of the three is not a choice to round to the nearest.
-      if (typeof msg.profileId !== "string") return true;
-      if (typeof msg.workspaceId === "string") {
-        if (msg.placement !== null && !isAgentPlacement(msg.placement)) return true;
-        workspaces.setWorkspaceAgentPlacement(msg.profileId, msg.workspaceId, msg.placement);
-      } else if (isAgentPlacement(msg.placement)) {
-        workspaces.setAgentPlacement(msg.profileId, msg.placement);
-      }
       return true;
 
     case "set-workspace-mobile":

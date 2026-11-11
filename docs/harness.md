@@ -41,7 +41,7 @@ screen", because a client is looking at them. The harness is not looking at
 anything: it acts on a profile it names, from a pane the user may have left,
 on workspaces that are not shown. So `workspaces.ts` grew a section of
 spellings that take the profile and workspace by id — `findCardIn`,
-`editBoardIn`, `paneBesideBoardIn`, `agentPaneIn`, `addTabIn`, `splitIn`, `newWorkspaceIn`,
+`editBoardIn`, `paneForIn`, `addTabIn`, `splitIn`, `newWorkspaceIn`,
 `setHarness` — and the on-screen spellings call them with the active ids.
 `index.ts` got the same for its three functions that open things:
 `openTerminalAt`, `cwdForPaneIn`, `runCardAt`. The arrangement is still the
@@ -622,8 +622,8 @@ it, never a launcher's `--model`) and the web tools' `--mcp-config`, then
 with a per-server timeout above Claude Code's one-minute default,
 `--allowedTools mcp__kururu`, `--append-system-prompt` with the role, and
 last, so they win, `harnessRunFlags`: `--model claude-opus-5-5 --effort high
---autocompact 233k`. Its tab goes into the profile's active workspace, in the
-pane beside the board; its directory is its own, below.
+--autocompact 233k`. Its tab goes into the profile's active workspace, in its
+lower half, as every terminal does; its directory is its own, below.
 
 ### Only kururu's tools, and the user's own
 

@@ -102,6 +102,16 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **Terminals open in the lower half, everything else in the upper.**
+  Agents, shells, dev servers, nvim and a machine's shell, whoever starts
+  them — you, Kuru, a card or an automation — open in the bottom half of
+  the workspace; the board and documents (from the file tree, a link in
+  Kuru's drawer or under an agent, a card, or another document) open in
+  the top half. When that half is not there yet the workspace is split for
+  it; an empty workspace is simply filled. Before, a document opened in
+  whatever pane you were in, often in front of the agent you were
+  watching, and a shell or the board's key split off beside the board.
+  What you open from a pane's own + menu still goes into that pane.
 - **Other computers moved to the bottom bar.** The sidebar's Nodes section
   is gone; a frog beside the machines on the bottom bar stands for it, with
   how many of your other kururus are linked ("1/2" and a grey dot when one
@@ -168,6 +178,9 @@ shows, so it is written once and read in three places — see
 
 ### Removed
 
+- **Settings → Agents → Where they open**, and the same choice per
+  workspace. There is one rule now (see Changed), so bottom, top and off
+  have nothing left to choose between.
 - **Themes, skins, packs, Explore and the skin studio.** Kururu has one look
   now: Dracula's colours on the chrome it always had. Settings → Theme is
   Settings → Fonts and keeps the font, its size and the cursor; your

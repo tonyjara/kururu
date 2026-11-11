@@ -28,7 +28,7 @@ import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, markNeeds
 import type { MadeFile } from "../../shared/made";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
-import { agentsPane, DEFAULT_AGENT_PLACEMENT, isAgentPlacement, placementOf, type AgentPlacement } from "../../shared/agentpane";
+import { paneInHalf, type Half } from "../../shared/halves";
 import type { HarnessState, Profile, ProfileSummary, Workspace } from "../../shared/model";
 import { gatherGroups, groupName, workspaceUnits, isLoginKey, mintLoginKey } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey, type Actor } from "../../shared/store";
@@ -162,7 +162,11 @@ function adoptSeq(profiles: Profile[]): void {
  * wrong is somebody else's problem, and index.ts already drops tabs pointing at
  * terminals the host does not have.
  */
-function adopt(profile: Profile): Profile {
+function adopt(stored: Profile): Profile {
+  // Where agents went was a setting until 2026-11-11 (bottom, top, or
+  // beside the board); one rule replaced it (`shared/halves.ts`), and a
+  // blob that still has the word drops it rather than carrying it to disk.
+  const { agentPlacement: _placement, ...profile } = stored as Profile & { agentPlacement?: unknown };
   return {
     ...profile,
     // The one field in here that is minted rather than nulled when it is
@@ -200,14 +204,12 @@ function adopt(profile: Profile): Profile {
     autoSwap: profile.autoSwap === true,
     // Absent before the switch existed, which is off.
     agentsKururuMcpOnly: profile.agentsKururuMcpOnly === true,
-    // Absent before agents had a pane of their own, which is the default —
-    // the feature is on unless somebody turned it off.
-    agentPlacement: isAgentPlacement(profile.agentPlacement) ? profile.agentPlacement : DEFAULT_AGENT_PLACEMENT,
-    // `dev` and `color` are taken off rather than carried: a blob written
-    // while workspaces remembered a dev command, or wore a colour, still has
-    // one, and a field the type no longer names would ride along into every
-    // snapshot and back out to disk.
-    workspaces: gatherGroups(profile.workspaces.map(({ dev: _dev, color: _color, ...workspace }: Workspace & { dev?: unknown; color?: unknown }) => ({
+    // `dev`, `color` and `agentPlacement` are taken off rather than carried:
+    // a blob written while workspaces remembered a dev command, wore a
+    // colour or chose where their agents went still has one, and a field the
+    // type no longer names would ride along into every snapshot and back out
+    // to disk.
+    workspaces: gatherGroups(profile.workspaces.map(({ dev: _dev, color: _color, agentPlacement: _placement, ...workspace }: Workspace & { dev?: unknown; color?: unknown; agentPlacement?: unknown }) => ({
       ...workspace,
       key: isStoreKey(workspace.key) ? workspace.key : mintWorkspaceKey(),
       // A field this version has and the blob may not, like the three below.
@@ -229,8 +231,6 @@ function adopt(profile: Profile): Profile {
       // Absent before workspaces could run on a machine, which is here. It
       // becomes a command line, so it is read as `adoptPin` reads a file.
       machine: adoptPin(workspace.machine),
-      // Absent before a workspace could say otherwise than its profile.
-      agentPlacement: isAgentPlacement(workspace.agentPlacement) ? workspace.agentPlacement : null,
       mobile: workspace.mobile === true,
     }))),
   };
@@ -869,7 +869,11 @@ export class Workspaces {
     this.pruneEmptied(source?.id, fresh.pane.id);
   }
 
-  /** Send a terminal to another workspace, into whatever pane has focus there. */
+  /**
+   * Send a terminal to another workspace: dropped on its row, which names no
+   * pane there, so into its lower half (`shared/halves.ts`) — the pane
+   * focused there when that is in it.
+   */
   moveTabToWorkspace(agentId: string, workspaceId: string): void {
     // The board is this workspace's cards; carried into another it would be
     // showing somebody else's list under the wrong name. A Dashboard tab is
@@ -882,10 +886,8 @@ export class Workspaces {
     const from = paneWithAgent(source.layout, agentId);
 
     this.removeTab(agentId);
-    this.mutate(profile.id, workspaceId, (w) => ({
-      ...w,
-      layout: addTab(w.layout, w.focusedPaneId, agentId),
-    }));
+    const into = this.paneForIn(profile.id, workspaceId, "lower", target.focusedPaneId);
+    if (into) this.mutate(profile.id, workspaceId, (w) => ({ ...w, layout: addTab(w.layout, into, agentId) }));
     if (from) this.pruneEmptied(from.id, undefined);
   }
 
@@ -1177,22 +1179,24 @@ export class Workspaces {
   }
 
   /**
-   * Show a file from the tree, as a tab of the focused pane.
+   * Show a file that was opened without a pane to put it in — from the tree,
+   * a link in Kuru's drawer or under an agent's row, Kuru's `show_file` — in
+   * the upper half (`shared/halves.ts`), the focused pane when it is there.
    *
-   * Always that pane, whatever it is showing. It used to hunt for a pane
-   * already showing a document and split a new one off when there was none,
-   * which made the window's arrangement change under a click in a sidebar; a
-   * tab in the pane you were last in is the one place a file can land that
-   * you can always predict. The terminal it covers is a tab away, not gone,
-   * and clicking down a list of files still collects them in one strip.
+   * It was the focused pane whatever it showed, for predictability, and
+   * since agents went to the bottom that was as often as not the agent
+   * somebody was watching. The half is as predictable and covers nothing
+   * that is working; clicking down a list of files still collects them in
+   * one strip, the reader's.
    *
    * It pins, through `openDoc`, for the reason `open-doc` does: a file you
    * clicked on is a file you asked for, and an editor next door should not take
    * it off you. Returns the pane.
    */
-  showDoc(root: string, path: string): string | null {
-    const paneId = this.focusedPaneId;
-    return this.openDoc(paneId, root, path) ? paneId : null;
+  showDoc(root: string, path: string, from?: string): string | null {
+    if (!path) return null;
+    const paneId = this.paneFor("upper", from);
+    return paneId && this.openDoc(paneId, root, path) ? paneId : null;
   }
 
   // -------------------------------------------------------------------------
@@ -1210,9 +1214,9 @@ export class Workspaces {
    * the tab there from wherever it was, the way dragging it would. Without it
    * this is the key and the menus' meaning, *show me the board*: the tab you
    * already have is selected where it is, and only when there is none is one
-   * made, beside `paneId` rather than on top of what it is showing (an empty
-   * pane is used as it is, since it is asking to be). Either way the focus goes
-   * to the board, because it is a thing you type into.
+   * made, in the upper half (`shared/halves.ts`) — `paneId` when it is
+   * there. Either way the focus goes to the board, because it is a thing you
+   * type into.
    */
   openBoard(paneId: string, here = false): string | null {
     const workspace = this.activeWorkspace;
@@ -1226,7 +1230,7 @@ export class Workspaces {
       this.moveTab(BOARD_TAB, target.id);
       at = target.id;
     } else if (target) {
-      at = here || (!showsDoc(target) && target.agentIds.length === 0) ? target.id : this.split("row", target.id);
+      at = here ? target.id : this.paneForIn(this.activeId, this.activeWorkspace.id, "upper", target.id);
       if (at) {
         const into = at;
         this.mutateWorkspace(this.activeWorkspace.id, (w) => ({ ...w, layout: addTab(w.layout, into, BOARD_TAB) }));
@@ -1243,22 +1247,18 @@ export class Workspaces {
 
   /**
    * A workspace's board, from its row in the sidebar: that workspace, and then
-   * the board where it is, or with none open a new tab in the pane you were
-   * last in there.
-   *
-   * A tab rather than the split beside it that `openBoard` makes for the key,
-   * because the key is pressed in a pane and a row's menu is not aimed at any:
-   * the pane you left is the one you would have opened it from. Decided here,
-   * against the layout the server holds, rather than by a client from the one
-   * it last drew — two clients a beat apart would otherwise move a board the
-   * other had just opened. A row for a workspace that has gone opens nothing,
-   * rather than the board of whichever one is on screen.
+   * the board where it is, or with none open in its upper half — `openBoard`'s
+   * answer for the key, since a row's menu is no more aimed at a pane than a
+   * key is. Decided here, against the layout the server holds, rather than by
+   * a client from the one it last drew — two clients a beat apart would
+   * otherwise move a board the other had just opened. A row for a workspace
+   * that has gone opens nothing, rather than the board of whichever one is on
+   * screen.
    */
   openBoardFromRow(workspaceId: string): string | null {
     if (!this.active.workspaces.some((w) => w.id === workspaceId)) return null;
     this.switchWorkspace(workspaceId);
-    const open = paneWithAgent(this.activeWorkspace.layout, BOARD_TAB) !== null;
-    return this.openBoard(this.focusedPaneId, !open);
+    return this.openBoard(this.focusedPaneId);
   }
 
   /** Change the active workspace's board. A workspace with none is left without one. */
@@ -1409,60 +1409,52 @@ export class Workspaces {
     return fresh.pane.id;
   }
 
-  /** `paneBesideBoard`, for a workspace that need not be on screen — the same preferences, against that layout. */
-  paneBesideBoardIn(profileId: string, workspaceId: string): string | null {
+  /**
+   * The pane a new tab goes to when nobody named one, in any workspace of the
+   * profile: the lower half for a terminal, the upper for the board or a
+   * document (`shared/halves.ts`), the half made by dividing the whole
+   * layout when there is none. A terminal's pane is marked so the next one
+   * joins it. `prefer` is the pane somebody is in, taken when it is in that
+   * half. Focus is left alone, as it is by `splitIn`: whether the screen
+   * moves is the caller's.
+   */
+  paneForIn(profileId: string, workspaceId: string, half: Half, prefer?: string | null): string | null {
     const workspace = this.workspaceIn(profileId, workspaceId);
     if (!workspace) return null;
-    const layout = workspace.layout;
-    const board = paneWithAgent(layout, BOARD_TAB);
-    if (!board) return workspace.focusedPaneId;
-    const takes = (pane: PaneState | null | undefined): pane is PaneState =>
-      Boolean(pane && pane.id !== board.id && !showsDoc(pane));
-    const last = workspace.lastPaneId ? findPane(layout, workspace.lastPaneId) : null;
-    if (takes(last)) return last.id;
-    const any = panes(layout).find(takes);
-    if (any) return any.id;
-    return this.splitIn(profileId, workspaceId, "row", board.id);
-  }
-
-  /**
-   * The pane an agent kururu starts on its own goes to — a card's run or
-   * resume, Kuru's `start_agent` — in any workspace of the profile: the
-   * agents' pane on the edge the workspace or its profile asks for, made by
-   * dividing the whole layout when there is none, and marked so the next
-   * one joins it (`shared/agentpane.ts`). `off` is `paneBesideBoardIn`, the
-   * rule from before. Focus is left alone, as it is by `splitIn`: whether
-   * the screen moves is the caller's, and the callers' answer is that it
-   * does not.
-   */
-  agentPaneIn(profileId: string, workspaceId: string): string | null {
-    const profile = this.profile(profileId);
-    const workspace = this.workspaceIn(profileId, workspaceId);
-    if (!profile || !workspace) return null;
-    const placement = placementOf(profile.agentPlacement, workspace.agentPlacement);
-    if (placement === "off") return this.paneBesideBoardIn(profileId, workspaceId);
-    const choice = agentsPane(workspace.layout, placement);
+    const choice = paneInHalf(workspace.layout, half, prefer);
     const pane = "pane" in choice ? choice.pane : id("n");
     this.mutate(profileId, workspaceId, (w) => {
       // A fresh pane starts in the directory of the pane the person is in,
       // as a split's half starts in its parent's: what it records is where
       // its next tab would open, and that is the project they are working on.
       const layout = "pane" in choice ? w.layout : wrapLayout(w.layout, id("s"), makePane(pane, findPane(w.layout, w.focusedPaneId)?.cwd), choice.wrap === "above");
-      return { ...w, layout: markAgentsPane(layout, pane) };
+      return { ...w, layout: half === "lower" ? markAgentsPane(layout, pane) : layout };
     });
     return pane;
   }
 
   /**
+   * `paneForIn` for what somebody on screen asked for without pointing at a
+   * pane — a key, a row's menu, the tree, a link: the workspace on screen,
+   * the focused pane preferred, or `prefer` when it is one of its panes (the
+   * reader a link was clicked in). From the Dashboard, which holds neither
+   * terminals nor documents, that is the workspace it was opened over, and
+   * the Dashboard is left for it, since what was opened is meant to be seen.
+   */
+  paneFor(half: Half, prefer?: string): string | null {
+    if (this.onDashboard) this.switchWorkspace(this.active.activeWorkspaceId);
+    const pane = prefer && this.hasPane(prefer) ? prefer : this.focusedPaneId;
+    return this.paneForIn(this.activeId, this.activeWorkspace.id, half, pane);
+  }
+
+  /**
    * The pane a new agent's directory is read off, which is not the pane it
-   * lands in: where `paneBesideBoardIn` would have put it — the pane focus
-   * came from, else any terminal's beside the board — without the split
-   * that rule makes when there is none, since a split's half only records
-   * the board pane's directory, and asking the board pane gives the same.
-   * Kept apart so that sending agents to their own pane changes where the
-   * tab goes and nothing about where the agent starts: following the
-   * agents' pane would start the next card in whatever checkout the last
-   * card's agent ran in, a worktree included.
+   * lands in: the pane focus came from, else any terminal's beside the
+   * board, else the board's own — where agents were put before they had a
+   * pane of their own. Kept apart so that where the tab goes changes
+   * nothing about where the agent starts: following the lower half's pane
+   * would start the next card in whatever checkout the last card's agent
+   * ran in, a worktree included.
    */
   cwdPaneIn(profileId: string, workspaceId: string): string | null {
     const workspace = this.workspaceIn(profileId, workspaceId);
@@ -1494,20 +1486,6 @@ export class Workspaces {
   setHarness(profileId: string, harness: HarnessState | null): void {
     if (!this.profile(profileId)) return;
     this.replaceProfile(profileId, (p) => ({ ...p, harness }));
-  }
-
-  /** Where the agents kururu starts in this profile go — see `Profile.agentPlacement`. */
-  setAgentPlacement(profileId: string, placement: AgentPlacement): void {
-    const profile = this.profile(profileId);
-    if (!profile || profile.agentPlacement === placement) return;
-    this.replaceProfile(profileId, (p) => ({ ...p, agentPlacement: placement }));
-  }
-
-  /** The same, for one workspace; null hands the choice back to its profile. */
-  setWorkspaceAgentPlacement(profileId: string, workspaceId: string, placement: AgentPlacement | null): void {
-    const workspace = this.workspaceIn(profileId, workspaceId);
-    if (!workspace || workspace.agentPlacement === placement) return;
-    this.mutate(profileId, workspaceId, (w) => ({ ...w, agentPlacement: placement }));
   }
 
   /** Whether a workspace builds a mobile app — see `Workspace.mobile`. */
@@ -1680,26 +1658,6 @@ export class Workspaces {
       }
     }
     return null;
-  }
-
-  /**
-   * Where the agent a card was handed to should go: a pane beside the board's
-   * rather than a tab in it, since a new tab is shown and taking the board
-   * away from somebody who has just pressed a robot on it would be the
-   * opposite of handing work off. The pane focus came from, else any other
-   * terminal pane, else a fresh split off the board.
-   */
-  paneBesideBoard(): string | null {
-    const layout = this.activeWorkspace.layout;
-    const board = paneWithAgent(layout, BOARD_TAB);
-    if (!board) return this.focusedPaneId;
-    const takes = (pane: PaneState | null | undefined): pane is PaneState =>
-      Boolean(pane && pane.id !== board.id && !showsDoc(pane));
-    const last = this.activeWorkspace.lastPaneId ? findPane(layout, this.activeWorkspace.lastPaneId) : null;
-    if (takes(last)) return last.id;
-    const any = panes(layout).find(takes);
-    if (any) return any.id;
-    return this.split("row", board.id);
   }
 
   /** The terminal a pane is showing, if any. */
@@ -2014,7 +1972,6 @@ export class Workspaces {
       // Nobody has asked for one yet — see `Workspace.board`.
       board: null,
       machine: null,
-      agentPlacement: null,
       mobile: false,
     };
   }
@@ -2039,7 +1996,6 @@ export class Workspaces {
       harness: null,
       autoSwap: false,
       agentsKururuMcpOnly: false,
-      agentPlacement: DEFAULT_AGENT_PLACEMENT,
     };
   }
 

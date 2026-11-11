@@ -10,7 +10,7 @@
  */
 import { createServer as createNetServer } from "node:net";
 import { type Card, type CardWorktree, setDev } from "../../shared/board";
-import { BOARD_TAB, paneWithAgent, showsDoc } from "../../shared/layout";
+import { BOARD_TAB, paneWithAgent } from "../../shared/layout";
 import { projectSettingsFor } from "../../shared/projects";
 import { worktreeOf } from "./cards";
 import { host, projects, workspaces } from "./context";
@@ -45,30 +45,16 @@ export function devOpen(card: Card): boolean {
 }
 
 /**
- * Where a card's dev server goes: the pane the last one went to, so that the
- * servers line up as tabs of one pane instead of scattering — and, before
- * there has been one, the pane of the newest terminal in the workspace. Never
- * the board's own pane, since a new tab is shown and the board would be taken
- * away from somebody who pressed a robot on it; the agents' pane otherwise
- * (`agentPaneIn`), where the agent it was started for is about to go — the
- * server goes in first, so the agent is the tab left showing. The card's
- * own workspace, which the profile's board means need not be the one on
- * screen.
+ * Where a card's dev server goes: the lower half, as every terminal does
+ * (`shared/halves.ts`), which is where the agent it was started for is about
+ * to go — the server goes in first, so the agent is the tab left showing.
+ * It used to follow the last dev server's pane, else the newest terminal's,
+ * which put it in the upper half whenever that is where a terminal was. The
+ * card's own workspace, which the profile's board means need not be the one
+ * on screen.
  */
 function devPane(workspaceId: string): string | null {
-  const profileId = workspaces.active.id;
-  const workspace = workspaces.workspaceIn(profileId, workspaceId);
-  if (!workspace) return null;
-  const layout = workspace.layout;
-  const board = paneWithAgent(layout, BOARD_TAB);
-  const servers = new Set((workspace.board?.cards ?? []).flatMap((card) => (card.dev?.agentId ? [card.dev.agentId] : [])));
-  const here = new Set(workspaces.agentsInWorkspace(profileId, workspaceId));
-  const newest = (ids: Set<string>) => host.agents.filter((agent) => ids.has(agent.id)).at(-1)?.id;
-  for (const agentId of [newest(servers), newest(here)]) {
-    const pane = agentId ? paneWithAgent(layout, agentId) : null;
-    if (pane && pane.id !== board?.id && !showsDoc(pane)) return pane.id;
-  }
-  return workspaces.agentPaneIn(profileId, workspaceId);
+  return workspaces.paneForIn(workspaces.active.id, workspaceId, "lower");
 }
 
 /**

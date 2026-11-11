@@ -13,7 +13,7 @@ in this folder.
 | `layout.ts` | The split tree and every pure operation on it. Both halves use it |
 | `marks.ts` | What every set of marks shares: the caps, the redaction, how somebody else's words are quoted on a line, a set's names and the 30-day sweep's rule. Pure, tested. The screen pen's own half is `ink.ts` |
 | `dashboard.ts` | The profile's Dashboard: its fixed tabs, the rule that it holds them and nothing else, and its layout made to fit. Pure, tested. See [layout](layout.md#the-dashboard) |
-| `agentpane.ts` | Where the agents kururu starts go: the bottom (or top) pane by geometry, the mark that keeps them in one, the word to split when there is none. Pure, tested. See [layout](layout.md#the-agents-pane) |
+| `halves.ts` | Where a tab goes when nobody named a pane: a terminal to the lower half, anything else to the upper, by geometry, the mark that keeps terminals in one pane, the word to split when the half is missing. Pure, tested. See [layout](layout.md#the-two-halves) |
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns, its model, effort and compaction point, its folder's two files. Pure, tested |
 | `agy.ts` | Antigravity's `agy`, the pure half: the title payload read as reports, the transcript's last reply, the quota as the bar's limits, the session settings, Kuru's line, MCP config, hooks and role. See [antigravity](antigravity.md) |
 | `opencode.ts` | Kuru on OpenCode, the pure half: the command line, the config kururu writes into Kuru's folder, the session id it picks, and the map of which Claude Code door each OpenCode one replaces. See [harness](harness.md#on-opencode) |

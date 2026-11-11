@@ -74,10 +74,13 @@ export function machineVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage)
       return true;
 
     case "open-machine-shell": {
-      const paneId = msg.paneId ?? workspaces.focusedPaneId;
       void replyAsync(ws, msg.id, () => {
         const machine = typeof msg.machineId === "string" ? findMachine(msg.machineId) : undefined;
         if (!machine) throw new Error("That machine is not in the list any more.");
+        // A pane named is where it was asked for; from the Machines list,
+        // which names none, the lower half, as every terminal goes.
+        const paneId = typeof msg.paneId === "string" && workspaces.hasPane(msg.paneId) ? msg.paneId : workspaces.paneFor("lower");
+        if (!paneId) throw new Error("There is no pane to open it in.");
         return openTerminal(paneId, { command: remoteShellCommand({ host: machine.host }), kind: "shell" });
       });
       return true;

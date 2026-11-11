@@ -30,7 +30,6 @@ import type { AutomationView } from "./automation";
 import type { KeyOverrides } from "./keys";
 import type { LayoutNode } from "./layout";
 import type { Board } from "./board";
-import type { AgentPlacement } from "./agentpane";
 import type { HarnessCli, LaunchSettings } from "./launchers";
 import type { MadeFile } from "./made";
 import type { MachinePin } from "./machines";
@@ -670,12 +669,6 @@ export interface Workspace {
    */
   machine: MachinePin | null;
   /**
-   * Where the agents kururu starts here go, when this workspace says
-   * otherwise than its profile — see `Profile.agentPlacement`. Null is "as
-   * the profile says", which is every workspace until somebody picks.
-   */
-  agentPlacement: AgentPlacement | null;
-  /**
    * Whether this workspace builds a mobile app, and so shares the Mac's
    * builds and simulators through the slot queue: a card run here starts
    * with the paragraph that says how (`shared/slots.ts`, `DEFAULT_BRIEF`).
@@ -873,18 +866,6 @@ export interface Profile {
    * says — see `kuruLaunchFlags`.
    */
   agentsKururuMcpOnly: boolean;
-  /**
-   * Where the agents kururu starts on its own go — a card's robot, a card
-   * run or resumed, Kuru's `start_agent`: a tab in the workspace's bottom
-   * pane, made if there is none, or the top one, or `off` for beside the
-   * board as before. Which pane counts is `shared/agentpane.ts`. An agent
-   * from a pane's + menu goes where it was asked for, whatever this says.
-   *
-   * Per profile, set in Settings → Agents, with a workspace able to say
-   * otherwise (`Workspace.agentPlacement`); a preference, so it survives a
-   * cold start.
-   */
-  agentPlacement: AgentPlacement;
 }
 
 /** A profile's harness session: the conversation, the launcher it was started on, and the terminal it is in. */

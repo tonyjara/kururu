@@ -117,39 +117,37 @@ describe("Agents with kururu's MCP only, on disk", () => {
 });
 
 /**
- * Where agents open is a preference, so it survives a cold start; so does
- * the agents' pane's mark, though not what was in the pane, because the
- * mark is how the next agent finds the pane again.
+ * Where a terminal opens is one rule now (`shared/halves.ts`), not a
+ * setting, and a file that still has the setting's word loses it. The
+ * agents' pane's mark survives a cold start, though not what was in the
+ * pane, because the mark is how the next terminal finds the pane again.
  */
-describe("where agents open, on disk", () => {
-  it("keeps the profile's choice, a workspace's own, and the mark", () => {
+describe("where terminals open, on disk", () => {
+  it("keeps the mark", () => {
     const workspaces = new Workspaces();
     workspaces.newProfile("work");
-    const [first, second] = workspaces.all();
-    workspaces.setAgentPlacement(second!.id, "top");
-    workspaces.setWorkspaceAgentPlacement(first!.id, first!.workspaces[0]!.id, "off");
-    workspaces.setWorkspaceAgentPlacement(second!.id, second!.workspaces[0]!.id, "off");
-    workspaces.setWorkspaceAgentPlacement(second!.id, second!.workspaces[0]!.id, null);
-    workspaces.agentPaneIn(second!.id, second!.workspaces[0]!.id);
+    const [, second] = workspaces.all();
+    workspaces.addTabIn(second!.id, second!.workspaces[0]!.id, second!.workspaces[0]!.focusedPaneId, BOARD_TAB, undefined);
+    workspaces.paneForIn(second!.id, second!.workspaces[0]!.id, "lower");
     writeSnapshot(workspaces.all(), workspaces.active.id);
     const after = readSnapshot()!.profiles;
-    expect(after.map((p) => p.agentPlacement)).toEqual(["bottom", "top"]);
-    expect(after.map((p) => p.workspaces[0]!.agentPlacement)).toEqual(["off", null]);
-    expect(panes(after[1]!.workspaces[0]!.layout).map((p) => p.forAgents === true)).toEqual([true, false]);
+    expect(panes(after[1]!.workspaces[0]!.layout).map((p) => p.forAgents === true)).toEqual([false, true]);
   });
 
-  it("reads a file from before it as the default, and junk as no choice", () => {
+  it("drops the old setting's word from a file, and junk in the mark", () => {
     const workspaces = new Workspaces();
     writeSnapshot(workspaces.all(), workspaces.active.id);
     const session = JSON.parse(readFileSync(snapshotPath(), "utf8"));
-    delete session.profiles[0].agentPlacement;
-    session.profiles[0].workspaces[0].agentPlacement = "sideways";
+    session.profiles[0].agentPlacement = "top";
+    session.profiles[0].workspaces[0].agentPlacement = "off";
     session.profiles[0].workspaces[0].layout.pane.forAgents = "yes";
     writeFileSync(snapshotPath(), JSON.stringify(session));
     const read = readSnapshot()!.profiles[0]!;
-    expect(read.agentPlacement).toBe("bottom");
-    expect(read.workspaces[0]!.agentPlacement).toBeNull();
+    expect("agentPlacement" in read).toBe(false);
+    expect("agentPlacement" in read.workspaces[0]!).toBe(false);
     expect(panes(read.workspaces[0]!.layout)[0]!.forAgents).toBeUndefined();
+    writeSnapshot([read], read.id);
+    expect(readFileSync(snapshotPath(), "utf8")).not.toContain("agentPlacement");
   });
 });
 

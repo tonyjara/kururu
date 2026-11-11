@@ -718,7 +718,7 @@ export async function attach(port: Port): Promise<void> {
     agentLine: (launcher, profileId, sessionId, ask) =>
       agentCommandFor(launcher, profileId, sessionId, ask ? { ...launch, bypassClis: launch.bypassClis.filter((cli) => cli !== launcher.cli) } : launch),
     open: async (profileId, workspaceId, options) => {
-      const target = workspaces.agentPaneIn(profileId, workspaceId);
+      const target = workspaces.paneForIn(profileId, workspaceId, "lower");
       if (!target) throw new Error("there is nowhere in the workspace to put it");
       return openTerminalAt(profileId, workspaceId, target, options);
     },
@@ -753,7 +753,7 @@ export async function attach(port: Port): Promise<void> {
     resume: async (profileId, workspaceId, run, launcher) => {
       const command = resumeCommand(launcher, launch, run.sessionId, false);
       if (!command) throw new Error("That run has no conversation kururu can open.");
-      const target = workspaces.agentPaneIn(profileId, workspaceId);
+      const target = workspaces.paneForIn(profileId, workspaceId, "lower");
       if (!target) throw new Error("there is nowhere in the workspace to put it");
       const cwd = run.cwd && isDirectory(run.cwd) ? run.cwd : undefined;
       const agent = await openTerminalAt(profileId, workspaceId, target, { cwd, command: command + hooksFor(launcher, profileId), kind: "agent" });

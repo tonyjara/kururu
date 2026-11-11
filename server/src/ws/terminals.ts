@@ -41,8 +41,17 @@ export function terminalVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage
       // Nor from the Dashboard, which holds no terminals: the workspace it was
       // opened over, before the pin below is read off what is on screen.
       else if (workspaces.onDashboard) workspaces.switchWorkspace(workspaces.active.activeWorkspaceId);
-      const paneId = msg.paneId ?? workspaces.focusedPaneId;
       void replyAsync(ws, msg.id, async () => {
+        /*
+         * A pane named is the one it was asked from — its + menu, its button,
+         * Enter in it while empty — and goes there. None named is a key or a
+         * workspace row's menu, and a terminal goes to the lower half like
+         * every terminal nobody pointed (`shared/halves.ts`). Looked up here,
+         * after the dashboard is left and before anything that can refuse,
+         * so a refusal below leaves at worst an empty pane there.
+         */
+        const paneId = typeof msg.paneId === "string" ? msg.paneId : workspaces.paneFor("lower");
+        if (!paneId) throw new Error("There is no pane to open it in.");
         /*
          * In a workspace pinned to a machine, everything the menu offers opens
          * there: the terminal through `pinnedShell`, nvim and the agents here,

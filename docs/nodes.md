@@ -1076,7 +1076,7 @@ offered by the side that runs it. `new-tab`, `run-card` and `resume-card`
 are routed verbs, and their replies come back with the agent qualified. The
 spawn is the node's own, with its hooks, its login (`logins.ts` there, or a
 lent token) and its `kururu_web` flags pointed at its own `/mcp/web`. A
-card's agent lands in the node's agents' pane by the node's `agentPaneIn`.
+card's agent lands in the node's lower half by the node's `paneForIn`.
 
 Two things are asked over `/link` rather than the watch, because the rows
 that ask them are drawn from the summary whether or not a watch is open:

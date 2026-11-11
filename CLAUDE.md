@@ -152,9 +152,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
   never in it, holding its fixed tabs once each and nothing else
   (`fitsDashboard`, kept in `Workspaces.mutate`). →
   [layout](docs/layout.md#the-dashboard)
-- **The agents kururu starts itself go to the agents' pane** (`agentPaneIn`,
-  `shared/agentpane.ts`); the keyboard stays where it was, and the + menu's go
-  where they were asked for. → [more](docs/invariants.md#the-agents-pane)
+- **Terminals open in the lower half, everything else in the upper**
+  (`paneForIn`, `shared/halves.ts`) when nobody named a pane; the keyboard
+  stays where it was, and a pane's + menu goes where it was asked. No setting.
+  → [more](docs/invariants.md#the-two-halves)
 - **Boards live in the database and nowhere else, and a file never moves or
   deletes a card that is there.** Every change goes through `Store.syncProfile`; a
   database that will not open is a server that does not start. →

@@ -139,12 +139,13 @@ function heldLink(root: string, path: string): boolean {
 }
 
 /**
- * Open what an agent made: Markdown in the reader, as a tab of the focused
- * pane — the file tree's `show-doc` — and anything else in a new nvim tab
- * there, at the line the link names. The focused pane because that is the
- * one you were last in (KUR-44); a new nvim rather than one already running,
- * unlike the tree, because a link is one click and the tree's question of
- * which editor is the one you are typing in is a second.
+ * Open what an agent made: Markdown in the reader, in the upper half — the
+ * file tree's `show-doc` — and anything else in a new nvim tab in the lower
+ * half, at the line the link names, since nvim is a terminal and terminals
+ * go there (`shared/halves.ts`); either the focused pane when it is in that
+ * half. A new nvim rather than one already running, unlike the tree,
+ * because a link is one click and the tree's question of which editor is
+ * the one you are typing in is a second.
  *
  * In the workspace the link was in — the agent's, the card's — switched to
  * first, the way clicking the agent's row goes to it, so the file opens
@@ -182,7 +183,8 @@ export async function openMade(
     if (focus) workspaces.focusPane(paneId);
     return { paneId };
   }
-  const paneId = workspaces.focusedPaneId;
+  const paneId = workspaces.paneFor("lower");
+  if (!paneId) throw new Error("there is no pane to open it in");
   await openTerminal(paneId, { cwd: root, command: nvimCommand(path, line), kind: "shell" });
   return { paneId };
 }

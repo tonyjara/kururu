@@ -250,9 +250,11 @@ export async function openInEditor(
     }
     return { agentId };
   }
-  // A pane named that is not in the workspace on screen is the focused one,
-  // on `openTerminal`'s reasoning for a pane closed while the host spawned.
-  const paneId = at.paneId && workspaces.hasPane(at.paneId) ? at.paneId : workspaces.focusedPaneId;
+  // A pane named is the one asked from; none, or one no longer in the
+  // workspace on screen, is the lower half's, where a terminal goes when
+  // nobody pointed (`shared/halves.ts`).
+  const paneId = at.paneId && workspaces.hasPane(at.paneId) ? at.paneId : workspaces.paneFor("lower");
+  if (!paneId) throw new Error("there is no pane to open it in");
   const agent = await openTerminal(paneId, { cwd: root, command: nvimCommand(path, at.line), kind: "shell" });
   return { agentId: agent.id };
 }

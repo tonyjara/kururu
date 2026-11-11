@@ -31,7 +31,6 @@ import {
   type HarnessCli,
   type LaunchSettings,
 } from "../../../shared/launchers";
-import type { AgentPlacement } from "../../../shared/agentpane";
 import * as api from "../session";
 import { LendLogin } from "./Secrets";
 import { Choice, Danger, Details, Field, Group, Mono, NumField, Outcome, P, Select, SwitchMenu, Toggle } from "./ui";
@@ -44,12 +43,6 @@ const HARNESS_OPTIONS = [
 ] as const satisfies ReadonlyArray<readonly [HarnessCli, string, string]>;
 
 /** The three answers, as the segments say them; the third's tooltip is what off means. */
-export const PLACEMENT_OPTIONS = [
-  ["bottom", "Bottom", "A tab in the bottom pane"],
-  ["top", "Top", "A tab in the top pane"],
-  ["off", "Off", "Beside the board, in the pane you came from, as before"],
-] as const satisfies ReadonlyArray<readonly [AgentPlacement, string, string]>;
-
 export function AgentsPage({
   launch,
   profileId,
@@ -57,7 +50,6 @@ export function AgentsPage({
   autoSwap,
   agentsKururuMcpOnly,
   kuruOn,
-  agentPlacement,
 }: {
   launch: LaunchSettings;
   profileId: string;
@@ -66,7 +58,6 @@ export function AgentsPage({
   agentsKururuMcpOnly: boolean;
   /** The program this profile's Kuru is running on, or null when it is not running. */
   kuruOn: HarnessCli | null;
-  agentPlacement: AgentPlacement;
 }) {
   const toggleCli = (cli: AgentCli, on: boolean) => api.setLaunch({ ...launch, offClis: on ? launch.offClis.filter((c) => c !== cli) : [...launch.offClis, cli] });
   const toggleLauncher = (id: string, on: boolean) =>
@@ -122,21 +113,19 @@ export function AgentsPage({
         );
       })}
 
-      <Group title="Where they open" foot={`For ${profileName}; a workspace can say otherwise under Workspaces. An agent from a pane's + menu opens where you asked.`}>
-        <Choice
-          label="A card's or Kuru's agent"
-          hint="Joins one pane on that edge as a tab, split off when there is none."
-          value={agentPlacement}
-          onChange={(placement) => api.setAgentPlacement(profileId, placement)}
-          options={PLACEMENT_OPTIONS}
-        />
-        <Details summary="Which pane is the bottom one">
+      <Group title="Where they open">
+        <P>
+          Anything that runs in a terminal (an agent, a shell, a dev server, nvim, a machine's shell) opens in the lower half of the workspace. Everything else (the
+          board, a document) opens in the upper half. When that half is not there yet the whole workspace is split for it, and an empty workspace is filled by the
+          first thing opened. What you open from a pane's own + menu goes into that pane.
+        </P>
+        <Details summary="Which pane is the lower one">
           <P>
-            The pane kururu put the last agent in, while it still runs along the bottom edge with something above it. Otherwise the widest pane along the bottom edge, then the
-            tallest, then the leftmost. A pane showing the board or a document is passed over. When nothing qualifies, the whole workspace is split: what is there keeps its
-            arrangement on top and the agents get the full width below. An empty workspace is split too, and keeps an empty top half. Top is the same, upside down.
+            A pane along the bottom edge with something above it; the upper half is a pane along the top edge with something below it, so two panes side by side are
+            neither. Among several: the one you are in, then for terminals the one kururu put the last terminal in, then one already showing the same kind of thing,
+            then the widest, the tallest, the leftmost.
           </P>
-          <P>Where the agent starts is unchanged: the directory of the pane you came from. The keyboard stays where it was.</P>
+          <P>Where an agent starts is unchanged: the directory of the pane you came from. The keyboard stays where it was.</P>
         </Details>
       </Group>
 

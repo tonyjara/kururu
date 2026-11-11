@@ -82,7 +82,6 @@ describe("the child's workspace, as the Mac draws it", () => {
     group: null,
     board,
     machine: { machineId: "m1", dir: "/srv" },
-    agentPlacement: null,
   };
 
   it("qualifies every id that names a thing, a document's root among them, and leaves the board's tab as it is", () => {

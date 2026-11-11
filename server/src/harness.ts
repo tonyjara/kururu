@@ -1174,12 +1174,12 @@ export class Harness {
       if (!prompt) return fail("A prompt is needed.");
       const launcher = this.launcher(str(args.launcher));
       // It starts where it always did, and its tab goes to the workspace's
-      // agents' pane — decided last, so that a refusal leaves no empty one
-      // behind. See `agentPaneIn` and `cwdPaneIn`.
+      // lower half — decided last, so that a refusal leaves no empty pane
+      // behind. See `paneForIn` and `cwdPaneIn`.
       const fromPane = ws.cwdPaneIn(profileId, workspaceId);
       if (!fromPane) return fail("Nowhere to put a terminal in that workspace.");
       const into = (): string => {
-        const pane = ws.agentPaneIn(profileId, workspaceId);
+        const pane = ws.paneForIn(profileId, workspaceId, "lower");
         if (!pane) throw new Error("Nowhere to put a terminal in that workspace.");
         return pane;
       };
@@ -1221,7 +1221,7 @@ export class Harness {
     open_shell: async ({ profileId, args, ws, follow, workspaceArg }) => {
       const workspaceId = workspaceArg(true)!;
       const workspace = ws.workspaceIn(profileId, workspaceId)!;
-      const pane = ws.paneBesideBoardIn(profileId, workspaceId);
+      const pane = ws.paneForIn(profileId, workspaceId, "lower");
       if (!pane) return fail("Nowhere to put a terminal in that workspace.");
       const dir = str(args.dir).trim();
       const place = this.place(str(args.machine), workspace, dir);
@@ -1609,7 +1609,7 @@ export class Harness {
    * closes with an error nobody saw. A session that ran in a project's
    * folder, as every harness did before the folder existed, is one of those.
    *
-   * The tab still goes into the active workspace, beside the board; only the
+   * The tab still goes into the active workspace, in its lower half; only the
    * directory is its own. And always the plain Claude launcher, with the
    * model, effort and compaction named after it (`harnessRunFlags`), so no
    * launcher's `--model` and no profile's settings decide them — unless
@@ -1699,7 +1699,7 @@ export class Harness {
     const key = ws.keyOf(profileId);
     if (!key) throw new Error("that profile has no key yet");
     const workspaceId = profile.activeWorkspaceId;
-    const pane = ws.paneBesideBoardIn(profileId, workspaceId);
+    const pane = ws.paneForIn(profileId, workspaceId, "lower");
     if (!pane) throw new Error("nowhere to put the harness");
     const cwd = harnessHome(key);
     await prepareHarnessHome(cwd, this.deps.claudeDir(profileId), profile.harness?.sessionId ?? null);
@@ -1769,7 +1769,7 @@ export class Harness {
     const key = ws.keyOf(profileId);
     if (!key) throw new Error("that profile has no key yet");
     const workspaceId = profile.activeWorkspaceId;
-    const pane = ws.paneBesideBoardIn(profileId, workspaceId);
+    const pane = ws.paneForIn(profileId, workspaceId, "lower");
     if (!pane) throw new Error("nowhere to put the harness");
     // Before anything is written or opened: with no OpenCode 2 there is
     // nothing to start, and the reason is the drawer's to show.
@@ -1827,7 +1827,7 @@ export class Harness {
     const key = ws.keyOf(profileId);
     if (!key) throw new Error("that profile has no key yet");
     const workspaceId = profile.activeWorkspaceId;
-    const pane = ws.paneBesideBoardIn(profileId, workspaceId);
+    const pane = ws.paneForIn(profileId, workspaceId, "lower");
     if (!pane) throw new Error("nowhere to put the harness");
     const cwd = harnessHome(key);
     await prepareHarnessHome(cwd, this.deps.claudeDir(profileId), null);

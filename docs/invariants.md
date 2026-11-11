@@ -11,15 +11,16 @@ on the way: a rule in either place is the same rule, and a change to one is
 a change to both. The subsystem docs each section links to are the reference;
 this is the brief's long form.
 
-## The agents pane
+## The two halves
 
-**The agents kururu starts itself go to the agents' pane.** A card's run and
-resume and Kuru's `start_agent` ask `agentPaneIn` — the bottom pane by
-geometry (`shared/agentpane.ts`), marked `forAgents` so the next one joins
-it, the whole layout split when there is none — and read their directory
-off the old pane (`cwdPaneIn`); the keyboard stays where it was. The + menu's
-agents go where they were asked for, and `off` is the old `paneBesideBoard`.
-→ [layout](layout.md#the-agents-pane)
+**Terminals open in the lower half, everything else in the upper.** Anything
+that names no pane — a card's run, Kuru's tools, an automation, a key, a
+row's menu, the tree, a link — asks `paneForIn` (`shared/halves.ts`): halves
+by geometry, a lone pane the half of what it shows, the focused pane first,
+the `forAgents` mark for terminals, the whole layout split when the half is
+missing. Agents still read their directory off the old pane (`cwdPaneIn`);
+the keyboard stays where it was; a pane's own + menu goes where it was
+asked. There is no setting. → [layout](layout.md#the-two-halves)
 
 ## Boards in the database
 

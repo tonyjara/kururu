@@ -29,7 +29,6 @@ import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderD
 import { adoptBoard, adoptProfileBoard, type Board } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
-import { DEFAULT_AGENT_PLACEMENT, isAgentPlacement, type AgentPlacement } from "../../shared/agentpane";
 import type { HarnessState } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey } from "../../shared/store";
 import { isDashboardTab } from "../../shared/dashboard";
@@ -99,8 +98,6 @@ interface StoredWorkspace {
    * and the first shell opened after a cold start finds them again by name.
    */
   machine?: MachinePin;
-  /** Where its agents go when it says otherwise than its profile — see `Workspace.agentPlacement`. */
-  agentPlacement?: AgentPlacement;
   /** Whether it builds a mobile app — see `Workspace.mobile`. Absent is no. */
   mobile?: boolean;
   /**
@@ -139,8 +136,6 @@ interface StoredProfile {
   autoSwap?: boolean;
   /** Agents with kururu's MCP only, written only when on. See `Profile.agentsKururuMcpOnly`. */
   agentsKururuMcpOnly?: boolean;
-  /** Where its agents go — see `Profile.agentPlacement`. Absent in a file from before it, which reads as the default. */
-  agentPlacement?: AgentPlacement;
   workspaces: StoredWorkspace[];
   /** Index rather than id: ids are regenerated on the way back in. */
   activeWorkspace: number;
@@ -216,9 +211,6 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
       // the rest of this file is careful about.
       ...(profile.autoSwap ? { autoSwap: true } : {}),
       ...(profile.agentsKururuMcpOnly ? { agentsKururuMcpOnly: true } : {}),
-      // Written always, the default included, so that a default changed in
-      // some later version moves nobody who had chosen.
-      agentPlacement: profile.agentPlacement,
       dashboard: { layout: strip(profile.dashboard.layout), ...(profile.onDashboard ? { open: true as const } : {}) },
       activeWorkspace: Math.max(
         0,
@@ -230,7 +222,6 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         mascotId: workspace.mascotId,
         group: workspace.group,
         ...(workspace.machine ? { machine: workspace.machine } : {}),
-        ...(workspace.agentPlacement ? { agentPlacement: workspace.agentPlacement } : {}),
         ...(workspace.mobile ? { mobile: true } : {}),
         layout: strip(workspace.layout),
       })),
@@ -435,7 +426,6 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         // the database holds replaces it before anything is drawn.
         board: adoptBoard(w.board),
         machine: adoptPin(w.machine),
-        agentPlacement: isAgentPlacement(w.agentPlacement) ? w.agentPlacement : null,
         mobile: w.mobile === true,
       };
       workspaces.push(workspace);
@@ -466,7 +456,6 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
       harness: adoptHarness(stored.harness),
       autoSwap: stored.autoSwap === true,
       agentsKururuMcpOnly: stored.agentsKururuMcpOnly === true,
-      agentPlacement: isAgentPlacement(stored.agentPlacement) ? stored.agentPlacement : DEFAULT_AGENT_PLACEMENT,
     });
   }
   if (profiles.length === 0) return null;

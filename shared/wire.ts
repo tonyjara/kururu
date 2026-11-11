@@ -35,7 +35,6 @@
  */
 import type { BoardColumn, CardDates } from "./board";
 import type { Direction } from "./layout";
-import type { AgentPlacement } from "./agentpane";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
 import type { SnapshotDelta } from "./snapdelta";
@@ -1015,12 +1014,6 @@ export type ClientMessage =
   | { type: "set-auto-swap"; profileId: string; on: boolean }
   /** Whether a profile's agents load only kururu's MCP servers. See `Profile.agentsKururuMcpOnly`. */
   | { type: "set-agents-kururu-mcp-only"; profileId: string; on: boolean }
-  /**
-   * Where the agents kururu starts go — a profile's choice, or one
-   * workspace's when `workspaceId` names it, where null hands the choice
-   * back to the profile. See `Profile.agentPlacement`.
-   */
-  | { type: "set-agent-placement"; profileId: string; workspaceId?: string; placement: AgentPlacement | null }
   /** Whether a workspace builds a mobile app, and so its card runs start with the slot queue's paragraph. See `Workspace.mobile`. */
   | { type: "set-workspace-mobile"; profileId: string; workspaceId: string; on: boolean }
 
@@ -1190,15 +1183,18 @@ export type ClientMessage =
   | { type: "split-with-file"; root: string; path: string; paneId: string; dir: "row" | "col"; before: boolean }
 
   /**
-   * Show a markdown file, from the file tree, as a tab of the focused pane.
+   * Show a markdown file — from the file tree, or a link in a reader — in the
+   * workspace's upper half (`shared/halves.ts`).
    *
-   * The server picks the pane rather than the client, because which pane is
-   * focused is the server's to know — a client that named one could be naming
-   * the pane it last drew rather than the one focus has since moved to.
-   * `focus` is `open-reader`'s — a phone wants to be taken to the document, a
-   * desktop wants its keyboard left where it was.
+   * The server picks the pane rather than the client, because which panes are
+   * which half, and which is focused, is the server's to know — a client that
+   * named one could be naming the pane it last drew. `paneId` is a hint, not
+   * a target: the reader whose link was clicked, preferred over the focused
+   * pane when it is in the upper half. `focus` is `open-reader`'s — a phone
+   * wants to be taken to the document, a desktop wants its keyboard left
+   * where it was.
    */
-  | { type: "show-doc"; root: string; path: string; focus?: boolean }
+  | { type: "show-doc"; root: string; path: string; focus?: boolean; paneId?: string }
 
   /**
    * Every nvim in the workspace on screen, nearest first — the focused pane's,
@@ -1403,7 +1399,7 @@ export type ClientMessage =
    * checkout would have refused — uncommitted work there in files the branch
    * changes — comes back as a `MergeBlock` with nothing ended, and the card
    * sends the message again with a `MergeResolution` once the person has
-   * picked one. `open-worktree` opens a shell there, beside the board.
+   * picked one. `open-worktree` opens a shell there, in the lower half.
    */
   | { type: "worktree-status"; id: number; workspaceId: string; cardId: string }
   | { type: "commit-card"; id: number; workspaceId: string; cardId: string }

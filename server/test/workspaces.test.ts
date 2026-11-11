@@ -8,7 +8,7 @@
  * nothing else, which is what makes it testable at all.
  */
 import { describe, expect, it } from "bun:test";
-import { BOARD_TAB, docTab, docsOf, findPane, panes, showingDoc } from "../../shared/layout";
+import { BOARD_TAB, docTab, docsOf, findPane, panes, rects, showingDoc } from "../../shared/layout";
 import { Workspaces, nextId, orderAgents } from "../src/workspaces";
 import { LOGIN_KEY, gatherGroups, groupName, type Profile } from "../../shared/model";
 import { addCard, moveCard, NEEDS_COLUMN } from "../../shared/board";
@@ -515,7 +515,7 @@ describe("document tabs", () => {
     const workspaces = new Workspaces();
     const home = workspaces.focusedPaneId;
     workspaces.addTab("a1", ROOT, home);
-    workspaces.showDoc(ROOT, "a.md");
+    workspaces.openDoc(home, ROOT, "a.md");
     workspaces.splitWithDoc(home, 1, home, "col", true);
     const reader = workspaces.focusedPaneId;
     expect(reader).not.toBe(home);
@@ -549,12 +549,12 @@ describe("document tabs", () => {
     const workspaces = new Workspaces();
     const terminal = workspaces.focusedPaneId;
     workspaces.addTab("a1", ROOT, terminal);
-    workspaces.showDoc(ROOT, "a.md");
-    workspaces.showDoc(ROOT, "b.md");
+    workspaces.openDoc(terminal, ROOT, "a.md");
+    workspaces.openDoc(terminal, ROOT, "b.md");
     workspaces.splitWithDoc(terminal, 2, terminal, "row", false);
     const two = workspaces.focusedPaneId;
     expect(paths(workspaces, two)).toEqual(["b.md"]);
-    workspaces.showDoc(ROOT, "a.md");
+    workspaces.openDoc(two, ROOT, "a.md");
     expect(paths(workspaces, two)).toEqual(["b.md", "a.md"]);
     workspaces.mergePanes(terminal, two);
     expect(paneOf(workspaces, terminal)).toBeUndefined();
@@ -943,11 +943,11 @@ describe("the store behind the arrangement", () => {
 
 /**
  * A workspace row's "Open board": the board where it is when it is open, and
- * otherwise a tab in the pane last used — never the split beside it that the
- * key makes, and never in the workspace that happened to be on screen.
+ * otherwise in that workspace's upper half (`shared/halves.ts`) — never in
+ * the workspace that happened to be on screen.
  */
 describe("openBoardFromRow", () => {
-  it("goes to the workspace and makes the board a tab in the pane you were last in there", () => {
+  it("goes to the workspace and makes the board in its upper half, over the terminals", () => {
     const workspaces = new Workspaces();
     const first = workspaces.activeWorkspace.id;
     const home = workspaces.focusedPaneId;
@@ -957,13 +957,13 @@ describe("openBoardFromRow", () => {
     workspaces.focusPane(home);
     workspaces.newWorkspace("elsewhere");
 
-    expect(workspaces.openBoardFromRow(first)).toBe(home);
+    const at = workspaces.openBoardFromRow(first)!;
     expect(workspaces.activeWorkspace.id).toBe(first);
-    expect(panes(workspaces.activeWorkspace.layout)).toHaveLength(2);
-    const pane = findPane(workspaces.activeWorkspace.layout, home)!;
-    expect(pane.agentIds).toEqual(["a1", BOARD_TAB]);
-    expect(pane.activeIdx).toBe(1);
-    expect(workspaces.focusedPaneId).toBe(home);
+    expect(panes(workspaces.activeWorkspace.layout)).toHaveLength(3);
+    expect(findPane(workspaces.activeWorkspace.layout, at)!.agentIds).toEqual([BOARD_TAB]);
+    expect(rects(workspaces.activeWorkspace.layout).get(at)).toEqual({ x: 0, y: 0, w: 1, h: 0.5 });
+    expect(findPane(workspaces.activeWorkspace.layout, home)!.agentIds).toEqual(["a1"]);
+    expect(workspaces.focusedPaneId).toBe(at);
     expect(workspaces.activeWorkspace.board).not.toBeNull();
   });
 

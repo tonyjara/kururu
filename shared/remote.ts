@@ -301,7 +301,7 @@ const ROUTED: Partial<Record<ClientMessage["type"], readonly string[]>> = {
   // A path's root says which disk it is on; see `ON_A_DISK`.
   "open-doc": ["paneId", "root"],
   "split-with-file": ["paneId", "root"],
-  "show-doc": ["root"],
+  "show-doc": ["paneId", "root"],
   "find-editors": [],
   "open-in-editor": ["paneId", "agentId", "root"],
   "open-made": ["workspaceId", "root"],

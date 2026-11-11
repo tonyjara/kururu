@@ -21,7 +21,6 @@
 import { useState, type ReactNode } from "react";
 import type { KeyOverrides } from "../../../shared/keys";
 import type { HarnessCli, LaunchSettings } from "../../../shared/launchers";
-import type { AgentPlacement } from "../../../shared/agentpane";
 import type { HostInfo, LoginSummary, MascotSet, ProfileSummary, Workspace } from "../../../shared/model";
 import type { NotifySettings as NotifyConfig } from "../../../shared/notify";
 import type { ProjectSettingsMap } from "../../../shared/projects";
@@ -155,7 +154,6 @@ export function Settings({
   autoSwap,
   agentsKururuMcpOnly,
   kuruOn,
-  agentPlacement,
   workspaces,
   activeWorkspaceId,
   projects,
@@ -183,7 +181,6 @@ export function Settings({
   agentsKururuMcpOnly: boolean;
   /** The program the profile's Kuru is running on, or null when it is not running. */
   kuruOn: HarnessCli | null;
-  agentPlacement: AgentPlacement;
   /** Which page this opening is about. Only the opening: where you go afterwards is this window's business. */
   initialTab: Tab;
   /** The address asked for this page (`#settings`), so it opens on the page even on a phone. */
@@ -266,7 +263,6 @@ export function Settings({
                       autoSwap,
                       agentsKururuMcpOnly,
                       kuruOn,
-                      agentPlacement,
                       workspaces,
                       activeWorkspaceId,
                       projects,
@@ -307,7 +303,6 @@ type PageProps = {
   autoSwap: boolean;
   agentsKururuMcpOnly: boolean;
   kuruOn: HarnessCli | null;
-  agentPlacement: AgentPlacement;
   workspaces: Workspace[];
   activeWorkspaceId: string;
   projects: WorkspaceProject[];
@@ -335,7 +330,6 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
       return (
         <WorkspacesPage
           profileId={p.activeProfileId}
-          agentPlacement={p.agentPlacement}
           workspaces={p.workspaces}
           activeWorkspaceId={p.activeWorkspaceId}
           projects={p.projects}
@@ -351,7 +345,6 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
           autoSwap={p.autoSwap}
           agentsKururuMcpOnly={p.agentsKururuMcpOnly}
           kuruOn={p.kuruOn}
-          agentPlacement={p.agentPlacement}
         />
       );
     case "keyboard":
