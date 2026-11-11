@@ -168,6 +168,13 @@ export interface DesktopFrame {
   claim(): Promise<FrameState | null>;
   release(): void;
   onState(listener: (state: FrameState) => void): () => void;
+  /**
+   * Where the buttons stand, in the page's pixels, so the first click on one
+   * acts while the window is behind another app's, as on the system's. Null
+   * for nowhere. Missing from an app built before 2026-11-10's second build,
+   * whose buttons take a click to bring the window forward first.
+   */
+  place?(room: { x: number; y: number; width: number; height: number } | null): void;
   act(verb: "close" | "minimize" | "fullscreen" | "zoom"): void;
 }
 

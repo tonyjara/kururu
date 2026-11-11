@@ -50,6 +50,7 @@ const { windowNumberOf } = require("./inkshape");
 const { createTray } = require("./tray");
 const { editMenuTemplate } = require("./editmenu");
 const { QuitGate, listenForSignals } = require("./quit");
+const { firstClick, firstClickRoom } = require("./stays");
 
 const DEV = process.env.KURURU_DEV === "1";
 /**
@@ -1029,7 +1030,9 @@ function leaveFrame(w, after) {
   if (frame.timer) clearTimeout(frame.timer);
   const back = () => {
     frame.timer = null;
-    if (!frame.claimed && !w.isDestroyed()) w.setWindowButtonVisibility(true);
+    if (frame.claimed || w.isDestroyed()) return;
+    w.setWindowButtonVisibility(true);
+    firstClick(w, null);
   };
   if (after > 0) frame.timer = setTimeout(back, after);
   else back();
@@ -1052,6 +1055,18 @@ ipcMain.handle("kururu:frame-claim", (event) => {
 ipcMain.on("kururu:frame-release", (event) => {
   const w = BrowserWindow.fromWebContents(event.sender);
   if (w && !w.isDestroyed()) leaveFrame(w, FRAME_RELEASE_MS);
+});
+
+/**
+ * Where the page's buttons stand, so that a first click on them acts while
+ * the window is behind another app's, as one on the system's does (`stay.m`
+ * says why only there). The page sends it in its own pixels whenever it may
+ * have moved, and above all as the window stops being the key one.
+ */
+ipcMain.on("kururu:frame-place", (event, raw) => {
+  const w = BrowserWindow.fromWebContents(event.sender);
+  if (!w || w.isDestroyed() || !frames.get(w)?.claimed) return;
+  firstClick(w, firstClickRoom(raw, w.webContents.getZoomFactor()));
 });
 
 ipcMain.on("kururu:frame-act", (event, verb) => {

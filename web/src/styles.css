@@ -582,31 +582,39 @@ kbd {
 }
 
 /**
- * The window's three buttons — see `WindowButtons.tsx`. Twelve pixels, flat,
+ * The window's three buttons — see `WindowButtons.tsx`. Twelve points, flat,
  * the three colours macOS used before its glass ones, and grey while the
  * window is not the key one.
  *
- * Fixed over the corner, where the system's stood: 14px in, and down by the
- * well's gutter and then to the top of a 20px mark centred in a strip, which
- * is where the logo's top edge is — the owner's ask was that the two line up
- * along the top. Above the dialogs' scrims, as the system's were above
- * everything.
+ * In the screen's points, not the page's pixels: the group wears the inverse
+ * of the page's zoom (`zoom`, set by the component with `--win-zoom` beside
+ * it), so every length in here is a point on the screen whatever ⌘+ says.
+ * Herdr's, measured off the owner's mark of the two windows side by side
+ * (2026-11-10): twelve across, eight between, thirteen in from the window's
+ * left edge. How far down is the one length that follows the zoom, because
+ * it is the top of the logo the owner asked them to stand level with: the
+ * well's gutter and then the top of a 20px mark centred in a strip, in the
+ * page's pixels, times the zoom.
+ *
+ * Fixed over the corner, where the system's stood, and above the dialogs'
+ * scrims, as the system's were above everything. Only the buttons are kept
+ * out of the window's drag region: the eight points between them drag the
+ * window, as the title bar between the system's did.
  */
 .win-btns {
   position: fixed;
   z-index: 70;
-  left: 14px;
-  top: calc(2 * var(--gutter) + (var(--strip-h) - 20px) / 2);
+  left: 13px;
+  top: calc((2 * var(--gutter) + (var(--strip-h) - 20px) / 2) * var(--win-zoom, 1));
   display: flex;
   gap: 8px;
-  -webkit-app-region: no-drag;
 }
-/* A phone-width window, or zen: no strip to stand in, so the corner itself. */
 /* With the sidebar away there is no logo to line up with: they stand in the
    head of the top-left pane's strip, centred on its row. */
 .app-sidebar-hidden .win-btns {
-  top: calc(2 * var(--gutter) + (var(--strip-h) - 12px) / 2);
+  top: calc((2 * var(--gutter) + var(--strip-h) / 2) * var(--win-zoom, 1) - 6px);
 }
+/* A phone-width window, or zen: no strip to stand in, so the corner itself. */
 :root[data-narrow] .win-btns,
 .app-zen .win-btns {
   top: 9px;
@@ -619,6 +627,7 @@ kbd {
   height: 12px;
   border-radius: var(--radius-round);
   cursor: default;
+  -webkit-app-region: no-drag;
 }
 .win-close {
   background: #ff5f57;

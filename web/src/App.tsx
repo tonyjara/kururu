@@ -1340,8 +1340,8 @@ export function App() {
   if (!snapshot || !profile || !workspace || !mascot) {
     return (
       <div className="app app-booting">
-        <WindowButtons frame={frame} />
         <p className="muted">{connected ? "Starting…" : "Connecting to the kururu server…"}</p>
+        <WindowButtons frame={frame} layout="booting" />
       </div>
     );
   }
@@ -1395,6 +1395,8 @@ export function App() {
       onToggle={() => run("toggle-sidebar")}
     />
   );
+  // The root's classes, which are also most of what moves the window's buttons; a phone-width window is the rest.
+  const appLayout = `${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${frame.own ? "app-lights" : ""} ${frame.fullscreen ? "app-fullscreen" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"}`;
 
   return (
     /* The width is a custom property rather than an inline width on the aside,
@@ -1408,15 +1410,12 @@ export function App() {
        system's, and `app-fullscreen` that there are none, so the room kept
        for them is given back. */
     <div
-      className={`app ${zen ? "app-zen" : ""} ${desktop() ? "app-window" : ""} ${frame.own ? "app-lights" : ""} ${frame.fullscreen ? "app-fullscreen" : ""} ${sidebarOpen ? "" : "app-sidebar-hidden"}`}
+      className={`app ${appLayout}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--files-w": `${filesWidth}px`, "--drawer-w": `${drawerWidth}px`, "--drawer-min": `${DRAWER_MIN}px`, "--stage-floor": `${STAGE_FLOOR}px` } as React.CSSProperties}
     >
       {/* Everything but the bottom bar, side by side: the sidebar, the panes,
           a drawer, the tree. A row of its own since 2026-10-18 so that the bar
           under it can run the whole width of the window. */}
-      {/* The window's three buttons, where the system's stood, in an app that
-          has none of its own. See `WindowButtons.tsx`. */}
-      <WindowButtons frame={frame} />
       <div className="app-body">
       {sidebarOpen && !zen && (
         <Sidebar
@@ -1766,6 +1765,13 @@ export function App() {
       )}
       {reach && <Reach onClose={() => setReach(false)} />}
       {dialog && <Dialog state={dialog} onClose={() => setDialog(null)} />}
+      {/* The window's three buttons, where the system's stood, in an app that
+          has none of its own. Last, and it must stay last: the window's drag
+          regions are laid down in the order of the page with the later one
+          winning, so anything draggable after these — the sidebar's top line,
+          the strip a folded sidebar leaves — would take every press on them
+          as a drag. See `WindowButtons.tsx`. */}
+      <WindowButtons frame={frame} layout={`${appLayout} ${narrow ? "narrow" : ""}`} />
     </div>
   );
 }

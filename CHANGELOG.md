@@ -127,10 +127,14 @@ shows, so it is written once and read in three places — see
   folds the sidebar away is at its right end. The workspace's name is no
   longer there; it leads the first pane's tabs while the sidebar is away.
 - **Smaller, flat window buttons.** Close, minimise and full screen are
-  twelve-pixel dots in the plain three colours, level with the top of the
-  logo, in place of the large glass ones macOS draws. Needs the app updated,
-  not only a reload; an app from before keeps the system's. Hold Option on
-  the green one to zoom instead of going full screen.
+  twelve-point dots in the plain three colours, eight points apart and
+  level with the top of the logo, in place of the large glass ones macOS
+  draws; zooming the window with ⌘+ leaves them that size, as it does the
+  system's. The first click on one works with Kururu behind another app, as
+  on the system's, and the room between them still drags the window. Needs
+  the app updated, not only a reload; an app from before keeps the
+  system's. Hold Option on the green one to zoom instead of going full
+  screen.
 - **Roomier tabs, and icons that match.** Tabs have more room in every
   direction and are a size larger. Icons across the window come in three
   sizes instead of one per button, a little bigger than before, and the

@@ -30,9 +30,33 @@
  * marks inside appear when the pointer is over the group: an × to close, a
  * − to minimise, and for the third the two arrows of full screen, or a + with
  * Option held, which fits the window to the screen instead.
+ *
+ * Three things the first build got wrong (2026-11-10, the owner: "clicking
+ * close, minimise or zoom does nothing", and beside Herdr, "they were meant to
+ * be smaller"):
+ *
+ * - **They are the last thing in the page.** Chromium collects the window's
+ *   drag regions in the order of the tree, not of what is painted on top, and
+ *   Electron lays them down in that order with the later one winning
+ *   (`DraggableRegionsToSkRegion`). The buttons came first and the sidebar's
+ *   top line — a drag region the width of the sidebar, the corner included —
+ *   after, so every press on them was taken by the window as the start of a
+ *   drag, whatever z-index drew them on top. `App.tsx` puts them after
+ *   everything else for that reason alone.
+ * - **They are sized in the screen's points, not the page's pixels.** The
+ *   window's ⌘+ is the page's zoom, and the system's buttons do not grow with
+ *   it: at 110% these were 13.2 points on a 22-point pitch beside Herdr's 12
+ *   on 20. The group undoes the zoom with its inverse (`usePageZoom`, as the
+ *   floating logo does), so the dots, the gap and the inset from the window's
+ *   left edge are Herdr's whatever the zoom; only how far down they stand
+ *   follows the zoom, because that is where the logo they stand level with is.
+ * - **The first click acts while the window is behind**, as on the system's:
+ *   the page says where they stand (`place`) and the main process gives that
+ *   room alone the first click (`desktop/stay/stay.m`).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { desktop, type FrameState } from "../desktop";
+import { usePageZoom } from "../float";
 
 const AT_REST: FrameState = { focused: true, fullscreen: false };
 
@@ -72,8 +96,16 @@ export function useWindowFrame(): FrameState & { own: boolean } {
   return { ...state, own };
 }
 
-export function WindowButtons({ frame }: { frame: FrameState & { own: boolean } }) {
+/**
+ * `layout` is whatever about the page moves the buttons — the sidebar away, a
+ * phone-width window, zen — so the room is measured again when it changes,
+ * and once more each time the window stops being the key one, which is when
+ * a first click can next fall on them.
+ */
+export function WindowButtons({ frame, layout }: { frame: FrameState & { own: boolean }; layout: string }) {
   const [alt, setAlt] = useState(false);
+  const zoom = usePageZoom();
+  const group = useRef<HTMLDivElement>(null);
   // Option is read while it is held, not at the click alone, because the mark
   // in the green button says which of its two things a click will do.
   useEffect(() => {
@@ -91,9 +123,29 @@ export function WindowButtons({ frame }: { frame: FrameState & { own: boolean } 
   }, [frame.own]);
 
   const bridge = desktop()?.frame;
-  if (!frame.own || !bridge || frame.fullscreen) return null;
+  const drawn = Boolean(frame.own && bridge && !frame.fullscreen);
+  const sent = useRef("");
+  useLayoutEffect(() => {
+    if (!bridge?.place) return;
+    const box = drawn ? group.current?.getBoundingClientRect() : undefined;
+    const room = box ? { x: box.left, y: box.top, width: box.width, height: box.height } : null;
+    const said = JSON.stringify(room);
+    if (said === sent.current) return;
+    sent.current = said;
+    bridge.place(room);
+  }, [bridge, drawn, layout, zoom, frame.focused]);
+
+  if (!drawn || !bridge) return null;
   return (
-    <div className={`win-btns ${frame.focused ? "" : "win-btns-away"}`} role="group" aria-label="Window">
+    <div
+      ref={group}
+      className={`win-btns ${frame.focused ? "" : "win-btns-away"}`}
+      role="group"
+      aria-label="Window"
+      style={{ zoom: 1 / zoom, "--win-zoom": zoom } as React.CSSProperties}
+      // Option pressed before the pointer came, or while another app had the keys.
+      onPointerMove={(event) => setAlt(event.altKey)}
+    >
       <button type="button" className="win-btn win-close" aria-label="Close the window" title="Close" onClick={() => bridge.act("close")}>
         <svg viewBox="0 0 12 12" aria-hidden="true">
           <path d="M3.6 3.6l4.8 4.8M8.4 3.6l-4.8 4.8" />

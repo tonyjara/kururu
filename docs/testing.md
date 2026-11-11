@@ -164,6 +164,28 @@ Kept short on purpose; the detail is in git history.
   held at opacity 0 and click-through by patching `BrowserWindow.prototype`.
   Not pressed with a real mouse on a hidden kururu, and no full-screen space
   was made.
+- **The window's buttons, pressed** (2026-11-10). A mouse event posted to
+  a process from outside (`CGEvent.postToPid`) reaches nothing from a
+  kururu pty, with no Accessibility grant, so the press is made inside the
+  app instead: a scratch Node-API addon builds the `NSEvent` down and up
+  with `mouseEventWithType:location:…windowNumber:` and queues them on
+  `NSApp postEvent:atStart:`. That is AppKit's own road for a click from
+  there on — the first-click question, the drag regions, Chromium's hit
+  test — without moving the owner's pointer. A bare Electron loaded the
+  real `styles.css` with the buttons and the sidebar's top line, at 100%
+  and 110%, in a window at opacity 0.02 in the screen's corner with the
+  app accessory and inactive. Buttons before the top line in the tree:
+  the press moved the window ("Window move completed without beginning")
+  and the page saw nothing, which is the bug as shipped. After it: the
+  click landed. With the window behind, the first click was swallowed with
+  no room, and with `firstClick`'s room close, minimise and ⌥-zoom each
+  acted, the Option reaching the page; outside the room it moved the
+  window. A double-click on the top line minimised, which is this Mac's
+  title-bar setting (`AppleActionOnDoubleClick`). The geometry read off
+  the page: 12-point dots on a 20-point pitch, 13 in, their tops level
+  with the logo's at 17 points at 100% and 18.7 at 110%. A posted mouse
+  move gives Chromium no `:hover`, so the hover marks with the window
+  behind, full screen, and a real pointer were left to the owner.
 - **The built-in browser and its marking** (phases 0 and 1, 2026-11-06)
   were verified end to end in an isolated instance and removed on
   2026-11-07; what was checked is in this file on the `browser-annotate`

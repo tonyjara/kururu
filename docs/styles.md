@@ -107,10 +107,24 @@ the sidebar is away the toggle and the name lead the top-left pane's strip
 (`.strip-lead`, `leadPane` in `Panes.tsx`).
 
 **The window's three buttons** are drawn by the page in the Mac app
-(`WindowButtons.tsx`): 12px, flat, the three plain colours, grey while the
-window is not the key one, level with the top of the logo. macOS draws its own
-large and glassy for an app built against the macOS 26 SDK, which Electron
-44 is, and has no switch for the old ones.
+(`WindowButtons.tsx`): flat, the three plain colours, grey while the window is
+not the key one, level with the top of the logo. macOS draws its own large and
+glassy for an app built against the macOS 26 SDK, which Electron 44 is, and
+has no switch for the old ones. They are measured in the screen's points, not
+the page's pixels — the group wears the inverse of the page's zoom — at
+Herdr's: 12 across, 8 between, 13 in from the window's left edge; only how far
+down follows the zoom, since that is the logo's top.
+
+**They are the last element of `.app`, and must stay so.** Chromium collects
+`-webkit-app-region` in tree order, not paint order, and Electron applies the
+list with the later rect winning; a `no-drag` button before the sidebar's
+draggable top line in the tree is draggable whatever its z-index, and every
+press on it moves the window instead (the first build, 2026-11-10). Only the
+buttons are `no-drag`; the gaps between them drag the window. A first click
+on them acts while the window is behind, as on the system's: the page sends
+the group's box (`frame.place`) and `desktop/stay/stay.m` answers
+`acceptsFirstMouse` yes for a press inside it and asks Electron's own answer,
+no, everywhere else.
 
 The page asks before it draws. `frame.claim()` on the bridge has the main
 process put the system's away (`setWindowButtonVisibility`) and answers with

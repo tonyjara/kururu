@@ -102,13 +102,15 @@ if (isPicker) {
      * `claimFrame`'s note in `main.js`. `claim` asks for the system's to be
      * put away and resolves with the window's state, or null where they are
      * not the page's to draw; `release` gives them back, for a page that has
-     * stopped drawing; `act` is what a button does, to the window the page is
+     * stopped drawing; `place` says where they stand, so a first click on
+     * them acts while the window is behind; `act` is what a button does, to the window the page is
      * in and no other.
      */
     frame: {
       claim: () => ipcRenderer.invoke("kururu:frame-claim"),
       release: () => ipcRenderer.send("kururu:frame-release"),
       onState: (listener) => relayOn("kururu:frame-state", listener),
+      place: (room) => ipcRenderer.send("kururu:frame-place", room && typeof room === "object" ? { x: room.x, y: room.y, width: room.width, height: room.height } : null),
       act: (verb) => {
         if (verb === "close" || verb === "minimize" || verb === "fullscreen" || verb === "zoom") ipcRenderer.send("kururu:frame-act", verb);
       },

@@ -21,11 +21,16 @@
  * offers, so it is set by a small addon (`stay/stay.m`). An app built
  * without it, or a Mac it will not load on, has these windows hide with the
  * app as they always did, said once on the console.
+ *
+ * The same addon holds the one other window property Electron reaches only
+ * for a whole window: the first click, given to the room the page draws the
+ * window's three buttons in and nowhere else (`firstClick`; `stay.m` says
+ * why).
  */
 const { app } = require("electron");
 const path = require("node:path");
 
-/** @type {{ stays: (handle: Buffer, stays: boolean) => boolean, read: (handle: Buffer) => Record<string, unknown> | undefined } | null | undefined} */
+/** @type {{ stays: (handle: Buffer, stays: boolean) => boolean, firstClick?: (handle: Buffer, x: number, y: number, width: number, height: number) => boolean, read: (handle: Buffer) => Record<string, unknown> | undefined } | null | undefined} */
 let addon;
 
 function load() {
@@ -57,8 +62,47 @@ function staysUp(win) {
 }
 
 /**
+ * The room the page's three buttons take, as the page sent it in its own
+ * pixels, put into the window's points; null for none, or for anything that
+ * is not four finite numbers and a width and height above nothing. A page at
+ * 110% measures its buttons a tenth smaller than the window holds them, so
+ * the room is multiplied by the zoom the window reports.
+ * @param {unknown} raw
+ * @param {number} zoom
+ * @returns {{ x: number, y: number, width: number, height: number } | null}
+ */
+function firstClickRoom(raw, zoom) {
+  if (!raw || typeof raw !== "object" || !Number.isFinite(zoom) || zoom <= 0) return null;
+  const { x, y, width, height } = /** @type {Record<string, unknown>} */ (raw);
+  if (typeof x !== "number" || typeof y !== "number" || typeof width !== "number" || typeof height !== "number") return null;
+  const room = { x: x * zoom, y: y * zoom, width: width * zoom, height: height * zoom };
+  if (!Object.values(room).every(Number.isFinite)) return null;
+  // Three buttons and the room between them; anything near a window's size is a page that measured the wrong thing.
+  if (room.width <= 0 || room.height <= 0 || room.width > 400 || room.height > 200) return null;
+  return room;
+}
+
+/**
+ * A first click in `room` on this window acts while the window is behind,
+ * as one on the system's own buttons does (`stay.m`); null takes it away.
+ * True if the addon took it.
+ * @param {import("electron").BrowserWindow} win
+ * @param {{ x: number, y: number, width: number, height: number } | null} room
+ */
+function firstClick(win, room) {
+  const native = load();
+  if (!native?.firstClick || win.isDestroyed()) return false;
+  try {
+    return room ? native.firstClick(win.getNativeWindowHandle(), room.x, room.y, room.width, room.height) : native.firstClick(win.getNativeWindowHandle(), 0, 0, 0, 0);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * What AppKit says about a window — `canHide`, `visible`, `level`,
- * `behavior` (the collection behaviour), `appHidden` — for a test or a
+ * `behavior` (the collection behaviour), `appHidden`, `firstClick` (a room
+ * is set) — for a test or a
  * debugging session to check against; nothing in the app reads it.
  * @param {import("electron").BrowserWindow} win
  */
@@ -68,4 +112,4 @@ function nativeState(win) {
   return native.read(win.getNativeWindowHandle());
 }
 
-module.exports = { staysUp, nativeState };
+module.exports = { staysUp, nativeState, firstClick, firstClickRoom };
