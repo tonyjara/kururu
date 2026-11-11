@@ -27,5 +27,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["desktop/globals.d.ts", "desktop/*.js", "desktop/*.mjs", "desktop/talkkey/*.mjs", "server/*.mjs"]
+  "include": ["desktop/globals.d.ts", "desktop/*.js", "desktop/*.mjs", "desktop/talkkey/*.mjs", "desktop/stay/*.mjs", "server/*.mjs"]
 }

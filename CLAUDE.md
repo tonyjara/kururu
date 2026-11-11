@@ -102,8 +102,9 @@ bun run slot status    # the slot queue agents share for builds and simulators; 
 bun run restore <repo> # a new Mac put back from the backup; refuses while a server is up
 bun run typecheck      # root tsconfig + web tsconfig + the JS half (tsconfig.js.json)
 bun test               # pure functions only — see docs/testing.md
-bun run build          # web → web/dist, server → desktop/dist/*.mjs, the talk-key hook → desktop/dist/talkkey
+bun run build          # web → web/dist, server → desktop/dist/*.mjs, the talk-key hook → desktop/dist/talkkey, the canHide addon → desktop/dist/stay.node
 bun run build:talkkey  # just the hook (Swift, through xcrun; skipped with a warning without Xcode)
+bun run build:stay     # just the addon that keeps the floating windows up while kururu is hidden (clang, same terms)
 bun run dist           # signed, notarized DMG + zip. `dist:unsigned` for testing
 ```
 
@@ -280,7 +281,9 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **The floating Kuru's chat is the drawers themselves, mounted only while it
   is open, and never a voice client** — the pill's page still holds the
   microphone; its window is docked to the logo and draws a waveform
-  (`desktop/float.js`). → [voice](docs/voice.md#the-floating-kuru)
+  (`desktop/float.js`). It, the pill and the ink stay up while kururu is
+  hidden (`canHide`, `desktop/stays.js`), and opening the chat never
+  unhides the window. → [voice](docs/voice.md#the-floating-kuru)
 - **An automation lives in the database and fires on one host, once a slot** —
   a file never switches one on; the run's row, unique by automation and slot,
   is written before anything starts (`server/src/automations.ts`). →

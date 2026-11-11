@@ -40,6 +40,7 @@
 const { BrowserWindow, Menu, screen, shell } = require("electron");
 const { EventEmitter } = require("node:events");
 const { editMenuTemplate } = require("./editmenu");
+const { staysUp } = require("./stays");
 const { LOGO, PANEL_FLOOR, adoptFloat, draggedHeight, draggedWidth, heldInside, logoBox, panelBox, placeOf, reach, waveBox, waveWidth } = require("./floatshape");
 
 /** As in `talkkey.js`: macOS is still moving windows for a while after a display changes. */
@@ -258,6 +259,8 @@ class FloatKuru extends EventEmitter {
     // On every space and over full-screen apps, without the app becoming an
     // accessory for a moment to get there — `notes.js` has why.
     logo.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    // And while kururu is hidden, as by a workspace switch (`stays.js`).
+    staysUp(logo);
     const contents = logo.webContents;
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
     if (this.debug) contents.on("console-message", (event, ...legacy) => console.log(`kururu float: ${event?.message ?? legacy[1]}`));
@@ -408,6 +411,7 @@ class FloatKuru extends EventEmitter {
     });
     panel.setAlwaysOnTop(true, "floating");
     panel.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    staysUp(panel);
     const contents = panel.webContents;
     // A link in a reply is somewhere else's business, and the chat is never
     // navigated away from itself.

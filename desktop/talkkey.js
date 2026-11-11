@@ -46,6 +46,7 @@ const { appendFileSync, existsSync, mkdirSync, renameSync, statSync } = require(
 const path = require("node:path");
 const { createInterface } = require("node:readline");
 const { stateDir } = require("./runner");
+const { staysUp } = require("./stays");
 
 /** Where macOS keeps the switch the helper needs. */
 const INPUT_MONITORING = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
@@ -624,6 +625,9 @@ class TalkKey extends EventEmitter {
     });
     panel.setAlwaysOnTop(true, "floating");
     panel.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // Over every app means while kururu is hidden too, and docked to the
+    // floating Kuru it is that logo's waveform (`stays.js`).
+    staysUp(panel);
     panel.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     if (this.debug) {
       // Electron 44 hands the event an object with `message` on it and warns about the old positional arguments; both are read so neither version is silent.

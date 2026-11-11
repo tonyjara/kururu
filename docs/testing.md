@@ -139,6 +139,31 @@ Kept short on purpose; the detail is in git history.
   the logo's mark measured 16 to 64 points in its 80-point window at each,
   with a count of 99+ inside it, and the docked waveform 8 to 140 in its
   148, where before the fix both ran off the right and the foot.
+- **The floating Kuru through a hide** (2026-11-10). **Hiding the app** is
+  tested in a bare Electron that loads the real `desktop/float.js` against a
+  loopback page, hidden from another process by a ten-line Swift tool
+  calling `NSRunningApplication(processIdentifier:).hide()`, which is what
+  Tile Bandit does; `nativeState` in `desktop/stays.js` reads `canHide`,
+  `isVisible`, the key window, the level and the collection behaviour
+  straight off AppKit. Three things to know. **An accessory app cannot be
+  hidden** (`hide()` does nothing to a Dock-less app), so the test app has
+  to be a regular one; start it with `env -u ELECTRON_RUN_AS_NODE open -g
+  -n -a …/Electron.app --args <dir>` so its Dock tile is its own coalition
+  and not the pty host's, and `open` passes the shell's environment on.
+  **`NSApp.isActive` lies here:** a non-activating panel made key reads as
+  active while the app stays hidden and another app keeps the front, so ask
+  `NSWorkspace.frontmostApplication` instead. And a launch is a race: wait
+  a second before the first hide, and put the app that was in front back
+  (`NSRunningApplication.activate`) at the end. What it showed: the logo
+  and the chat with `canHide` false, the logo still up through the hide
+  while an ordinary window went, both on every space and over full-screen
+  apps (collection behaviour 261: can join all spaces, managed, full-screen
+  auxiliary; floating level); the logo's press (`toggle`) opened the chat
+  as the key window with kururu still hidden, its window still down and the
+  other app still in front; a second press shut it, still hidden. Windows
+  held at opacity 0 and click-through by patching `BrowserWindow.prototype`.
+  Not pressed with a real mouse on a hidden kururu, and no full-screen space
+  was made.
 - **The built-in browser and its marking** (phases 0 and 1, 2026-11-06)
   were verified end to end in an isolated instance and removed on
   2026-11-07; what was checked is in this file on the `browser-annotate`

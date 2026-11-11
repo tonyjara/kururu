@@ -24,8 +24,11 @@ shows, so it is written once and read in three places — see
   corner between them to make it shorter, taller, narrower or wider — short
   enough to show only the last few messages, if you like — and it keeps the
   size. The box's pencil draws on the screen from there too. While it is on,
-  the talk key's pill is replaced by a waveform beside the logo. Off by
-  default.
+  the talk key's pill is replaced by a waveform beside the logo. It stays
+  on screen while Kururu is hidden — ⌘H, or a workspace switcher that hides
+  the apps of other workspaces — and opening the conversation then leaves
+  Kururu's window where it was; the talk key's pill and the screen pen stay
+  up the same way. Off by default.
 - **A font and a size for kururu itself.** Settings → Fonts has an
   Interface section under the terminal's, for the face and the size of
   everything that is not a terminal: the sidebar, the boards, Kuru's drawer,

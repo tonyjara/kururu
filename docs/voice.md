@@ -941,9 +941,31 @@ Edges, said plainly:
   says it can do.
 - **Like a note window, the chat never activates the app**, so a ⌘ shortcut it
   does not take itself goes to the application in front.
+- **It stays up while kururu is hidden.** Hiding an app takes every window it
+  has, and kururu is hidden all the time: ⌘H, and the owner's workspace
+  switcher (Tile Bandit), which hides every app not in the workspace it
+  switches to with `NSRunningApplication.hide`. The logo, the chat, the pill
+  (so the docked waveform) and the pen's ink set NSWindow's `canHide` to NO
+  as they are made (`desktop/stays.js`), so they stay while the window and
+  the notes go with the app. Electron has no option for it, so a Node-API
+  addon sets it (`desktop/stay/stay.m`, built to `dist/stay.node` by
+  `bun run build:stay`, part of `build`); an app without the addon has them
+  hide with the app as before, and says so on its console. Pressing the logo
+  while kururu is hidden opens the chat and leaves kururu hidden: the chat
+  takes the keys as a non-activating panel, the app in front keeps the menu
+  bar, and the window comes back only when something in the chat asks for it
+  — a card, a terminal, a file, a Needs row, or "Open Kururu's Window" on the
+  logo's right-click. Electron's `show()` and `focus()` on the panel report
+  the app active (`NSApp.isActive`, a non-activating panel's key window) but
+  neither unhides it nor takes the front; checked against a real hide. Only
+  the floating windows' own switch, or quitting, takes them off the screen.
 
 Verified 2026-11-10 in a hidden, isolated copy of the app (`docs/testing.md`),
-and then used by the owner the same evening. Not pressed by anybody yet: a
+and then used by the owner the same evening. Staying up through a hide was
+checked the same night on the real `FloatKuru` in a bare Electron, hidden by
+`NSRunningApplication.hide` from another process as Tile Bandit does it
+(`docs/testing.md`, "Hiding the app"), and not yet with a real mouse on a
+hidden kururu. Not pressed by anybody yet: a
 real pen stroke started from the chat (the test's helper took no pictures),
 the windows over a full-screen app, and a display plugged in or pulled.
 

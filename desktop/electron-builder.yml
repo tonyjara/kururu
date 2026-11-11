@@ -54,13 +54,15 @@ files:
   - ink.html
   - inkpreload.js
   - quit.js
+  - stays.js
   - icon/icon-1024.png
   - icon/trayTemplate.png
   - icon/trayTemplate@2x.png
 
 extraResources:
   # `dist` holds the server, the host, the hook report, Kokoro — and the
-  # talk-key hook, a bare Mach-O beside them. node-pty's `spawn-helper` is
+  # talk-key hook, a bare Mach-O beside them, and `stay.node`, the addon
+  # main loads by this path to keep the floating windows up (`stays.js`). node-pty's `spawn-helper` is
   # the precedent for a bare binary in Resources being signed and notarized
   # with the rest; that it holds for this one is UNVERIFIED as of 0.2.0.
   - from: dist

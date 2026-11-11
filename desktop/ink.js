@@ -78,6 +78,7 @@ const { existsSync, mkdtempSync, readFileSync, rmSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createInterface } = require("node:readline");
+const { staysUp } = require("./stays");
 const { BURST_GAP_MS, FRAME_LONG_EDGE, MARKS_MAX, cropRect, pointOf, strokesBox, windowNumberOf } = require("./inkshape");
 
 /** The shortcut that starts a session with the voice, and toggles the pen in one. Needs no permission. */
@@ -455,6 +456,8 @@ class Ink extends EventEmitter {
       // raised to the same level after, so its buttons stay over the ink.
       win.setAlwaysOnTop(true, "screen-saver");
       win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      // The pen draws on whatever is on the screen, kururu hidden or not (`stays.js`).
+      staysUp(win);
       // Made at the bounds, and set there again: macOS keeps a new window
       // under the menu bar unless it is told otherwise after it exists.
       win.setBounds(display.bounds);
