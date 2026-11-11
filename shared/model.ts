@@ -669,6 +669,20 @@ export interface Workspace {
    */
   machine: MachinePin | null;
   /**
+   * The folder on this Mac everything new in this workspace starts in — a
+   * shell, nvim, LazyGit, an agent, a card's run — or null for none chosen,
+   * an absolute path. See `shared/workspaceroot.ts`.
+   *
+   * Stored rather than worked out, because working it out was the old rule
+   * and it was wrong a third of the time: a new tab followed wherever the
+   * terminal it was opened from had last `cd`'d, so one trip into `web/` or
+   * a worktree and the next agent started there. A workspace is a project,
+   * and a project has one folder; the user said which in Settings →
+   * Workspaces. A workspace pinned to a machine has its root over there, in
+   * `machine.dir`, and this is not read for what opens on the machine.
+   */
+  root: string | null;
+  /**
    * Whether this workspace builds a mobile app, and so shares the Mac's
    * builds and simulators through the slot queue: a card run here starts
    * with the paragraph that says how (`shared/slots.ts`, `DEFAULT_BRIEF`).

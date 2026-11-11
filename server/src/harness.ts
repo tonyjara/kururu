@@ -252,6 +252,12 @@ export interface HarnessDeps {
   stopTerminal: (agentId: string) => void;
   /** Where a new tab in that pane would start. */
   cwdFor: (profileId: string, workspaceId: string, paneId: string) => Promise<string | undefined>;
+  /**
+   * A root folder as Kuru gave it, cleaned and found on this disk, or null
+   * for none; throws the sentence to say. `rootToStore` in `terminals.ts`,
+   * absent in a harness that cannot look at a disk.
+   */
+  checkRoot?: (value: unknown) => string | null;
   /** Hand a card to an agent, on a board that need not be on screen. */
   runCard: (
     profileId: string,
@@ -1417,8 +1423,43 @@ export class Harness {
     new_workspace: ({ profileId, args, ws }) => {
       const nameFor = str(args.name);
       if (!nameFor) return fail("A name is needed.");
-      const id = ws.newWorkspaceIn(profileId, nameFor.slice(0, 60));
-      return id ? ok(`Made workspace ${id} "${nameFor}".`) : fail("Could not make it.");
+      // Checked before anything is made, so a bad folder makes no workspace.
+      let root: string | null = null;
+      if (str(args.root)) {
+        if (!this.deps.checkRoot) return fail("This kururu cannot look at folders.");
+        try {
+          root = this.deps.checkRoot(str(args.root));
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err));
+        }
+      }
+      const id = ws.newWorkspaceIn(profileId, nameFor.slice(0, 60), root ?? undefined);
+      return id ? ok(`Made workspace ${id} "${nameFor}"${root ? `, with its root at ${root}` : ""}.`) : fail("Could not make it.");
+    },
+
+    set_workspace_root: ({ profileId, args, ws, workspaceArg }) => {
+      const workspaceId = workspaceArg(true)!;
+      const workspace = ws.workspaceIn(profileId, workspaceId)!;
+      const asked = str(args.root).trim();
+      // A pinned workspace's root is the folder on its machine, which is the
+      // pin's own `dir` and goes through what a pin's folder goes through.
+      const pin = workspace.machine;
+      if (pin) {
+        const machine = this.deps.machines().find((m) => m.id === pin.machineId);
+        const dir = validRemoteDir(asked || "~");
+        if (dir === null) return fail("A folder on a machine is ~, ~/… or /…, in letters, digits, spaces and . _ - + @ , : = only.");
+        ws.setWorkspaceMachineIn(profileId, workspaceId, { ...pin, dir });
+        return ok(`${workspace.name}'s root is now ${dir} on ${machine?.name ?? "its machine"}.`);
+      }
+      if (!this.deps.checkRoot) return fail("This kururu cannot look at folders.");
+      let root: string | null;
+      try {
+        root = this.deps.checkRoot(asked);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+      ws.setWorkspaceRoot(profileId, workspaceId, root);
+      return ok(root ? `${workspace.name}'s root is now ${root}: new terminals, agents and card runs there start in it.` : `${workspace.name} has no root now: a new terminal there follows the one it was opened from.`);
     },
 
     move_workspace: async ({ profileId, args, workspaceArg }) => {
@@ -2099,7 +2140,8 @@ export class Harness {
       const counts = board ? ["todo", "doing", "review", "done"].map((c) => `${c} ${board.cards.filter((k) => k.column === c).length}`).join(", ") : "no board";
       const pin = workspace.machine;
       const machine = pin ? this.deps.machines().find((m) => m.id === pin.machineId) : undefined;
-      const runsOn = pin && machine ? ` · runs on ${machine.name} in ${pin.dir} (its shells, agents and card runs open there)` : "";
+      const runsOn = pin && machine ? ` · runs on ${machine.name} in ${pin.dir} (its shells, agents and card runs open there; that folder is its root)` : "";
+      const root = !runsOn ? ` · root ${workspace.root ?? "none (new terminals follow the one they were opened from)"}` : "";
       // The Dashboard is not a workspace and is not listed as one; while it
       // is up, the workspace it was opened over is behind it, not on screen.
       const shown =
@@ -2110,7 +2152,7 @@ export class Harness {
               ? " · on screen when the user leaves the Dashboard (the profile's board) they are looking at"
               : " · on screen"
           : "";
-      out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${runsOn}${shown}`);
+      out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${root}${runsOn}${shown}`);
     }
     // By name, which is what open_shell takes and what the user says.
     const machines = this.deps.machines();

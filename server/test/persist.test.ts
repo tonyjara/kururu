@@ -207,6 +207,44 @@ describe("a workspace's machine on disk", () => {
 });
 
 /**
+ * A workspace's root is a preference like its machine, so it comes back as it
+ * was by both roads a session takes, and a value somebody wrote into the file
+ * by hand that is not an absolute path is no root rather than a directory.
+ */
+describe("a workspace's root on disk", () => {
+  it("goes round the session file, and a relative or broken one comes back as none", () => {
+    const workspaces = new Workspaces();
+    const id = workspaces.activeWorkspace.id;
+    expect(workspaces.activeWorkspace.root).toBeNull();
+    expect(workspaces.setWorkspaceRoot(workspaces.active.id, id, "/Users/me/code/kururu")).toBe(true);
+    writeSnapshot(workspaces.all(), workspaces.active.id);
+    expect(readSnapshot()!.profiles[0]!.workspaces[0]!.root).toBe("/Users/me/code/kururu");
+
+    const session = JSON.parse(readFileSync(snapshotPath(), "utf8"));
+    for (const bad of ["code/kururu", "/x\n/y", 7]) {
+      session.profiles[0].workspaces[0].root = bad;
+      writeFileSync(snapshotPath(), JSON.stringify(session));
+      expect(readSnapshot()!.profiles[0]!.workspaces[0]!.root).toBeNull();
+    }
+    delete session.profiles[0].workspaces[0].root;
+    writeFileSync(snapshotPath(), JSON.stringify(session));
+    expect(readSnapshot()!.profiles[0]!.workspaces[0]!.root).toBeNull();
+  });
+
+  it("rides in the host's blob, and a workspace made for a known folder starts with it", () => {
+    const workspaces = new Workspaces();
+    workspaces.setWorkspaceRoot(workspaces.active.id, workspaces.activeWorkspace.id, "/srv/app");
+    const kept = JSON.parse(hostBlob(workspaces.all(), workspaces.active.id)) as { profiles: ReturnType<Workspaces["all"]> };
+    expect(new Workspaces(adoptReaders(kept.profiles)).active.workspaces[0]!.root).toBe("/srv/app");
+
+    const made = workspaces.newWorkspaceIn(workspaces.active.id, "moved", "/srv/other")!;
+    expect(workspaces.workspaceIn(workspaces.active.id, made)!.root).toBe("/srv/other");
+    expect(workspaces.workspaceIn(workspaces.active.id, workspaces.newWorkspaceIn(workspaces.active.id, "blank")!)!.root).toBeNull();
+    expect(workspaces.setWorkspaceRoot(workspaces.active.id, "w-nope", "/x")).toBe(false);
+  });
+});
+
+/**
  * The views a pane holds — the board and documents — come back in their order
  * and with the one that was showing still showing; the terminals beside them
  * do not, because they are processes. Both older shapes a reader has been

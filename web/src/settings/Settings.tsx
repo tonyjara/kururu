@@ -95,7 +95,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
     label: "General",
     pages: [
       ["profiles", "Profiles", "The drawers your workspaces live in."],
-      ["workspaces", "Workspaces", "Where each one's shells run and agents open, whether it builds a mobile app, and what a card's worktree gets."],
+      ["workspaces", "Workspaces", "Each one's root folder and machine, whether it builds a mobile app, and what a card's worktree gets."],
       ["agents", "Agents", "What the + menu starts, where kururu's own agents open, and when an idle card's agent sleeps."],
       ["keyboard", "Keyboard", "Every action and the keys that reach it."],
     ],

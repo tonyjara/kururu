@@ -17,6 +17,12 @@ export interface DesktopBridge {
   /** Where a dropped file is on disk, or null in a runtime that cannot say. */
   pathForFile(file: File): string | null;
   /**
+   * The system's folder chooser, opened at `start` when it is given: a path,
+   * or null when cancelled. Optional: a window from before it, a browser and
+   * the phone type the path instead.
+   */
+  pickFolder?(start?: string | null): Promise<string | null>;
+  /**
    * Bring this window forward. Clicking a notification is the only caller.
    *
    * It is on the bridge because it cannot be anywhere else: a renderer's

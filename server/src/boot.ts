@@ -148,6 +148,8 @@ import {
   saveTimer,
   sessionShell,
   workspaceRepo,
+  workspaceRoot,
+  rootToStore,
 } from "./terminals";
 import { leadEligibility, nodeAddress, nodeSummary, nodeUnreachable, refreshClaudeReady, secretLanded, STARTED_AT } from "./thisnode";
 import { usageSnapshot } from "./usage";
@@ -597,6 +599,7 @@ export async function attach(port: Port): Promise<void> {
       host.kill(agentId);
     },
     cwdFor: cwdForPaneIn,
+    checkRoot: rootToStore,
     runCard: (profileId, workspaceId, cardId, launcherId, fresh) => runCardAt(profileId, workspaceId, cardId, launcherId, false, "harness", fresh),
     stopDev,
     // Through the variable rather than the instance, because the voice is
@@ -705,7 +708,11 @@ export async function attach(port: Port): Promise<void> {
       return workspace ? { id: workspace.id, name: workspace.name } : null;
     },
     folderOf: async (profileId, workspaceId) => {
-      // The main checkout the walk found, as the row's git verbs use; else
+      // The workspace's root when it has one (`Workspace.root`), as it is
+      // where everything else in the workspace starts.
+      const root = workspaceRoot(profileId, workspaceId);
+      if (root) return root;
+      // Otherwise the main checkout the walk found, as the row's git verbs use; else
       // the main checkout of wherever the workspace's agents start, as a
       // card's run starts — the repository's top, not a subfolder or a
       // worktree a tab happens to be in. A folder in no repository is itself.

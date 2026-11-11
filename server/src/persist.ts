@@ -29,6 +29,8 @@ import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderD
 import { adoptBoard, adoptProfileBoard, type Board } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
+import { adoptRoot } from "../../shared/workspaceroot";
+import { homedir } from "node:os";
 import type { HarnessState } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey } from "../../shared/store";
 import { isDashboardTab } from "../../shared/dashboard";
@@ -98,6 +100,8 @@ interface StoredWorkspace {
    * and the first shell opened after a cold start finds them again by name.
    */
   machine?: MachinePin;
+  /** Its root folder — see `Workspace.root`. Absent is none, and a file from before roots has none. */
+  root?: string | null;
   /** Whether it builds a mobile app — see `Workspace.mobile`. Absent is no. */
   mobile?: boolean;
   /**
@@ -222,6 +226,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         mascotId: workspace.mascotId,
         group: workspace.group,
         ...(workspace.machine ? { machine: workspace.machine } : {}),
+        ...(workspace.root ? { root: workspace.root } : {}),
         ...(workspace.mobile ? { mobile: true } : {}),
         layout: strip(workspace.layout),
       })),
@@ -426,6 +431,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         // the database holds replaces it before anything is drawn.
         board: adoptBoard(w.board),
         machine: adoptPin(w.machine),
+        root: adoptRoot(w.root, homedir()),
         mobile: w.mobile === true,
       };
       workspaces.push(workspace);

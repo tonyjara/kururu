@@ -30,8 +30,29 @@ disk. Never move a layout decision back into React state.
 - **An empty pane is the button.** The ways to have one are restoring a layout
   and closing the last tab of a workspace's last pane, and in both there is one
   thing it can do — so the pane body itself is what you click, or Enter.
-- **A new terminal starts where the last one *is*, not where it was opened.**
-  `cwdForNewTab` asks the kernel for the pty's own cwd (`cwd.ts`, one `lsof`) and
+- **A new terminal starts in the workspace's root.** `Workspace.root` is one
+  absolute folder per workspace, set in Settings → Workspaces (a path field,
+  and the system's chooser in the desktop app) or by Kuru's
+  `set_workspace_root`, and shown in `kururu_status`. Every new shell, `C-a c`,
+  a split's terminal, nvim, LazyGit (a row's too), an agent from the + menu or
+  `start_agent`, `open_shell` without `dir`, a card's run and an automation
+  start there, whichever pane they were opened from. A directory somebody
+  named still wins: `open_shell`'s `dir`, `start_agent`'s `cwd`, a worktree
+  (a card's run and its dev server, the worktree shell), and a card's resume,
+  which goes back to the folder its conversation is filed under. The pane
+  you came from lost (the owner, 2026-11-11): what it usually holds is
+  wherever the last shell was `cd`'d, a `web/` or a worktree, so the next
+  agent started somewhere nobody chose, and Tile Bandit's cards ran in
+  Pasapy's checkout. The root is checked at the moment it is set (it must be
+  a folder on this Mac; `~` is expanded, `shared/workspaceroot.ts`) and again
+  at each spawn: one inside a worktree since removed reads as its
+  repository, one gone altogether as none. A workspace pinned to a machine
+  has its root over there, which is the pin's own folder (`machine.dir`):
+  Settings draws the one field for both, and `set_workspace_root` on a
+  pinned workspace sets the pin's folder.
+- **Without a root, a new terminal starts where the last one *is*, not where
+  it was opened.** This is the rule from before roots, kept as the fallback
+  for a workspace nobody has given one. `cwdForNewTab` asks the kernel for the pty's own cwd (`cwd.ts`, one `lsof`) and
   only falls back to the spawn directory. A shell is cd'd into a project within
   seconds, and a tab that landed in the spawn directory would open in `~` all
   afternoon. The ladder: the terminal this pane is showing, then the pane's
@@ -933,7 +954,7 @@ the lower half gets the next agent in front of it, a tab away, rather than a
 third row.
 
 **Where an agent starts did not move with its tab, and nor did the
-keyboard.** `cwdPaneIn` is the old beside-the-board rule's pane without its
+keyboard.** With a root, that is the root; without one, `cwdPaneIn` is the old beside-the-board rule's pane without its
 split, and the directory is read off that: following the lower half's pane
 would start the next card in whatever checkout the last card's agent ran in,
 a worktree included. Placing a tab never moves focus; on screen

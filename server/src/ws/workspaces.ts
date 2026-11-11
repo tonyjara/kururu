@@ -13,7 +13,7 @@ import { retireWorktrees } from "../cards";
 import { type ClientState, workspaces } from "../context";
 import { saveProject } from "../look";
 import { findMachine } from "../machines";
-import { fillPane, killAll } from "../terminals";
+import { fillPane, killAll, rootToStore } from "../terminals";
 import { reply, replyAsync } from "./reply";
 
 export function workspaceVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): boolean {
@@ -78,6 +78,15 @@ export function workspaceVerbs(ws: WebSocket, st: ClientState, msg: ClientMessag
         const pin = { machineId: machine.id, dir };
         workspaces.setWorkspaceMachine(msg.workspaceId, pin);
         return pin;
+      });
+      return true;
+
+    case "set-workspace-root":
+      reply(ws, msg.id, () => {
+        if (typeof msg.profileId !== "string" || typeof msg.workspaceId !== "string") throw new Error("No workspace named.");
+        const root = rootToStore(msg.root);
+        if (!workspaces.setWorkspaceRoot(msg.profileId, msg.workspaceId, root)) throw new Error("That workspace is gone.");
+        return root;
       });
       return true;
 

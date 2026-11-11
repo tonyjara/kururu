@@ -1432,3 +1432,64 @@ describe("Kuru's notices across a server restart", () => {
     expect(viaBlob(harness)).toEqual({ inboxes: {}, batches: {}, unposted: {} });
   });
 });
+
+/**
+ * A workspace's root through Kuru's tools: set, cleared, refused when the
+ * disk says no, and on a pinned workspace the folder on its machine — the
+ * same one field Settings → Workspaces draws.
+ */
+describe("a workspace's root, from the harness", () => {
+  function rig() {
+    const ws = new Workspaces();
+    const profileId = ws.active.id;
+    const deps = {
+      workspaces: ws,
+      host: { isLive: () => false, find: () => undefined },
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+      machines: () => [{ id: "m1", name: "MV", host: "mv" }],
+      checkRoot: (value: unknown) => {
+        if (value === "") return null;
+        if (value === "~/app") return "/Users/me/app";
+        throw new Error(`${String(value)} is not a folder on this Mac.`);
+      },
+    } as unknown as HarnessDeps;
+    const harness = new Harness(deps);
+    const call = async (name: string, args: Record<string, unknown>) => harness.call(profileId, null, name, args);
+    return { ws, profileId, call };
+  }
+
+  it("sets it, clears it, and leaves it alone when the folder is not there", async () => {
+    const { ws, call } = rig();
+    const workspace = ws.activeWorkspace.id;
+    const set = await call("set_workspace_root", { workspace, root: "~/app" });
+    expect(set.isError).toBeFalsy();
+    expect(ws.activeWorkspace.root).toBe("/Users/me/app");
+    const refused = await call("set_workspace_root", { workspace, root: "/nowhere" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("not a folder");
+    expect(ws.activeWorkspace.root).toBe("/Users/me/app");
+    expect((await call("set_workspace_root", { workspace, root: "" })).isError).toBeFalsy();
+    expect(ws.activeWorkspace.root).toBeNull();
+  });
+
+  it("is the folder on the machine for a pinned workspace", async () => {
+    const { ws, call } = rig();
+    const workspace = ws.activeWorkspace.id;
+    ws.setWorkspaceMachine(workspace, { machineId: "m1", dir: "~" });
+    expect((await call("set_workspace_root", { workspace, root: "~/sites/app" })).text).toContain("on MV");
+    expect(ws.activeWorkspace.machine).toEqual({ machineId: "m1", dir: "~/sites/app" });
+    expect((await call("set_workspace_root", { workspace, root: "~/x; rm -rf ~" })).isError).toBe(true);
+    expect(ws.activeWorkspace.root).toBeNull();
+  });
+
+  it("is given to a new workspace, and a bad one makes none", async () => {
+    const { ws, call } = rig();
+    expect((await call("new_workspace", { name: "App", root: "~/app" })).text).toContain("/Users/me/app");
+    expect(ws.active.workspaces.at(-1)!.root).toBe("/Users/me/app");
+    const before = ws.active.workspaces.length;
+    expect((await call("new_workspace", { name: "Nope", root: "/nowhere" })).isError).toBe(true);
+    expect(ws.active.workspaces.length).toBe(before);
+  });
+});

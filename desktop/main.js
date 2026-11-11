@@ -999,6 +999,25 @@ function closeWindow() {
 ipcMain.handle("kururu:server-url", () => connected);
 
 /**
+ * A folder chosen in the system's dialog, sheeted on the window that asked:
+ * a workspace's root in Settings → Workspaces. Null when cancelled. A path
+ * the page names is only where the dialog opens, and is used only when it
+ * is absolute: the server checks what comes back as it checks a typed one.
+ */
+ipcMain.handle("kururu:pick-folder", async (event, start) => {
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  /** @type {Electron.OpenDialogOptions} */
+  const options = {
+    title: "Choose the workspace's root folder",
+    properties: ["openDirectory", "createDirectory"],
+    buttonLabel: "Use this folder",
+    ...(typeof start === "string" && start.startsWith("/") ? { defaultPath: start } : {}),
+  };
+  const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+  return picked.canceled ? null : (picked.filePaths[0] ?? null);
+});
+
+/**
  * The window's three buttons, and who draws them.
  *
  * The window has no title bar, and macOS floats its close, minimise and zoom

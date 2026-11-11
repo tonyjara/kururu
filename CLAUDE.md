@@ -156,6 +156,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
   (`paneForIn`, `shared/halves.ts`) when nobody named a pane; the keyboard
   stays where it was, and a pane's + menu goes where it was asked. No setting.
   → [more](docs/invariants.md#the-two-halves)
+- **Everything new in a workspace starts in its root** (`Workspace.root`,
+  Settings → Workspaces), never the folder of the pane it came from; a named
+  `dir`, a worktree and a resume still win, and a workspace with no root
+  keeps the old follow-the-pane rule. → [layout](docs/layout.md#terminals-tabs-and-panes)
 - **Boards live in the database and nowhere else, and a file never moves or
   deletes a card that is there.** Every change goes through `Store.syncProfile`; a
   database that will not open is a server that does not start. →

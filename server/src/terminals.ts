@@ -24,6 +24,7 @@ import { type MachineEntry, remoteAgentRun, remoteShellCommand, remoteShellOf, s
 import type { AgentSnapshot, PtyKind } from "../../shared/model";
 import { mintOpencodeSession, opencodeAgentCommand } from "../../shared/opencode";
 import { standingDir } from "../../shared/projects";
+import { tildePath, workspaceRootPath } from "../../shared/workspaceroot";
 import { isRemote } from "../../shared/remote";
 import { sessionOfTranscript } from "../../shared/store";
 import type { LaunchRow } from "../../shared/usage";
@@ -135,9 +136,20 @@ export function queueSave(): void {
 }
 
 /**
- * Where a new terminal should start.
+ * Where a new terminal should start, when nobody named a directory.
  *
- * A multiplexer's answer is "where the terminal you were just in is", and it
+ * The workspace's root, when it has one (`Workspace.root`), and nothing about
+ * the pane it was opened from. That is the user's rule (2026-11-11): every
+ * new shell, nvim, LazyGit and agent opens in the project's folder. The pane's
+ * live directory lost because of what it usually is: wherever the last shell
+ * was `cd`'d to, a `web/` or a worktree an agent was in, so the next card
+ * started somewhere nobody chose. A worktree, a card's resume and a `dir`
+ * still win, because they are named by whoever asks; this is only the answer
+ * for nobody having said.
+ *
+ * Without a root, the rule from before roots, kept as the fallback rather
+ * than replaced by `~`, since a workspace nobody has given one yet still had
+ * a fair guess. A multiplexer's answer is "where the terminal you were just in is", and it
  * means *is*, not was: a minute after a shell opens it has been cd'd into a
  * project, and a tab that landed in the directory the pty was spawned in would
  * open in a home directory nobody is working in. So the pid is asked of the
@@ -150,6 +162,8 @@ export function queueSave(): void {
  * workspace is one piece of work and its directory is a better guess than `~`.
  */
 async function cwdForNewTab(paneId: string): Promise<string | undefined> {
+  const root = workspaceRoot(workspaces.active.id, workspaces.activeWorkspace.id);
+  if (root) return root;
   const showing = workspaces.activeAgentIn(paneId);
   if (showing) {
     const followed = standing(await followCwd(showing));
@@ -326,6 +340,29 @@ export function workspaceRepo(workspaceId: string): string | undefined {
   );
 }
 
+/**
+ * The workspace's root folder on this Mac, when it has one that is still
+ * there — see `Workspace.root`. A root inside a worktree that has since been
+ * removed reads as its repository, on `standing`'s reasoning; one that has
+ * gone altogether reads as none, and the old rule answers instead.
+ */
+export function workspaceRoot(profileId: string, workspaceId: string): string | undefined {
+  const root = workspaces.workspaceIn(profileId, workspaceId)?.root;
+  return root ? standing(root) : undefined;
+}
+
+/**
+ * A root as a client or Kuru sent it, cleaned and checked against the disk,
+ * or null for "none". Throws the sentence to show. Asked at the moment it is
+ * set, so a typo is said then rather than found at the next new tab.
+ */
+export function rootToStore(value: unknown): string | null {
+  const root = workspaceRootPath(value, homedir());
+  if (root === undefined) throw new Error("A root folder is an absolute path on this Mac, /… or ~/….");
+  if (root !== null && !isDirectory(root)) throw new Error(`${tildePath(root, homedir())} is not a folder on this Mac.`);
+  return root;
+}
+
 export function pinOf(profileId: string, workspaceId: string): { machine: MachineEntry; dir: string; workspaceName: string } | undefined {
   const workspace = workspaces.workspaceIn(profileId, workspaceId);
   const pin = workspace?.machine;
@@ -412,8 +449,10 @@ export function endRemote(agentId: string): void {
   if (remote?.session) endSession(remote.host, remote.session);
 }
 
-/** `cwdForNewTab`, for a pane of any workspace: the terminal it shows, else what it remembers, else the workspace's newest. */
+/** `cwdForNewTab`, for a pane of any workspace: the workspace's root, else the terminal it shows, else what it remembers, else the workspace's newest. */
 export async function cwdForPaneIn(profileId: string, workspaceId: string, paneId: string): Promise<string | undefined> {
+  const root = workspaceRoot(profileId, workspaceId);
+  if (root) return root;
   const showing = workspaces.activeAgentInW(profileId, workspaceId, paneId);
   if (showing) {
     const followed = standing(await followCwd(showing));

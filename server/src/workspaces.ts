@@ -28,6 +28,8 @@ import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, markNeeds
 import type { MadeFile } from "../../shared/made";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
+import { adoptRoot } from "../../shared/workspaceroot";
+import { homedir } from "node:os";
 import { paneInHalf, type Half } from "../../shared/halves";
 import type { HarnessState, Profile, ProfileSummary, Workspace } from "../../shared/model";
 import { gatherGroups, groupName, workspaceUnits, isLoginKey, mintLoginKey } from "../../shared/model";
@@ -231,6 +233,9 @@ function adopt(stored: Profile): Profile {
       // Absent before workspaces could run on a machine, which is here. It
       // becomes a command line, so it is read as `adoptPin` reads a file.
       machine: adoptPin(workspace.machine),
+      // Absent before workspaces had one. It becomes a process's directory,
+      // so it is read as a client's would be.
+      root: adoptRoot(workspace.root, homedir()),
       mobile: workspace.mobile === true,
     }))),
   };
@@ -1472,12 +1477,14 @@ export class Workspaces {
   /**
    * `newWorkspace`, in a profile that need not be on screen, and without
    * switching anybody to it. `cwd` is where its one pane starts — a
-   * workspace moved here from another node, whose folder is already known.
+   * workspace moved here from another node, whose folder is already known —
+   * and its root, since a folder somebody named for the workspace is the
+   * one it is about (`Workspace.root`).
    */
   newWorkspaceIn(profileId: string, name: string, cwd?: string): string | null {
     const profile = this.profile(profileId);
     if (!profile) return null;
-    const workspace = this.blankWorkspace(name, cwd);
+    const workspace = this.blankWorkspace(name, cwd, cwd === undefined ? undefined : (adoptRoot(cwd, homedir()) ?? undefined));
     this.replaceProfile(profileId, (p) => ({ ...p, workspaces: [...p.workspaces, workspace] }));
     return workspace.id;
   }
@@ -1486,6 +1493,18 @@ export class Workspaces {
   setHarness(profileId: string, harness: HarnessState | null): void {
     if (!this.profile(profileId)) return;
     this.replaceProfile(profileId, (p) => ({ ...p, harness }));
+  }
+
+  /**
+   * A workspace's root folder, or null for none — see `Workspace.root`.
+   * Expects a path already cleaned and found to be a folder; the callers are
+   * the two verbs that take one from outside, and they ask the disk first.
+   */
+  setWorkspaceRoot(profileId: string, workspaceId: string, root: string | null): boolean {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace) return false;
+    if (workspace.root !== root) this.mutate(profileId, workspaceId, (w) => ({ ...w, root }));
+    return true;
   }
 
   /** Whether a workspace builds a mobile app — see `Workspace.mobile`. */
@@ -1784,7 +1803,12 @@ export class Workspaces {
    * know the meaning of. Tabs already open stay where they are.
    */
   setWorkspaceMachine(workspaceId: string, pin: MachinePin | null): void {
-    this.mutate(this.activeId, workspaceId, (w) => ({ ...w, machine: pin }));
+    this.setWorkspaceMachineIn(this.activeId, workspaceId, pin);
+  }
+
+  /** `setWorkspaceMachine`, in a profile that need not be on screen: Kuru's `set_workspace_root` on a pinned workspace. */
+  setWorkspaceMachineIn(profileId: string, workspaceId: string, pin: MachinePin | null): void {
+    this.mutate(profileId, workspaceId, (w) => ({ ...w, machine: pin }));
   }
 
   /** A machine has been removed: every workspace in every profile that ran on it now runs here. */
@@ -1958,7 +1982,7 @@ export class Workspaces {
   // Internals
   // -------------------------------------------------------------------------
 
-  private blankWorkspace(name: string, cwd?: string): Workspace {
+  private blankWorkspace(name: string, cwd?: string, root?: string): Workspace {
     const pane = makePane(id("n"), cwd);
     return {
       id: id("w"),
@@ -1972,6 +1996,7 @@ export class Workspaces {
       // Nobody has asked for one yet — see `Workspace.board`.
       board: null,
       machine: null,
+      root: root ?? null,
       mobile: false,
     };
   }

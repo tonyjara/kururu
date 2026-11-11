@@ -147,6 +147,7 @@ export function makeDashboard(id: string, key: string, layout: LayoutNode): Work
     group: null,
     board: null,
     machine: null,
+    root: null,
     mobile: false,
   };
 }

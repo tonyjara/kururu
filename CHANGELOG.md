@@ -15,6 +15,17 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Every workspace has a root folder.** Set it in Settings → Workspaces,
+  typed or with Choose… in the desktop app, and every new terminal, split,
+  nvim, LazyGit, agent, card run and automation in that workspace starts
+  there, whichever pane you opened it from. A folder you name still wins:
+  a card's worktree, and a folder given to Kuru for a shell or an agent.
+  A workspace on a machine has its root over there, which is the folder it
+  already had. Kuru sees each workspace's root and can set one
+  (`set_workspace_root`, or a root with `new_workspace`). A workspace with no
+  root keeps the old way: a new terminal starts where the one you opened it
+  from is.
+
 - **A floating Kuru.** Switch it on from the menu bar's frog or in Settings →
   Voice, and Kuru's logo floats over every app, like the chat bubble on a web
   page. Drag it anywhere; it stays where you leave it. Click it and the

@@ -167,6 +167,13 @@ if (isPicker) {
       }
     },
     /**
+     * The system's folder chooser, for Settings → Workspaces' root. A path
+     * the person picked or null, and nothing else: the page names where it
+     * opens and the main process shows it, so what a page gains is what it
+     * would get if the person typed the path.
+     */
+    pickFolder: (start) => ipcRenderer.invoke("kururu:pick-folder", typeof start === "string" ? start : null),
+    /**
      * Replacing this application with a newer one.
      *
      * The whole of what a page may say is "fetch it" and "restart into it".

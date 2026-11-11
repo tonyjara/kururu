@@ -1994,6 +1994,11 @@ export function setAgentsKururuMcpOnly(profileId: string, on: boolean): void {
   send({ type: "set-agents-kururu-mcp-only", profileId, on });
 }
 
+/** A workspace's root folder, or "" for none. Resolves with the path the server stored; rejects with why it was refused. See `Workspace.root`. */
+export function setWorkspaceRoot(profileId: string, workspaceId: string, root: string): Promise<string | null> {
+  return request((id) => ({ type: "set-workspace-root", id, profileId, workspaceId, root })) as Promise<string | null>;
+}
+
 export function setWorkspaceMobile(profileId: string, workspaceId: string, on: boolean): void {
   send({ type: "set-workspace-mobile", profileId, workspaceId, on });
 }

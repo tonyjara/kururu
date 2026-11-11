@@ -288,14 +288,14 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "start_agent",
     description:
-      "Start a coding agent in a workspace, in a terminal of its own in the workspace's lower half, where every terminal opens, with an opening prompt. Prefer add_card with run=true when the work is a task worth tracking; use this for a quick question or a one-off. Returns the new agent's id. Without machine, a workspace pinned to a machine starts it there, in the workspace's folder, inside tmux; any other workspace starts it on this Mac in the workspace's current directory. On a machine its status is read off its screen and it has no transcript here.",
+      "Start a coding agent in a workspace, in a terminal of its own in the workspace's lower half, where every terminal opens, with an opening prompt. Prefer add_card with run=true when the work is a task worth tracking; use this for a quick question or a one-off. Returns the new agent's id. Without machine, a workspace pinned to a machine starts it there, in the workspace's folder, inside tmux; any other workspace starts it on this Mac in the workspace's root (kururu_status says it), or where its terminals are when it has none. On a machine its status is read off its screen and it has no transcript here.",
     inputSchema: obj(
       {
         workspace: WORKSPACE,
         prompt: str("The first message the agent is given."),
         launcher: str("Which agent and model, a launcher id from kururu_status. Default: Claude on its default model."),
         machine: str("A machine's name from kururu_status, or local for this Mac. Default: the workspace's pinned machine, else this Mac."),
-        cwd: str("Where to start. On this Mac: an absolute directory, default where the workspace's terminals are. On a machine: ~, ~/path or /path, default the workspace's folder when pinned there, else ~."),
+        cwd: str("Where to start. On this Mac: an absolute directory, default the workspace's root, else where its terminals are. On a machine: ~, ~/path or /path, default the workspace's folder when pinned there, else ~."),
         name: str("A name for its tab."),
       },
       ["workspace", "prompt"],
@@ -309,7 +309,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
       {
         workspace: WORKSPACE,
         machine: str("A machine's name from kururu_status, or local for this Mac. Default: the workspace's pinned machine, else this Mac."),
-        dir: str("Where to start. On a machine: ~, ~/path or /path, default the workspace's folder when pinned there, else ~. On this Mac: an absolute path, default where the workspace's terminals are."),
+        dir: str("Where to start. On a machine: ~, ~/path or /path, default the workspace's folder when pinned there, else ~. On this Mac: an absolute path, default the workspace's root, else where its terminals are."),
         run: str("A command to run in it, typed at the prompt."),
         name: str("A name for its tab."),
       },
@@ -427,7 +427,19 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "new_workspace",
     description: "Make a new, empty workspace in this profile and return its id. A workspace is a project: its own panes, board and branch. The user is not switched to it.",
-    inputSchema: obj({ name: str("The workspace's name.") }, ["name"]),
+    inputSchema: obj({ name: str("The workspace's name."), root: str("The project's folder on this Mac, /… or ~/…, where its terminals, agents and card runs will start. It must exist. Optional.") }, ["name"]),
+  },
+  {
+    name: "set_workspace_root",
+    description:
+      "Set the folder a workspace's new terminals, nvim, LazyGit, agents and card runs start in: its root, shown by kururu_status. A cwd or dir given to start_agent or open_shell, and a card's worktree, still win. For a workspace pinned to a machine the root is the folder on that machine. Empty root clears it on this Mac (new terminals then follow the one they were opened from). Refused when the folder is not there. The user sees and changes the same thing in Settings → Workspaces.",
+    inputSchema: obj(
+      {
+        workspace: WORKSPACE,
+        root: str("On this Mac: an absolute path or ~/…, which must be a folder that exists; empty for none. On a pinned workspace's machine: ~, ~/… or /…."),
+      },
+      ["workspace", "root"],
+    ),
   },
   {
     name: "move_workspace",

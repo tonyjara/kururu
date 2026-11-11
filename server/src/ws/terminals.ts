@@ -28,6 +28,7 @@ import {
   sendBacklog,
   syncWatched,
   workspaceRepo,
+  workspaceRoot,
 } from "../terminals";
 import { replyAsync } from "./reply";
 
@@ -89,7 +90,10 @@ export function terminalVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage
         }
         if (msg.lazygit) {
           if (pin) return openTerminal(paneId, { command: await commandOn(pin.machine, pin.workspaceName, pin.dir, lazygitRun(pin.machine.name)), kind: "shell" });
-          const cwd = msg.cwd ?? (fromRow ? workspaceRepo(workspaces.activeWorkspace.id) : undefined);
+          // A row's LazyGit is the repository's, unless the workspace has a
+          // root, which `openTerminal` already starts in: the user named it.
+          const rooted = workspaceRoot(workspaces.active.id, workspaces.activeWorkspace.id) !== undefined;
+          const cwd = msg.cwd ?? (fromRow && !rooted ? workspaceRepo(workspaces.activeWorkspace.id) : undefined);
           return openTerminal(paneId, { cwd, command: lazygitCommand(), kind: "shell" });
         }
         return openTerminal(paneId, { cwd: msg.cwd, command: msg.command, kind: msg.kind, local: msg.local === true });

@@ -1,7 +1,7 @@
 /**
- * Settings → General → Workspaces: where a workspace's shells run, where the
- * agents kururu starts in it open, whether it builds a mobile app, and what a
- * card's worktree gets, for the repository each workspace is in.
+ * Settings → General → Workspaces: a workspace's root folder and the machine
+ * it runs on, whether it builds a mobile app, and what a card's worktree
+ * gets, for the repository each workspace is in.
  *
  * Drawn per workspace and stored per repository: a person thinks in
  * workspaces, so that is the list, and under the one chosen is the repository
@@ -21,7 +21,8 @@ import { projectSettingsFor, worktreeDir, type ProjectSettings, type ProjectSett
 import type { WorkspaceProject } from "../../../shared/wire";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { Bullets, Choice, Danger, Details, Empty, Field, Group, Mono, Outcome, P, plural, Readout, Row, Segments, Toggle } from "./ui";
+import { desktop } from "../desktop";
+import { Btn, Bullets, Choice, Danger, Details, Empty, errorText, Field, Group, Mono, Outcome, P, plural, Readout, Row, Segments, TextBox, Toggle } from "./ui";
 
 export function WorkspacesPage({
   profileId,
@@ -53,7 +54,7 @@ export function WorkspacesPage({
         </Row>
       </Group>
 
-      {shown && <RunsOn key={shown.id} workspace={shown} />}
+      {shown && <Root key={shown.id} profileId={profileId} workspace={shown} />}
       {shown && <Mobile profileId={profileId} workspace={shown} />}
 
       {shown && !root && (
@@ -71,40 +72,78 @@ export function WorkspacesPage({
 }
 
 /**
- * Where a workspace's new shells open: here, or on a machine, in a folder
- * there, inside tmux. The folder is the server's to refuse: it goes into a
- * command line on the far side, and the sentence that comes back says which
- * characters it will not put there.
+ * The workspace's root folder, and the machine it runs on: the one place
+ * everything new in it starts (`Workspace.root`).
+ *
+ * One field for both, because to the person they are one question, "where is
+ * this project": on this Mac it is a folder here, with the system's chooser
+ * beside it in the desktop app, and on a machine it is the pin's folder there,
+ * which is all a pinned workspace's root ever was. The server is the one to
+ * refuse either: a folder here must be there, and a folder on a machine goes
+ * into a command line, so the sentence that comes back says which characters
+ * it will not put there.
  */
-function RunsOn({ workspace }: { workspace: Workspace }) {
+function Root({ profileId, workspace }: { profileId: string; workspace: Workspace }) {
   const { machines } = useKururu();
   const pin = workspace.machine;
   const machine = pin ? (machines.find((m) => m.id === pin.machineId) ?? null) : null;
   const [error, setError] = useState<string | null>(null);
+  const fail = (err: unknown) => setError(errorText(err));
   const pinTo = (machineId: string | null, dir: string) => {
     setError(null);
-    api.pinWorkspace(workspace.id, machineId, dir).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    api.pinWorkspace(workspace.id, machineId, dir).catch(fail);
+  };
+  const setRoot = (root: string) => {
+    setError(null);
+    api.setWorkspaceRoot(profileId, workspace.id, root).catch(fail);
+  };
+  const bridge = desktop();
+  const choose = () => {
+    void bridge
+      ?.pickFolder?.(workspace.root)
+      .then((picked) => {
+        if (picked) setRoot(picked);
+      })
+      .catch(fail);
   };
 
   return (
     <Group
-      title="Runs on"
+      title="Root"
       foot={
-        machines.length === 0
-          ? "Add a machine under Connections to run this workspace's shells there."
-          : machine
-            ? "New terminals open there in a tmux session, so a dropped connection reattaches. Only shells go: agents, nvim, files and dev servers stay on this Mac."
-            : "Only shells move; agents and everything that reads files stay on this Mac."
+        machine
+          ? `New terminals, nvim, LazyGit, agents and card runs open on ${machine.name}, in this folder, inside tmux, so a dropped connection reattaches. The file tree and dev servers stay on this Mac.`
+          : workspace.root
+            ? "New terminals, nvim, LazyGit, agents, card runs and automations start in this folder, whichever pane they are opened from. A card's worktree and a folder given to Kuru still win."
+            : "None yet, so a new terminal starts wherever the one it was opened from is. Give the project's folder and everything new starts there."
       }
     >
-      <Choice
-        label="Shells"
-        hint={error ? <Outcome bad>{error}</Outcome> : undefined}
-        value={machine?.id ?? "local"}
-        onChange={(value) => pinTo(value === "local" ? null : value, "~")}
-        options={[["local", "This Mac"] as const, ...machines.map((m) => [m.id, m.name, `ssh ${m.host}`] as const)]}
-      />
-      {machine && pin && <Field label="Folder" hint={`On ${machine.name}.`} mono value={pin.dir} placeholder="~" onCommit={(dir) => pinTo(machine.id, dir)} ariaLabel={`Folder on ${machine.name}`} />}
+      {machines.length > 0 && (
+        <Choice
+          label="Runs on"
+          value={machine?.id ?? "local"}
+          onChange={(value) => pinTo(value === "local" ? null : value, "~")}
+          options={[["local", "This Mac"] as const, ...machines.map((m) => [m.id, m.name, `ssh ${m.host}`] as const)]}
+        />
+      )}
+      {machine && pin ? (
+        <Field
+          label="Root folder"
+          hint={error ? <Outcome bad>{error}</Outcome> : `On ${machine.name}.`}
+          mono
+          value={pin.dir}
+          placeholder="~"
+          onCommit={(dir) => pinTo(machine.id, dir)}
+          ariaLabel={`Root folder on ${machine.name}`}
+        />
+      ) : (
+        <Row label="Root folder" hint={error ? <Outcome bad>{error}</Outcome> : "On this Mac. ~ is your home folder."} wide>
+          <span className="st-keybox">
+            <TextBox mono value={workspace.root ?? ""} placeholder="~/projects/name" onCommit={setRoot} aria-label="Root folder" />
+            {bridge?.pickFolder && <Btn onClick={choose}>Choose…</Btn>}
+          </span>
+        </Row>
+      )}
     </Group>
   );
 }
