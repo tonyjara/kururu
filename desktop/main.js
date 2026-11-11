@@ -787,20 +787,27 @@ function createWindow() {
   });
 
   /**
-   * And a link the page forgot to catch must not turn this window into the
-   * thing it pointed at. The page is the whole app: a link to a file in a
-   * document, followed, took the window to a JSON error and read as kururu
-   * crashing (2026-11-11). The reader classifies every link now
-   * (`web/src/readerlink.ts`); this is the floor under it, for whatever page
-   * draws a link next. Only the page's own navigations are seen here —
-   * `loadURL` and a reload are not — and an `/api/` path is never a page.
+   * And the page never takes this window anywhere. The page is the whole app,
+   * with no back button behind it: a link to a file in a document, followed,
+   * left the window on Chromium's JSON viewer showing file-raw's refusal, and
+   * that read as kururu crashing (2026-11-11). The reader classifies every
+   * link now (`web/src/readerlink.ts`); this is the floor under it, for
+   * whatever page draws a link next.
+   *
+   * Strict rather than a list of bad paths, because every navigation this
+   * window is meant to make is the main process's — `loadURL` to a server or
+   * its vite, `loadFile` to the picker — and those, like a reload, never
+   * arrive here. What does arrive is the page's own: a link, a form, a
+   * `location` set. The same document again (a fragment, say) is let be; a
+   * page outside kururu goes to the browser, where the window-open handler
+   * would have sent it; anything else is refused and the app stays drawn.
    */
   win.webContents.on("will-navigate", (event, url) => {
-    try {
-      if (/^https?:/i.test(url) && new URL(url).pathname.startsWith("/api/")) event.preventDefault();
-    } catch {
-      event.preventDefault();
-    }
+    const bare = (/** @type {string} */ u) => u.split("#")[0];
+    if (bare(url) === bare(win?.webContents.getURL() ?? "")) return;
+    event.preventDefault();
+    const here = originOf(win?.webContents.getURL() ?? "");
+    if (/^https?:/i.test(url) && originOf(url) !== here && originOf(url) !== connected) void shell.openExternal(url);
   });
 
   // Cut, Copy and Paste on a right-click in a text field, and Copy on selected

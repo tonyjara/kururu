@@ -148,9 +148,12 @@ back: a markdown file is `open-doc` in the same pane, with a short-lived word
 left for the heading it named; any other file is a new window, which the
 desktop hands to the system's browser; the web and mail leave the window;
 anything else does nothing. A file the server will not resolve is simply not
-opened. The desktop's `will-navigate` refuses an `/api/` path as the floor
-under every page, after a link to `bancard.md` took the window to a JSON error
-and read as kururu crashing (2026-11-11).
+opened. Under every page, the desktop's main window refuses any navigation
+the page starts (`will-navigate`) other than to the document it is on, and
+hands a page outside kururu to the browser: the window's own moves are all
+`loadURL`/`loadFile` from main, which never pass there. Both came after a link
+to `bancard.md` left the window on Chromium's JSON viewer with no way back,
+which read as kururu crashing (2026-11-11).
 
 `persist.ts` writes a pane's view tabs as `tabs` (the board and documents in
 order) and `showing`, and reads the older `reader`/`board` shape; `adoptReaders`
