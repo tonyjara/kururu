@@ -624,9 +624,10 @@ type Edge = "height" | "width" | "both";
  * were not heard. The ✕ is the pill's: drop the clip, stop Kuru, dismiss.
  *
  * As tall as the logo's mark and `float.wave` wide, since the main process
- * puts its window in the logo's row and the two are read as one thing.
+ * puts its window in the logo's row and the two are read as one thing — or
+ * `room` wide, which is less when the pen's tools share the row (`Pill.tsx`).
  */
-export function FloatWave({ float }: { float: FloatState }) {
+export function FloatWave({ float, room = float.wave }: { float: FloatState; room?: number }) {
   const ui = useVoiceUi();
   const mineId = useMine();
   const { outbox } = useKururu();
@@ -635,7 +636,7 @@ export function FloatWave({ float }: { float: FloatState }) {
   const stuck = ui.phase === "sending" && mine !== null && !("state" in mine) && mine.error !== null;
   const words = ui.phase === "error" ? ui.text : stuck ? "Not with the server yet — kept, retrying" : null;
   // Room for words when there are some: a waveform's width holds four of them.
-  const width = words ? Math.max(float.wave, 300) : float.wave;
+  const width = words ? Math.max(room, 300) : room;
   const bars = Math.max(8, Math.floor((width - 58) / BAR_PITCH));
   const levels = useLevels(ui.phase === "listening", ui.level, bars);
   if (ui.phase === "idle") return null;

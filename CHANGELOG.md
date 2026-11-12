@@ -224,6 +224,24 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **A voice message with marks on WhatsApp reaches Kuru, once.** WhatsApp's
+  window title starts with an invisible direction mark, a mark's label
+  quotes it, and Claude Code ignores the Enter after any line holding one:
+  the message sat in Kuru's prompt box, was typed again on every retry, and
+  arrived six times over in one turn when an Enter finally got through.
+  Direction marks are now left out of everything kururu types into an
+  agent, and out of the marks' labels.
+
+- **The floating Kuru's waveform stays the chat's width when the pen comes
+  out.** Pressing Shift while talking put the pen's tools beside a waveform
+  already as wide as the chat, and the two ran far across the screen; now
+  the waveform makes room for them. Needs no rebuild.
+
+- **A message sent while kururu is reconnecting goes once it is back.** The
+  drawer's and the floating chat's box emptied on Send even when the
+  connection to the server was down for that moment, and the message was
+  gone; now it waits and goes on reconnect.
+
 - **Kuru's conversation no longer scrolls sideways**, in the floating chat or
   the drawer. A line saying an agent finished or is blocked could not fit a
   narrow column. It now cuts the agent's name short first, and if the rest

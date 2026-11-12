@@ -73,6 +73,10 @@ describe("promptCarries", () => {
     expect(promptCarries(prompt, said)).toBe(true);
   });
 
+  test("finds a message whose bidi controls were taken out as it was typed", () => {
+    expect(promptCarries("[voice] look at [mark 2 WhatsApp] here", "look at [mark 2 \u200eWhatsApp] here")).toBe(true);
+  });
+
   test("finds each of two messages typed as one turn", () => {
     const prompt = "[voice] first thing\n\n[voice] second thing";
     expect(promptCarries(prompt, "first thing")).toBe(true);

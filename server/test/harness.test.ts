@@ -398,6 +398,16 @@ describe("keys and pastes", () => {
     expect(5 * TYPE_PIECE).toBeLessThanOrEqual(800);
   });
 
+  it("types no bidi control, which makes Claude Code drop the Enter after it", () => {
+    // The 2026-11-12 message: WhatsApp's window title begins with U+200E, and a mark's label quotes it.
+    const said = "[voice] [marks 2 on screen (/m/marks.md)] look at this [mark 2 \u200eWhatsApp] it got big";
+    expect(typingPieces(said).join("")).toBe("[voice] [marks 2 on screen (/m/marks.md)] look at this [mark 2 WhatsApp] it got big");
+    expect(typingPieces("a\u202eb\u2066c\u2069d\u200fe\u061cf\u202ag")).toEqual(["abcdefg"]);
+    expect(typingPieces("two\u200e\nlines")).toEqual(["\x1b[200~two\nlines\x1b[201~"]);
+    // Not the other invisible ones: a joiner is half an emoji.
+    expect(typingPieces("👩\u200d💻 \u200b\ufeff")).toEqual(["👩\u200d💻 \u200b\ufeff"]);
+  });
+
   it("never ends a piece on half a character", () => {
     const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
     const text = `${"a".repeat(TYPE_PIECE - 1)}${"😀".repeat(200)}`;

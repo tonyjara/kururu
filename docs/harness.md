@@ -503,6 +503,19 @@ instructions found there as the user's. Text with a newline is still one
 bracketed paste, because typed, the newline would be Enter; a long one does
 arrive tagged, and `stripPastedContent` takes the tags off for the drawer.
 
+**No bidi controls.** A line with one Unicode bidi control in it — U+200E,
+U+202E, U+2066 and the rest of `shared/bidi.ts` — goes into Claude Code's
+prompt box and its Enter does nothing (2.1.322, tried in a pty with a prompt
+hook blocking every submit; zero-width spaces, joiners, BOMs and soft hyphens
+do no harm). WhatsApp's window title begins with U+200E and a screen mark's
+label quotes the title, so on 2026-11-12 a voice message was typed into Kuru
+six times — twice by each try the outbox makes, over a Resend and a restart —
+and taken once, as one prompt holding all six, when an Enter finally landed;
+whatever came after joined the pile. `typingPieces` takes the set out of
+everything typed or pasted into an agent, `labelWords` out of a mark's label,
+and `promptCarries` out of both sides when it looks for a message in Kuru's
+transcript.
+
 **Why not the inbox.** Every Claude Code session since 2.1.224 binds a Unix
 socket and exports its path and a token to its hooks
 (`CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`), and the

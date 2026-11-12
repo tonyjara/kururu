@@ -47,6 +47,11 @@ describe("the lines", () => {
     expect(labelWords("one two three four five six seven eight nine ten eleven twelve", 30)).toBe("one two three four five six…");
   });
 
+  it("takes the bidi controls out of a window's title, as WhatsApp's starts with one", () => {
+    expect(labelWords("\u200eWhatsApp")).toBe("WhatsApp");
+    expect(labelWords("pay\u202e\u2066 now\u2069")).toBe("pay now");
+  });
+
   it("still reads a browser set's lines, which sit in old conversations", () => {
     const path = "/Users/me/.local/share/kururu/marks/m0123456789ab/marks.md";
     const lines = [`[marks 3 on localhost:3000/checkout (${path})]`, '[mark 1 button "Pay now"] make it the accent colour', '[mark 2 area 320×180 under "Order summary"] this gap is too big', '[mark 3 text "Totla"] typo'];

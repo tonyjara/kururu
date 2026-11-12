@@ -26,6 +26,7 @@
  * ending and nothing more being queued; `wait_agent` reports the first and the
  * orchestrator is told to look before trusting it.
  */
+import { withoutBidi } from "./bidi";
 import { boardLanes, type Board, type Card } from "./board";
 import type { HarnessCli } from "./launchers";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "./model";
@@ -715,8 +716,12 @@ export const TYPE_PIECE = 160;
  * instructions found there as the user's. Typed, the words are the user's.
  * A piece never ends between the halves of a surrogate pair, since each write
  * is encoded on its own and half a character is a replacement character.
+ *
+ * Bidi controls are taken out first, typed or pasted: one anywhere in the
+ * words and Claude Code drops the Enter after them (`shared/bidi.ts`).
  */
-export function typingPieces(text: string): string[] {
+export function typingPieces(said: string): string[] {
+  const text = withoutBidi(said);
   if (/[\r\n]/.test(text)) return [`\x1b[200~${text}\x1b[201~`];
   const pieces: string[] = [];
   for (let at = 0; at < text.length; ) {

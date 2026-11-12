@@ -335,6 +335,7 @@ function connect(): void {
       case "snapshot":
         resyncing = false;
         set({ snapshot: msg.snapshot });
+        sayUnsaid();
         break;
       case "delta": {
         // Until the whole snapshot asked for arrives, every delta is from a
@@ -1756,11 +1757,40 @@ export function kuruReplay(profileId: string, utterance: string, text?: string):
  * is, so that the server can tell a retry from a second message; what comes
  * back is the outbox's record of it, on the socket, merged into the
  * conversation like a spoken one.
+ *
+ * Said with the socket down, it waits here for the next server's snapshot
+ * (`sayUnsaid`) rather than going the way of every other message `send`
+ * cannot deliver. The box empties on Send either way, and a line that went
+ * nowhere left nothing behind it: the owner pressed Send in the floating
+ * chat and nothing reached Kuru (2026-11-12). That day's cause was another
+ * (`shared/bidi.ts`), but a server restarting under `bun run dev` is a
+ * socket down for a second or two many times a day, and a hidden page's
+ * reconnect can take longer. Kept by the profile's key, since the id it was
+ * said to is minted afresh by a server that started cold.
  */
 export function kuruSay(profileId: string, text: string): string {
   const id = mintId();
-  send({ type: "kuru-say", profileId, id, text, at: Date.now() });
+  const at = Date.now();
+  if (socket?.readyState === WebSocket.OPEN) send({ type: "kuru-say", profileId, id, text, at });
+  else {
+    const profile = state.snapshot?.profile;
+    if (profile?.id === profileId) unsaid.push({ key: profile.key, id, text, at });
+  }
   return id;
+}
+
+/** Lines for Kuru said while the socket was down, by the key of the profile they were said in. In memory: a page reloaded meanwhile has lost them. */
+const unsaid: { key: string; id: string; text: string; at: number }[] = [];
+
+/** A snapshot came: what was said while there was none goes now, to the profile's id on this server. Sent twice, the id makes the second nothing. */
+function sayUnsaid(): void {
+  const profile = state.snapshot?.profile;
+  if (!profile || !unsaid.length || socket?.readyState !== WebSocket.OPEN) return;
+  const waiting = unsaid.splice(0);
+  for (const line of waiting) {
+    if (line.key === profile.key) send({ type: "kuru-say", profileId: profile.id, id: line.id, text: line.text, at: line.at });
+    else unsaid.push(line);
+  }
 }
 
 /** Stop Kuru's turn, as Escape in its terminal would. The status the drawer reads says when it has. */

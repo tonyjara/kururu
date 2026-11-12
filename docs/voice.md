@@ -990,7 +990,12 @@ Edges, said plainly:
   neither on there is no pill page, the talk key only exists in kururu's own
   window, and the pill drawn in that window is as it was.
 - **The screen pen's tools** are still the pill's draw-only form, now in the
-  logo's row beside the waveform, and cannot be dragged while docked.
+  logo's row beside the waveform, and cannot be dragged while docked. The
+  waveform gives them its room (`Pill.tsx`), so the row is still the chat's
+  edge and no wider; under 132 px of waveform it stops giving, and the row
+  is longer than the chat by what the tools still need. Drawn at its whole
+  width beside them, the two once ran 955 points from the logo across the
+  screen when Shift put the pen down mid-recording (2026-11-12).
 - **The logo and the chat are in the pen's stills**, where the pill is left
   out of them, and with the pen down the ink is over both, as it is over the
   window: lift the pen (Esc) to press either.

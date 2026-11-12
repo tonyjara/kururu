@@ -14,6 +14,9 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { desktop, type FloatState } from "./desktop";
 
+/** The least the voice's waveform is drawn at: its width beside a shut chat (`WAVE_WIDTH` in `desktop/floatshape.js`). */
+export const FLOAT_WAVE_MIN = 132;
+
 let state: FloatState | null = null;
 let asked = false;
 const listeners = new Set<() => void>();

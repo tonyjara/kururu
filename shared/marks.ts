@@ -23,6 +23,8 @@
  * the one free text.
  */
 
+import { withoutBidi } from "./bidi";
+
 /**
  * The version `marks.json` carries, for whoever reads it next. 2 added
  * `kind`: a set of marks on a page (the browser's, from before its removal),
@@ -94,10 +96,12 @@ export function redact(text: string): string {
 /**
  * Somebody else's words as a label quotes them: on one line, a `"` as `'`
  * and a bracket as a parenthesis — so nothing they say can close the quote
- * or the line's bracket early — and cut at a word with `…`.
+ * or the line's bracket early — with no bidi control in them (WhatsApp's
+ * window title begins with one, see `shared/bidi.ts`), and cut at a word
+ * with `…`.
  */
 export function labelWords(text: string, max = LABEL_WORDS_MAX): string {
-  const flat = text.replace(/\s+/g, " ").replace(/"/g, "'").replace(/\[/g, "(").replace(/\]/g, ")").trim();
+  const flat = withoutBidi(text).replace(/\s+/g, " ").replace(/"/g, "'").replace(/\[/g, "(").replace(/\]/g, ")").trim();
   if (flat.length <= max) return flat;
   const cut = flat.slice(0, max);
   const space = cut.lastIndexOf(" ");

@@ -25,6 +25,8 @@
  * programs; `web/src/voice.ts` is the half that holds the microphone.
  */
 
+import { withoutBidi } from "./bidi";
+
 /** The two languages Kuru is spoken to in, and in which it answers. The order is the user's preference. */
 export type VoiceLang = "en" | "es";
 export const VOICE_LANGS: readonly VoiceLang[] = ["en", "es"];
@@ -807,7 +809,8 @@ export function transcribeRetryMs(attempt: number): number | null {
  * delivered message look lost, which would type it twice.
  */
 export function promptCarries(prompt: string, text: string): boolean {
-  const fold = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  // Without bidi controls on both sides: they are taken out as the words are typed (`typingPieces`).
+  const fold = (s: string) => withoutBidi(s).replace(/\s+/g, " ").trim().toLowerCase();
   const needle = fold(text).slice(0, 200);
   return needle.length > 0 && fold(prompt).includes(needle);
 }

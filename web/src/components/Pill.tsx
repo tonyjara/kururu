@@ -42,7 +42,7 @@ import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
 import { installInk, installShiftPen, useInk } from "../ink";
 import { installReload } from "../reload";
-import { useFloat, usePageZoom } from "../float";
+import { FLOAT_WAVE_MIN, useFloat, usePageZoom } from "../float";
 import { FloatWave } from "./Float";
 import { DrawPill, VoicePill } from "./VoicePill";
 
@@ -57,6 +57,8 @@ const HERE_MS = 5000;
 const IDLE_POLL_MS = 500;
 /** A panel made for the screen pen alone (`TalkKey.forPen`): its tools, and nothing of the voice. */
 const DRAW_ONLY = typeof location !== "undefined" && new URLSearchParams(location.search).has("draw");
+/** Between the waveform and the pen's tools in the docked row: `.pill-stack`'s gap. */
+const STACK_GAP = 6;
 
 /**
  * **The pill page is never hot-updated; it reloads instead, once it is idle.**
@@ -179,6 +181,36 @@ export function Pill() {
   // owner's window is read at it was a tenth too big for its panel, its right
   // end and its foot cut off by the window's edge (2026-11-11).
   const scale = usePageZoom();
+  /**
+   * Docked with the pen's tools beside it, the waveform gives them its room.
+   * It runs the chat's edge, and the tools stand in the same row further
+   * from the logo, so drawn at its whole width the two ran that far past the
+   * chat: the owner pressed Shift while talking with the chat open and got a
+   * band from the logo a third of the way across a 2880-point display, 529
+   * points going to 870 and on to 955 as the marks were counted on the tools'
+   * label (pill.log, 2026-11-12: "this was supposed to be integrated, and
+   * once I pressed Shift it became super big"). Now the row is the waveform's
+   * width whatever is in it, down to the waveform's own width beside a shut
+   * chat; under that the row is longer than the chat by what the tools need,
+   * since those cannot be squeezed. Measured rather than known, since the
+   * tools' label grows with the count. In the screen's points, as `report`
+   * says the box.
+   */
+  const [tools, setTools] = useState(0);
+  const docksTools = docked !== null && drawing;
+  useLayoutEffect(() => {
+    const el = docksTools ? root.current?.querySelector(".voice-pill-drawing") : null;
+    if (!el) {
+      setTools(0);
+      return;
+    }
+    const measure = () => setTools(Math.round(el.getBoundingClientRect().width * scale));
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [docksTools, scale]);
+  const room = docked ? (tools > 0 ? Math.max(FLOAT_WAVE_MIN, docked.wave - tools - STACK_GAP) : docked.wave) : 0;
   const report = useRef(() => {});
   report.current = () => {
     const bridge = desktop()?.voice;
@@ -192,7 +224,7 @@ export function Pill() {
     report.current();
     // The pen's tools come and go with its session, its label counts the marks, and the panel is sized to them.
     // And docked to the floating Kuru it is the waveform's box, which is as wide as the chat it runs along.
-  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.marks, ink.state.ending, ink.state.voice, docked?.wave, docked?.reach, scale]);
+  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.marks, ink.state.ending, ink.state.voice, docked?.wave, docked?.reach, scale, room]);
   // Docked, the box also changes for a reason that is none of those: the
   // waveform gives way to words when the server will not take a clip. The
   // window beside the logo has to be exactly what is drawn, so it is watched.
@@ -209,7 +241,7 @@ export function Pill() {
     <div className={`pill-page-root ${docked ? `pill-docked pill-docked-${docked.reach}` : ""}`} style={scale !== 1 ? { zoom: 1 / scale } : undefined} ref={root}>
       <div className="pill-stack">
         {drawing && <DrawPill />}
-        {DRAW_ONLY ? null : ui.phase === "idle" && here ? <PillHere /> : docked ? <FloatWave float={docked} /> : <VoicePill floating />}
+        {DRAW_ONLY ? null : ui.phase === "idle" && here ? <PillHere /> : docked ? <FloatWave float={docked} room={room} /> : <VoicePill floating />}
       </div>
     </div>
   );
