@@ -5766,8 +5766,11 @@ html.pill-page #root {
    Kuru, so no ground and no side — one line in the meta line's size and ink,
    across the list, between the two of you. The agent's name is the part
    that gives way when the drawer is narrow; what happened, and when, never
-   do. A blocked agent's "is blocked" is in the blocked ink, the one notice
-   that may be waiting on you. The caret turns as the message opens. */
+   do, nor who sent it or where — a column too narrow for those wraps the
+   line onto a second row, where it used to run past the list's edge and
+   scroll the whole conversation sideways (2026-11-12). A
+   blocked agent's "is blocked" is in the blocked ink, the one notice that
+   may be waiting on you. The caret turns as the message opens. */
 .kuru-notice {
   align-self: stretch;
   display: flex;
@@ -5798,6 +5801,7 @@ html.pill-page #root {
   border-radius: var(--radius-sm);
   text-align: left;
   white-space: nowrap;
+  flex-wrap: wrap;
   font-variant-numeric: tabular-nums;
 }
 .kuru-notice-line:hover {
@@ -5816,9 +5820,27 @@ html.pill-page #root {
 .kuru-notice-from {
   font-weight: 700;
 }
-.kuru-notice-line > .kuru-notice-cut {
+/* The name takes what the rest of the line leaves, from a stub of 4em up
+   to its own width and never past it, and is cut with an ellipsis. Its
+   starting width is the stub, not the whole name, because a row wraps on
+   its parts' starting widths: when even the stub has no room, the sender,
+   the workspace and what happened go to a second row, whole, rather than
+   any of them being cut. With `flex: 0 1 auto` the name could only shrink
+   to nothing, and the rest, which could not, ran out past the list. The
+   other parts shrink only when one alone is wider than a row, which a
+   phone's narrowest sheet is the only place to meet. */
+.kuru-notice-line > .kuru-notice-from,
+.kuru-notice-line > .kuru-notice-where,
+.kuru-notice-line > .kuru-notice-what {
   flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kuru-notice-line > .kuru-notice-cut {
+  flex: 1 1 4em;
+  min-width: 0;
+  max-width: max-content;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -5842,8 +5864,12 @@ html.pill-page #root {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* It wraps rather than run past its bubble: a narrow drawer has no room
+   for a folded line's who, when and three buttons on one row, and what did
+   not fit hung out past the list's edge. */
 .kuru-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   font-size: var(--fs-sm);
@@ -5931,8 +5957,11 @@ html.pill-page #root {
 .kuru-folded .kuru-meta > * {
   flex: none;
 }
+/* From nothing, as a notice's name grows (`.kuru-notice-line`): a row
+   wraps on its parts' starting widths, and the words, which are cut to fit
+   anyway, must never be what pushes the buttons onto a second row. */
 .kuru-folded .kuru-meta > .kuru-fold-line {
-  flex: 1 1 auto;
+  flex: 1 1 0;
 }
 .kuru-fold-who {
   flex: none;
@@ -6438,7 +6467,10 @@ button.kuru-quote:hover {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  max-width: 100%;
+  /* Its margins are outside the 100%, so they come off it: a long chip
+     drawn at the full width ran two pixels past its bubble, and that was
+     enough to scroll the conversation sideways. */
+  max-width: calc(100% - 2px);
   margin: 0 1px;
   padding: 0 5px;
   vertical-align: baseline;

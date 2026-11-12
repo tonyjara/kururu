@@ -212,6 +212,13 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **Kuru's conversation no longer scrolls sideways**, in the floating chat or
+  the drawer. A line saying an agent finished or is blocked could not fit a
+  narrow column. It now cuts the agent's name short first, and if the rest
+  still does not fit, it goes onto a second row. A folded line with no room
+  for its buttons wraps the same way, and a long chip in your own message
+  stays inside its bubble.
+
 - **A menu's list no longer opens just because the pointer passed over its
   row.** Going down a card's right-click menu past Send to used to open its
   list at once, over the rows you were heading for. A row's list now opens
