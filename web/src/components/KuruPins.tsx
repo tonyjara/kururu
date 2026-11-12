@@ -40,14 +40,14 @@ export function PinsButton({ count, open, onToggle }: { count: number; open: boo
   return (
     <button
       type="button"
-      className={`kuru-head-btn kuru-pins-btn ${open ? "kuru-head-btn-on" : ""}`}
+      className={`kuru-head-btn kuru-head-icon kuru-pins-btn ${open ? "kuru-head-btn-on" : ""}`}
       aria-pressed={open}
       aria-label={`Pinned messages, ${count}`}
       title={open ? "Hide the pinned messages" : "Pinned messages"}
       onClick={onToggle}
     >
       <PinIcon filled={open} />
-      <span className="kuru-pins-count">{count}</span>
+      <span className="kuru-head-count kuru-pins-count">{count}</span>
     </button>
   );
 }

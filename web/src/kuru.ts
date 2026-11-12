@@ -136,10 +136,11 @@ export function takeKuruSearch(): void {
 }
 
 /**
- * What Escape does to a search that is up, for the window's key handler, which
- * is above the drawer and otherwise closes it. Registered by the drawer while
- * it is mounted; it answers whether there was a search to leave, so that the
- * first Escape takes the search away and the next the drawer.
+ * What Escape does to a search that is up — or to the filter's panel, which
+ * goes before it — for the window's key handler, which is above the drawer
+ * and otherwise closes it. Registered by the drawer while it is mounted; it
+ * answers whether there was something to leave, so that the first Escape
+ * takes that away and the next the drawer.
  */
 let searchExit: (() => boolean) | null = null;
 

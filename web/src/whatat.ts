@@ -77,6 +77,8 @@ function headingAbove(root: Element, y: number): string {
 
 /** Which part of Kuru's drawer a point is on. */
 function drawerPart(el: Element): string {
+  if (el.closest(".kuru-filter")) return "its filter of workspaces and nodes";
+  if (el.closest(".kuru-tags")) return "the strip saying what its filter shows";
   if (el.closest(".kuru-head")) return "its header";
   if (el.closest(".kuru-search")) return "its search";
   const line = el.closest(".kuru-item, .kuru-notice");

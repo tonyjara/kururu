@@ -392,14 +392,28 @@ nearly every turn and would carry the openings each time.
 ### Tags
 
 Every line wears the workspaces it is about, as small chips after its time, and
-the row under the header narrows the list to any of them: **Todo**, then the
-nodes when this kururu is linked with others, then the workspaces the loaded
-lines are about, most recently talked about first. Several pressed read as any
-of them; a node and workspaces together as that node's lines about any of them.
-It replaced the row of a chip per node (All · mac · omarchy) on 2026-11-12. A
-chip on a line shows that workspace's thread, held at that line; pressed again
-while it is all that is shown, everything. What is picked is this device's
-(`kururu.kuru.tags`).
+the header's **Filter** narrows the list to any of them. It opens a panel hung
+from the header (⌘⇧F with the drawer open): a field to type a name into, then
+**Todo**, the nodes when this kururu is linked with others, the workspaces
+lately talked about (five at most, most recent first), and the rest by name.
+A row is a switch and the panel stays open, the list narrowing behind it;
+several picked read as any of them, a node and workspaces together as that
+node's lines about any of them. "only" on a row, or Shift+Enter, makes it the
+one thing shown and closes the panel. While anything is picked a strip under
+the header shows those chips, each let go of by a press, with Todo before
+them. A chip on a line shows that workspace's thread, held at that line;
+pressed again while it is all that is shown, everything. What is picked is
+this device's (`kururu.kuru.tags`).
+
+It was a row under the header on 2026-11-12 — Todo and a chip per node and per
+workspace, which replaced the row of a chip per node (All · mac · omarchy) the
+same day — and twenty-one workspaces ran two thousand pixels of chips past a
+drawer of four hundred. The panel's rows and their order are sums in
+`web/src/kurufilter.ts` (`web/test/kurufilter.test.ts`); the argument for the
+layout, and for where the rest of the chat's controls went with it, is
+[plans/kuru-chat-ux.md](plans/kuru-chat-ux.md). The header holds what finds
+things (search, filter, pins); the box's foot holds what writes into it (the
+mic, the pen), how the answer comes back (Speak replies, Telegram) and Send.
 
 Where they come from (`shared/kurutags.ts`, pure, `server/test/kurutags.test.ts`):
 

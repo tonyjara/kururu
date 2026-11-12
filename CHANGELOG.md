@@ -20,10 +20,14 @@ shows, so it is written once and read in three places — see
   what is in it: a card code like HOL-81, a card reference, a path in a project,
   a workspace's name (a mark on a window titled "WhatsApp · Holapy" counts). A
   line that names nothing takes the one it answers. Kuru can also say what a
-  reply is about. The row under Kuru's header (All · mac · omarchy) is now
-  **Todo** and those tags, the most recent first: press one, or several, to see
-  only that thread, both sides of it; the nodes are still there when kururu is
-  linked with others. Press a tag on a line to see its thread from that line.
+  reply is about. The row under Kuru's header (All · mac · omarchy) became a
+  **Filter** button in the header: it opens a list you can type into, with
+  **Todo** (everything), the nodes when kururu is linked with others, the
+  workspaces lately talked about and then the rest by name. Pick one, or
+  several, to see only that thread, both sides of it; "only" on a row shows
+  just that one. What is picked stays in a strip under the header, and a press
+  there lets it go. ⌘⇧F opens it. Press a tag on a line to see its thread from
+  that line.
   The tag button beside a line's pin adds or takes off a workspace by hand. The
   whole history is tagged already. In the drawer and the floating chat.
 
@@ -133,6 +137,16 @@ shows, so it is written once and read in three places — see
   elsewhere puts it away, and ⌘C still copies.
 
 ### Changed
+
+- **Kuru's chat: the top is for finding, the bottom is for talking.** The
+  header now holds only what changes the list — Search, Filter, Pins — with
+  their words beside them when the drawer is wide enough. The speaker (read
+  replies aloud) and Telegram moved out of the header into the foot of the box
+  you write in, and the mic and the pen moved there from the box's right end:
+  first what writes into the box, then how the answer comes back, and a **Send**
+  button alone at the right (Enter still sends). A dictation or pen marks can
+  now be sent without touching the keyboard, and the mic takes Enter or Space.
+  In the drawer, on the phone and in the floating chat.
 
 - **Terminals open in the lower half, everything else in the upper.**
   Agents, shells, dev servers, nvim and a machine's shell, whoever starts

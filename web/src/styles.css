@@ -5313,6 +5313,14 @@ html.pill-page #root {
 .kuru-head-spacer {
   flex: 1;
 }
+/* The head asks its own width, not the window's: the drawer is as wide as it
+   was dragged and the floating chat as wide as its window, and a word beside
+   a glyph is drawn where that width has the room for it (`.kuru-head-label`
+   below). On the head and not the drawer, since a container holds whatever is
+   position-fixed inside it, and the head has nothing of the kind. */
+.kuru-head {
+  container: kuru-head / inline-size;
+}
 
 /* Beside the panes, the head is a column's head — see `--top-h` — so the
    chips and the buttons stand on the line the top row of tabs stands on and
@@ -5400,6 +5408,76 @@ html.pill-page #root {
 .kuru-head-icon {
   --icon-size: var(--icon-md);
 }
+/* What the header's three say beside their glyphs: the filter's word from
+   380px of header — a drawer at the width it starts at — the search's from
+   480px, and under that the glyphs alone,
+   which is all a drawer at its narrowest holds beside the two chips. A count
+   — how many things the filter is narrowed to, how many lines are pinned —
+   is news and stays at any width. */
+.kuru-head-label {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-sm);
+}
+@container kuru-head (min-width: 380px) {
+  .kuru-head-label {
+    display: inline;
+  }
+  .kuru-head-label-wide {
+    display: none;
+  }
+}
+@container kuru-head (min-width: 480px) {
+  .kuru-head-label-wide {
+    display: inline;
+  }
+}
+/* And at its narrowest the head lets go of what is said twice. Kuru's chip
+   says "asking" or "off" in a word beside its name; its ink says the same,
+   and so does the line over the box, in full. In the owner's face at 14 that
+   word was what pushed the close button off a 320px drawer. Should even that
+   not be enough — a count of failed messages in a chat zoomed in — the chip
+   is cut short rather than the buttons after it. */
+@container kuru-head (max-width: 340px) {
+  .sb-kuru-word {
+    display: none;
+  }
+}
+.kuru-head .drawer-chips,
+.kuru-head .sb-kuru {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.kuru-head .sb-kuru {
+  overflow: hidden;
+}
+.kuru-head-icon:has(> .kuru-head-label),
+.kuru-head-icon:has(> .kuru-head-count) {
+  padding-inline: 7px;
+}
+.kuru-head-count {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* The filter while the list is narrowed and its panel is shut: the accent
+   ink with no wash, and its count on the accent itself. The list is not the
+   whole conversation, and the button that made it so is where that is said
+   when the strip under it has scrolled out of mind. */
+.kuru-head-icon.kuru-head-btn-set {
+  color: var(--accent);
+}
+.kuru-filter-btn .kuru-head-count {
+  min-width: 1.5em;
+  padding: 0 4px;
+  border-radius: 1em;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+}
 /* Where a message of yours came from when it was a channel: the plane and the
    channel's name, since a plane alone is a glyph somebody has to learn. */
 .kuru-via {
@@ -5407,12 +5485,14 @@ html.pill-page #root {
   align-items: center;
   gap: 3px;
 }
-/* The row under the header that narrows the conversation to what it is
-   about (`KuruTags.tsx`): Todo, the nodes when there are others, then the
-   workspaces most recently talked about. One line that scrolls along inside
-   itself, never the list, with no bar drawn — a wheel over it scrolls it.
-   A lit chip wears the accent, as any choice that is on does; a workspace's
-   chip carries its hue as a dot, the node chips theirs as the band's dot. */
+/* The strip under the header that says what the conversation is narrowed
+   to, drawn only while it is (`KuruTags.tsx`): Todo, then the nodes and the
+   workspaces picked in the filter's panel, each let go of by a press. It was
+   a row of every workspace until 2026-11-12, and twenty-one did not fit. One
+   line that scrolls along inside itself, never the list, with no bar drawn —
+   a wheel over it scrolls it. A picked chip wears the accent, as any choice
+   that is on does; a workspace's chip carries its hue as a dot, the node
+   chips theirs as the band's dot. */
 .kuru-tags {
   flex: none;
   display: flex;
@@ -5454,16 +5534,23 @@ html.pill-page #root {
 .kuru-tag-chip-away {
   opacity: 0.55;
 }
+.kuru-tag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The ✕ on a picked chip: what a press on it does. */
+.kuru-tag-x {
+  flex: none;
+  --icon-size: 0.8em;
+  opacity: 0.7;
+}
+.kuru-tag-chip:hover .kuru-tag-x {
+  opacity: 1;
+}
 :root[data-narrow] .kuru-tag-chip {
   min-height: 32px;
   padding: 2px 12px;
-}
-.kuru-tags-rule {
-  flex: none;
-  align-self: stretch;
-  width: var(--border);
-  margin: 2px 2px;
-  background: var(--line);
 }
 .kuru-tag-dot {
   flex: none;
@@ -5471,6 +5558,179 @@ html.pill-page #root {
   height: 0.55em;
   border-radius: 50%;
   background: var(--tag-hue, var(--dim));
+}
+/* The filter's panel (`FilterPanel` in `KuruTags.tsx`): a field to type a
+   name into over a list of switches, hung from the header's foot and laid
+   over the conversation. Its anchor is a row of no height straight after the
+   header, so the panel starts where the header ends whatever height that is
+   — a column's head beside the panes, a taller one on a phone's sheet — and
+   nothing has to be measured. Never wider than the chat it is in, nor taller
+   than most of its window: the floating chat is 320 by 260 at its smallest. */
+.kuru-filter-anchor {
+  position: relative;
+  flex: none;
+  height: 0;
+  z-index: 6;
+}
+.kuru-filter {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  width: min(calc(28 * var(--fs-md)), calc(100% - 16px));
+  max-height: min(calc(100vh - 72px), calc(36 * var(--fs-md)));
+  max-height: min(calc(100dvh - 72px), calc(36 * var(--fs-md)));
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  border: var(--border) solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-menu);
+}
+/* A phone's sheet: the sheet's width, since a thumb wants the whole row. */
+.kuru-sheet .kuru-filter {
+  left: 8px;
+  width: auto;
+}
+.kuru-filter-find {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 5px 5px 10px;
+  border-bottom: var(--border) solid var(--line-soft);
+  color: var(--dim);
+  --icon-size: var(--icon-sm);
+}
+.kuru-filter-field {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+}
+.kuru-filter-field:focus {
+  outline: none;
+}
+.kuru-filter-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kuru-filter-title {
+  padding: 8px 8px 3px;
+  color: var(--dimmer);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* A row is a switch: its box ticked in the accent while it is on. The row
+   the arrows are on looks like the row the pointer is on, as a menu's does. */
+.kuru-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  color: var(--dim);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.kuru-filter-row:hover,
+.kuru-filter-row-at {
+  background: var(--chrome-high);
+  color: var(--text);
+}
+.kuru-filter-row-on {
+  color: var(--text);
+}
+.kuru-filter-row-away .kuru-filter-name,
+.kuru-filter-row-away .node-chip-dot {
+  opacity: 0.55;
+}
+:root[data-narrow] .kuru-filter-row {
+  padding-block: 11px;
+}
+.kuru-filter-check {
+  position: relative;
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  border: var(--border) solid var(--line-high);
+  border-radius: var(--radius-sm);
+}
+.kuru-filter-row-on .kuru-filter-check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.kuru-filter-row-on .kuru-filter-check::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: 8%;
+  width: 28%;
+  height: 58%;
+  border: solid var(--on-accent);
+  border-width: 0 0.16em 0.16em 0;
+  transform: rotate(45deg);
+}
+.kuru-filter-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kuru-filter-hint {
+  flex: none;
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+}
+.kuru-filter-row .kuru-node-count {
+  flex: none;
+  font-size: var(--fs-sm);
+}
+/* "only", at the row's end: this one and nothing else, in one press. Shown
+   with the row lit, by the pointer or the arrows, and quietly always where
+   nothing hovers. */
+.kuru-filter-only {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  opacity: 0;
+}
+.kuru-filter-row:hover .kuru-filter-only,
+.kuru-filter-row-at .kuru-filter-only {
+  opacity: 1;
+}
+.kuru-filter-only:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+@media (hover: none) {
+  .kuru-filter-only {
+    opacity: 0.7;
+  }
+}
+:root[data-narrow] .kuru-filter-only {
+  padding: 4px 10px;
+}
+.kuru-filter-none {
+  padding: 14px 10px;
+  color: var(--dim);
+  font-size: var(--fs-md);
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 /* A line's own tags, after its time: small, quiet, a door to that thread.
    They take what the meta line leaves and wrap inside that, so the line's
@@ -5727,6 +5987,19 @@ html.pill-page #root {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
+}
+/* Its words give way before the list scrolls sideways: in a chat narrower
+   than the words and the day together they wrap between the two rules, and
+   the day stays whole. (At 291px in a mono face at 14 the row was 12px too
+   wide, and a list that scrolls down scrolls sideways for that.) */
+.kuru-mark > span {
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.kuru-mark > time {
+  flex: none;
 }
 .kuru-mark::before,
 .kuru-mark::after {
@@ -6472,15 +6745,16 @@ button.kuru-quote:hover {
   width: 32px;
   height: 32px;
 }
-/* The box, with the mic inside it at its foot — one field with a button in it
-   rather than a field and a button beside it. The buttons were outside until
-   2026-10-18 and read as notches cut into the box's edge, as tall as it was.
-   Held to the last line as the text grows, as every chat box has it, so a long
-   draft grows away from it rather than around it. */
+/* The box: the words, the box's whole width, and under them its foot
+   (`.kuru-foot`) — one field with its buttons in it rather than a field and
+   buttons beside it. The buttons were outside until 2026-10-18 and read as
+   notches cut into the box's edge; then inside at its right end until
+   2026-11-12, where they took a fifth of a narrow drawer's line from the
+   words and stood where every other chat keeps Send. The foot stays under
+   the last line as the text grows, so a long draft grows away from it. */
 .kuru-box {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
+  flex-direction: column;
   padding: 3px;
   border-radius: var(--radius-md);
   border: var(--border) solid var(--line);
@@ -6520,8 +6794,7 @@ button.kuru-quote:hover {
 /* Kuru's box (`ChipField.tsx`). */
 .kuru-write {
   position: relative;
-  flex: 1;
-  align-self: stretch;
+  flex: none;
   min-width: 0;
   display: flex;
 }
@@ -6650,7 +6923,31 @@ button.kc {
 :root[data-narrow] .kuru-suggest-item {
   padding: 10px 12px;
 }
-.kuru-mic {
+/* The box's foot, in the order a message goes: what writes into the box
+   (the mic, the pen), a rule, how its answer comes back (the speaker,
+   Telegram), and at the far end, alone, Send. Its own ground is the box's:
+   a press on it puts the cursor in the words. */
+.kuru-foot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  cursor: text;
+}
+.kuru-foot-rule {
+  flex: none;
+  width: var(--border);
+  height: 14px;
+  margin: 0 5px;
+  background: var(--line);
+  pointer-events: none;
+}
+.kuru-foot-gap {
+  flex: 1;
+  pointer-events: none;
+}
+/* A button in the foot: a glyph with no frame, as a pane's buttons are. */
+.kuru-tool {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6659,13 +6956,58 @@ button.kc {
   border-radius: var(--radius-md);
   color: var(--dim);
   flex: none;
-  touch-action: none;
+  cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
 }
-.kuru-mic:hover {
+.kuru-tool:hover:not(:disabled) {
   color: var(--text);
   background: var(--chrome-high);
+}
+.kuru-tool:disabled {
+  opacity: 0.4;
+  cursor: auto;
+}
+/* The two switches. On, either wears the accent, as a choice that is on
+   does — Telegram the working ink while its link is failing; off, either is
+   a step dimmer than the tools beside it, and the speaker's own glyph is
+   struck through. */
+.kuru-tool-on {
+  color: var(--accent);
+}
+.kuru-tool-warn {
+  color: var(--working);
+}
+.kuru-tool-off {
+  color: var(--dimmer);
+}
+/* A held mic is a press that lasts, and must not scroll or select under a thumb. */
+.kuru-mic {
+  touch-action: none;
+}
+/* Send: the one filled button in the drawer while there is something to
+   send, since it is the one thing the box is for; a quiet arrow while there
+   is not. Enter does the same, and says so in its title. */
+.kuru-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  --icon-size: var(--icon-sm);
+}
+.kuru-send:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 86%, var(--text));
+}
+.kuru-send:disabled {
+  background: transparent;
+  color: var(--dimmer);
+  cursor: auto;
 }
 /* The mic is a pen into the box: in the danger colour while it listens, with
    the microphone's level as a ring that swells around it (`--mic-level`, 0–1),
@@ -6683,9 +7025,13 @@ button.kc {
   animation: st-key-wait 1.2s ease-in-out infinite;
 }
 /* A thumb's size on a phone, still inside the box. */
-:root[data-narrow] .kuru-mic {
-  width: 32px;
-  height: 32px;
+:root[data-narrow] .kuru-tool,
+:root[data-narrow] .kuru-send {
+  width: 36px;
+  height: 36px;
+}
+:root[data-narrow] .kuru-foot {
+  gap: 4px;
 }
 
 .help-list {

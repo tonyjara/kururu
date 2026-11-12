@@ -69,7 +69,7 @@
  * them. The header used to carry "Play unheard" and "Mark all heard" for
  * those two jobs, and they were two buttons nobody could say the use of.
  *
- * **The speaker in the header is Settings → Voice's "Speak replies"** — the
+ * **The speaker in the box's foot is Settings → Voice's "Speak replies"** — the
  * one setting, not a copy of it: read off the socket's `voice` and written
  * back whole through `setVoice`, so the two places cannot disagree. Muting
  * also stops a reply already audible here, because a mute that lets the
@@ -130,12 +130,22 @@
  * quote selects the words as drawn, which is what you saw. Why the reader's
  * renderer is not borrowed is at the top of `kurumd.ts`.
  *
- * **Every line wears the workspaces it is about,** and the row under the
- * header narrows the list to any of them (`shared/kurutags.ts`, drawn by
- * `KuruTags.tsx`) — the row that held a chip per node until 2026-11-12, with
- * the nodes among its tags. A filter keeps the line that was at the top of
- * the list where it was, and reaches back a few pages for more of what it
- * shows when what is loaded holds little of it.
+ * **Every line wears the workspaces it is about,** and the header's filter
+ * narrows the list to any of them and to any node (`shared/kurutags.ts`,
+ * drawn by `KuruTags.tsx`): a panel behind a button since 2026-11-12, where
+ * it was a row of chips that twenty-one workspaces ran off the end of. A
+ * filter keeps the line that was at the top of the list where it was, and
+ * reaches back a few pages for more of what it shows when what is loaded
+ * holds little of it.
+ *
+ * **The top is for finding and the bottom is for talking** (the owner,
+ * 2026-11-12, not happy with where the search, the speaker, Telegram, the
+ * mic and the pen were; `docs/plans/kuru-chat-ux.md` has the argument). The
+ * header holds what changes the list being looked at — the search, the
+ * filter, the pins — and nothing else; the two switches that sat among them,
+ * whether replies are read aloud and whether Telegram is on, are about the
+ * answer to what is being written, and stand in the box's foot with the mic
+ * and the pen that write into it and the Send that sends it.
  *
  * **Any line can be pinned, to come back to.** A pin beside the fold, on the
  * same terms, and always shown in the accent on a line that is pinned; the
@@ -179,7 +189,7 @@ import { CHIP_ICONS, CHIP_WORD, ChipField, type ChipFieldHandle } from "./ChipFi
 import { Icon } from "./Icon";
 import { KuruInline, KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
 import { PinButton, PinsButton, PinsList } from "./KuruPins";
-import { LineTags, TagButton, TagRow, type TagName } from "./KuruTags";
+import { FilterButton, FilterPanel, FilterStrip, LineTags, TagButton, type TagName } from "./KuruTags";
 import { MadeInline } from "./MadeLinks";
 import { quotable } from "./Quote";
 import { Mascot } from "./Status";
@@ -322,6 +332,32 @@ export function KuruDrawer({
   };
   const filterOn = filter.spaces.length > 0 || filter.nodes.length > 0;
   const filterKey = `${filter.spaces.join(",")}|${filter.nodes.join(",")}`;
+  /**
+   * The filter's panel, and where the keyboard was when it opened, which is
+   * where Escape puts it back: the box, usually, or a terminal. Closing
+   * takes the keyboard out of the panel's field first, since a focused field
+   * taken out of the page tells nobody, and the prefix would go on believing
+   * a field has the keyboard.
+   */
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterBack = useRef<HTMLElement | null>(null);
+  // What the key handler below reads, which outlives the render that set it up.
+  const canFilterNow = useRef(false);
+  const filterOpenNow = useRef(false);
+  const openFilter = useCallback(() => {
+    const now = document.activeElement;
+    filterBack.current = now instanceof HTMLElement && now !== document.body ? now : null;
+    setFilterOpen(true);
+  }, []);
+  const closeFilter = useCallback((back: boolean) => {
+    const now = document.activeElement;
+    if (now instanceof HTMLElement && now.closest(".kuru-filter")) now.blur();
+    setFilterOpen(false);
+    const to = filterBack.current;
+    filterBack.current = null;
+    if (back && to?.isConnected) to.focus();
+  }, []);
+  useEffect(() => setFilterOpen(false), [profile.id]);
   /**
    * A line's reply arrow was pressed: the composer quotes it, and has the
    * keyboard — and starts `@node ` for another node's line, so the reply goes
@@ -508,6 +544,10 @@ export function KuruDrawer({
     .map((key) => ({ key, name: nameOf.get(key)! }));
   /** The tag button's list: the row's order, then the rest by name. */
   const menuSpaces: TagName[] = [...rowSpaces, ...spacesHere.filter((space) => !rowSpaces.some((s) => s.key === space.key)).sort((a, b) => a.name.localeCompare(b.name))];
+  /** Whether there is anything to filter by: a workspace, or another node. */
+  const canFilter = spacesHere.length > 0 || kuruPeers.length > 0 || filterOn;
+  canFilterNow.current = canFilter;
+  filterOpenNow.current = filterOpen;
   const moreEarlier = searching ? false : fetched ? viewing!.older : more;
   /** The last line of what was fetched for a result, where the chat stops short of the newest. */
   const fetchedLast = fetched?.at(-1) ?? null;
@@ -662,10 +702,17 @@ export function KuruDrawer({
     setSearchOpen(false);
     return true;
   }, [searchOpen, words]);
+  // What Escape steps back out of, asked by whoever hears the key first (the
+  // window's own handler captures it): the filter's panel when it is up, and
+  // otherwise the search.
   useEffect(() => {
-    setKuruSearchExit(leaveSearch);
+    setKuruSearchExit(() => {
+      if (!filterOpenNow.current) return leaveSearch();
+      closeFilter(true);
+      return true;
+    });
     return () => setKuruSearchExit(null);
-  }, [leaveSearch]);
+  }, [leaveSearch, closeFilter]);
   useEffect(() => {
     searchField.current?.blur();
     setSearchOpen(false);
@@ -689,17 +736,22 @@ export function KuruDrawer({
   useEffect(() => {
     const mac = /Mac|iP(hone|ad)/.test(navigator.platform);
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "f" || event.shiftKey || event.altKey || !(mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) return;
+      if (event.key.toLowerCase() !== "f" || event.altKey || !(mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) return;
       const target = event.target instanceof Element ? event.target : null;
       const here = target === document.body || root.current?.contains(target);
       if (!here && (!mac || target?.closest("input, textarea, select, [contenteditable]:not(.term)"))) return;
+      // With Shift it is the filter's, on the same terms: the other way of
+      // finding something in here, so the same key with one more finger.
+      if (event.shiftKey && !canFilterNow.current) return;
       event.preventDefault();
       event.stopPropagation();
-      openSearch();
+      if (!event.shiftKey) openSearch();
+      else if (filterOpenNow.current) closeFilter(true);
+      else openFilter();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [openSearch]);
+  }, [openSearch, openFilter, closeFilter]);
 
   /**
    * A result opened: the chat at that line, in context, with the words still
@@ -1152,16 +1204,20 @@ export function KuruDrawer({
         <span className="kuru-head-spacer" />
         <button type="button" className={`kuru-head-btn kuru-head-icon ${searchOpen ? "kuru-head-btn-on" : ""}`} aria-pressed={searchOpen} aria-label="Search the conversation" title="Search the conversation (⌘F, or C-a /)" onClick={() => (searchOpen ? leaveSearch() : openSearch())}>
           <SearchIcon />
+          <span className="kuru-head-label kuru-head-label-wide">Search</span>
         </button>
+        {canFilter && <FilterButton count={filter.spaces.length + filter.nodes.length} open={filterOpen} onToggle={() => (filterOpen ? closeFilter(true) : openFilter())} />}
         {pins.length > 0 && <PinsButton count={pins.length} open={pinsOpen} onToggle={() => setPinsOpen((was) => !was)} />}
-        {voice && <SpeakSwitch settings={voice.settings} />}
-        {telegram && <TelegramSwitch status={telegram} />}
         <button className="sidebar-close kuru-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
           <Icon name="close" />
         </button>
       </header>
 
-      {(rowSpaces.length > 0 || kuruPeers.length > 0 || filterOn) && <TagRow filter={filter} spaces={rowSpaces} self={selfName} peers={kuruPeers} onPick={(next) => pickFilter(next, null)} />}
+      {filterOpen && (
+        <FilterPanel filter={filter} self={selfName} peers={kuruPeers} lately={rowSpaces.map((space) => space.key)} spaces={spacesHere} onPick={(next) => pickFilter(next, null)} onClose={closeFilter} onEditing={onEditing} />
+      )}
+
+      {filterOn && <FilterStrip filter={filter} nameOf={nameOf} peers={kuruPeers} onPick={(next) => pickFilter(next, null)} />}
 
       {searchOpen && (
         <div className="kuru-search" role="search">
@@ -1324,7 +1380,7 @@ export function KuruDrawer({
 
       <Live live={live} working={working} profileId={profile.id} mascot={mascot} onTerminal={onTerminal} />
 
-      <Composer profileId={profile.id} onEditing={onEditing} peers={kuruPeers} />
+      <Composer profileId={profile.id} onEditing={onEditing} peers={kuruPeers} voice={voice?.settings ?? null} telegram={telegram} />
 
       {/* The edge you drag, on the sidebar's and the tree's terms: last in the
           tree and absolutely positioned, so it sits over the border rather
@@ -1559,12 +1615,16 @@ function Grip({ onResize, onReset }: { onResize: (px: number) => void; onReset: 
 }
 
 /**
- * Settings → Voice's "Speak replies", in the header of the conversation it
- * governs. The glyph is the state — the speaker while replies are read aloud,
- * the speaker struck through while they are only on screen — so the button
- * does not also wear the accent ink the Telegram switch wears when on: on is
- * this switch's ordinary position, and a colour worn all the time says
- * nothing. Its name stays the same both ways and `aria-pressed` says which,
+ * Settings → Voice's "Speak replies", in the foot of the box whose answers
+ * it governs (it was in the header until 2026-11-12, an unlabelled glyph
+ * among the search and the pins, which are not switches). The glyph is the
+ * state — the speaker while replies are read aloud, the speaker struck
+ * through while they are only on screen — and so is the ink, the accent
+ * while it is on, as Telegram's beside it is. In the header it wore no
+ * accent, on the argument that a colour worn all the time says nothing; in
+ * the foot it stands between two tools that are not switches and one that
+ * is, and two switches that say "on" two different ways are two things to
+ * learn. Its name stays the same both ways and `aria-pressed` says which,
  * as a toggle's should. Muting asks the voice client what it is doing at the
  * moment of the click — this page, or the pill when the pill is the mouth —
  * and stops a reply mid-sentence through `dismissVoice`, the ✕ itself, so it
@@ -1575,10 +1635,12 @@ function SpeakSwitch({ settings }: { settings: VoiceSettings }) {
   return (
     <button
       type="button"
-      className="kuru-head-btn kuru-head-icon"
+      className={`kuru-tool ${on ? "kuru-tool-on" : "kuru-tool-off"}`}
       aria-pressed={on}
       aria-label="Speak the replies"
-      title={on ? "Replies are read aloud. Click to mute them (Settings → Voice → Speak replies)" : "Replies are muted. Click to read them aloud (Settings → Voice → Speak replies)"}
+      title={on ? "Kuru's replies are read aloud. Click to mute them (Settings → Voice → Speak replies)" : "Kuru's replies are muted. Click to have them read aloud (Settings → Voice → Speak replies)"}
+      // The box keeps the keyboard: a switch flipped is not a reason to stop typing.
+      onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         if (on && voiceNow().phase === "speaking") dismissVoice();
         api.setVoice({ ...settings, speak: !on });
@@ -1590,14 +1652,15 @@ function SpeakSwitch({ settings }: { settings: VoiceSettings }) {
 }
 
 /**
- * The Telegram channel's switch, beside the speaker: the same switch as
- * Settings → Channels, here because the drawer is where you notice you are
- * leaving the Mac. Drawn only once the channel is set up — a token and an
+ * The Telegram channel's switch, beside the speaker in the box's foot: the
+ * same switch as Settings → Channels, here because the drawer is where you
+ * notice you are leaving the Mac. Drawn only once the channel is set up — a token and an
  * account — since a switch that can only refuse is not a switch. Its ink
  * says on; a link that is failing says so in the warning ink and the title.
- * The plane alone since 2026-10-18, on the speaker's terms: the words "on"
- * and "off" were the widest thing in the header, the ink already says which,
- * and the title and `aria-pressed` say it in words.
+ * The plane alone since 2026-10-18, on the speaker's terms: the ink already
+ * says which, and the title and `aria-pressed` say it in words. Send, at the
+ * other end of the foot, is an arrow and not a paper plane for this glyph's
+ * sake.
  */
 function TelegramSwitch({ status }: { status: TelegramStatus }) {
   const bot = status.bot ? `@${status.bot.username}` : "the bot";
@@ -1608,10 +1671,12 @@ function TelegramSwitch({ status }: { status: TelegramStatus }) {
       : `Telegram is off. Click to let ${bot} reach Kuru, and send Kuru's replies there.`;
   return (
     <button
-      className={`kuru-head-btn kuru-head-icon ${status.enabled ? (status.error ? "kuru-head-btn-warn" : "kuru-head-btn-on") : ""}`}
+      type="button"
+      className={`kuru-tool ${status.enabled ? (status.error ? "kuru-tool-warn" : "kuru-tool-on") : "kuru-tool-off"}`}
       aria-pressed={status.enabled}
       aria-label="Telegram"
       title={title}
+      onMouseDown={(event) => event.preventDefault()}
       onClick={() => void api.setChannel("telegram", { enabled: !status.enabled }).catch(() => {})}
     >
       <PlaneIcon />
@@ -2256,10 +2321,17 @@ function writeFiles(profileId: string, files: readonly string[]) {
 
 /**
  * Typing to Kuru. Enter sends and Shift+Enter is a new line, as every chat
- * box has agreed; Escape gives the keyboard back to the panes. There is no
- * send button, because Enter is one on every keyboard this box is typed on,
- * the phone's included. The mic is inside the box, at its foot: held, it
- * records, and tapped, it toggles. What is typed
+ * box has agreed; Escape gives the keyboard back to the panes.
+ *
+ * **The box is the words and, under them, a foot** (2026-11-12): the mic and
+ * the pen, which write into the box; a rule; the speaker and Telegram, which
+ * are how its answer comes back; and Send alone at the far end. The mic and
+ * the pen were inside the box at its right end, which is where every other
+ * chat keeps Send, and the mic does not send — held, it listens until the
+ * release, and tapped, it toggles. There was no Send at all, on the argument
+ * that Enter is one on every keyboard; but a dictation and a set of pen
+ * marks are put in by the mouse, and a hand on the mouse had nothing to send
+ * them with. It is an arrow, since the paper plane is Telegram's. What is typed
  * and not yet sent survives closing the drawer and reloading the page — a
  * thought half-written must not vanish because the drawer did — and the field
  * grows with it up to `.chip-field`'s `max-height`, so writing more than one
@@ -2302,11 +2374,17 @@ function Composer({
   profileId,
   onEditing,
   peers,
+  voice,
+  telegram,
 }: {
   profileId: string;
   onEditing: (editing: boolean) => void;
   /** The other nodes' Kurus, which `@name` at the start of a message is for. */
   peers: PeerKuru[];
+  /** The voice's settings, for the speaker in the foot; null until the server has said. */
+  voice: VoiceSettings | null;
+  /** The Telegram channel when it is set up and this conversation's, for its switch in the foot. */
+  telegram: TelegramStatus | null;
 }) {
   const [text, setText] = useState(() => readDraft(profileId));
   const [caret, setCaret] = useState<number | null>(null);
@@ -2411,11 +2489,12 @@ function Composer({
   };
   /** Whether the reply still goes where its line is: a reply to one conversation's line means nothing in another's. */
   const quoteGoes = quoting !== null && quoting.node === (address?.node ?? null);
+  // An address and nothing after it goes nowhere: the server would hand
+  // `@omarchy` to this Kuru as words, which is not what the bold promised.
+  const canSend = text.trim() !== "" && !(address && !address.rest);
   const send = () => {
     const words = text.trim();
-    // An address and nothing after it goes nowhere: the server would hand
-    // `@omarchy` to this Kuru as words, which is not what the bold promised.
-    if (!words || (address && !address.rest)) return;
+    if (!canSend) return;
     if (quoting && quoteGoes) {
       const to = typedAddress(words, names);
       const reference = replyReference({ ...quoting.ref, when: replyClock(quoting.at, Date.now()) });
@@ -2562,7 +2641,17 @@ function Composer({
   const putInNow = useRef(putIn);
   putInNow.current = putIn;
   const said = dictatingFor.current !== null ? dictation.phase : "idle";
-  const speak = (pressed: number) => {
+  /** The mic pressed by the keyboard and not yet listening: see `speak`. */
+  const keyTap = useRef(false);
+  /**
+   * `pressed` is the pointer's own stamp, or null for the keyboard, which the
+   * mic had no way to be pressed by until 2026-11-12: Enter or Space on it is
+   * a tap — it listens until the key again, or Escape. There is no release to
+   * wait for then, but the microphone takes a moment to open and a dictation
+   * is only a tapped one once it listens, so the tap is kept in `keyTap`
+   * until it does.
+   */
+  const speak = (pressed: number | null) => {
     if (dictatingFor.current !== null) {
       // The second press of a tapped dictation; one already being heard has nothing left to stop.
       dictateStop();
@@ -2571,15 +2660,19 @@ function Composer({
     setUnheard(null);
     const forProfile = profileId;
     dictatingFor.current = forProfile;
+    keyTap.current = pressed === null;
     const up = (event: PointerEvent) => {
       window.removeEventListener("pointerup", up, true);
       window.removeEventListener("pointercancel", up, true);
-      if (event.timeStamp - pressed < TAP_MS) dictateToggled();
+      if (pressed !== null && event.timeStamp - pressed < TAP_MS) dictateToggled();
       else dictateStop();
     };
-    window.addEventListener("pointerup", up, true);
-    window.addEventListener("pointercancel", up, true);
+    if (pressed !== null) {
+      window.addEventListener("pointerup", up, true);
+      window.addEventListener("pointercancel", up, true);
+    }
     void dictate().then((outcome) => {
+      keyTap.current = false;
       window.removeEventListener("pointerup", up, true);
       window.removeEventListener("pointercancel", up, true);
       if (dictatingFor.current !== forProfile) return;
@@ -2595,6 +2688,9 @@ function Composer({
       }
     });
   };
+  useEffect(() => {
+    if (keyTap.current && dictation.phase === "listening" && dictateToggled()) keyTap.current = false;
+  }, [dictation.phase]);
   /**
    * The pencil beside the mic: the screen pen with no voice, for when the
    * user cannot talk. Pressed, the pen goes down over every display; the
@@ -2778,44 +2874,78 @@ function Composer({
             }}
           />
         </div>
-        <button
-          type="button"
-          className={`kuru-mic ${said === "listening" ? "kuru-mic-listening" : said === "hearing" ? "kuru-mic-hearing" : ""}`}
-          style={{ "--mic-level": said === "listening" ? dictation.level : 0 } as CSSProperties}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            // The field keeps the keys and the cursor the words go in at.
+        {/* The foot: what writes into the box, how its answer comes back,
+            and Send alone at the far end where no switch can be hit for it. */}
+        <div
+          className="kuru-foot"
+          // A press on the foot's own ground is a press on the box.
+          onMouseDown={(event) => {
+            if (event.target !== event.currentTarget) return;
             event.preventDefault();
-            speak(event.timeStamp);
+            field.current?.focus();
           }}
-          onMouseDown={(event) => event.preventDefault()}
-          onContextMenu={(event) => event.preventDefault()}
-          title={said === "listening" ? "Put what you said in the box (Esc)" : unheard ? `${unheard} Hold or tap to try again` : "Dictate into the box — hold, or tap to start and again to stop. Nothing is sent"}
-          aria-label={said === "listening" ? "Stop dictating" : "Dictate into the box"}
-          aria-pressed={said === "listening"}
         >
-          <MicIcon />
-        </button>
-        {hasPen() && (
           <button
             type="button"
-            className={`kuru-mic ${penOn ? "kuru-mic-listening" : ""}`}
+            className={`kuru-tool kuru-mic ${said === "listening" ? "kuru-mic-listening" : said === "hearing" ? "kuru-mic-hearing" : ""}`}
+            style={{ "--mic-level": said === "listening" ? dictation.level : 0 } as CSSProperties}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              // The field keeps the keys and the cursor the words go in at.
+              event.preventDefault();
+              speak(event.timeStamp);
+            }}
             onMouseDown={(event) => event.preventDefault()}
-            onClick={pencil}
-            disabled={ink.state.on && ink.state.voice}
-            title={
-              penOn
-                ? `${penSaid} Press to put the marks in the box`
-                : ink.state.on
-                  ? "The pen is with a recording; send it first"
-                  : "Draw on the screen, without talking — the marks come into this box for you to write about"
-            }
-            aria-label={penOn ? "Put the marks in the box" : "Draw on the screen"}
-            aria-pressed={penOn}
+            onContextMenu={(event) => event.preventDefault()}
+            onKeyDown={(event) => {
+              if ((event.key !== "Enter" && event.key !== " ") || event.repeat) return;
+              event.preventDefault();
+              speak(null);
+            }}
+            title={said === "listening" ? "Put what you said in the box (Esc)" : unheard ? `${unheard} Hold or tap to try again` : "Dictate into the box — hold, or tap to start and again to stop. Nothing is sent"}
+            aria-label={said === "listening" ? "Stop dictating" : "Dictate into the box"}
+            aria-pressed={said === "listening"}
           >
-            <PenIcon />
+            <MicIcon />
           </button>
-        )}
+          {hasPen() && (
+            <button
+              type="button"
+              className={`kuru-tool kuru-mic ${penOn ? "kuru-mic-listening" : ""}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={pencil}
+              disabled={ink.state.on && ink.state.voice}
+              title={
+                penOn
+                  ? `${penSaid} Press to put the marks in the box`
+                  : ink.state.on
+                    ? "The pen is with a recording; send it first"
+                    : "Draw on the screen, without talking — the marks come into this box for you to write about"
+              }
+              aria-label={penOn ? "Put the marks in the box" : "Draw on the screen"}
+              aria-pressed={penOn}
+            >
+              <PenIcon />
+            </button>
+          )}
+          {(voice || telegram) && <span className="kuru-foot-rule" aria-hidden="true" />}
+          {voice && <SpeakSwitch settings={voice} />}
+          {telegram && <TelegramSwitch status={telegram} />}
+          <span className="kuru-foot-gap" aria-hidden="true" />
+          <button
+            type="button"
+            className="kuru-send"
+            disabled={!canSend}
+            // Neither the mouse nor a thumb takes the keyboard from the box: the next message is typed where this one was.
+            onPointerDown={(event) => event.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={send}
+            title={toPeer ? `Send to the Kuru on ${toPeer.node.name} (Enter)` : "Send (Enter)"}
+            aria-label="Send"
+          >
+            <SendIcon />
+          </button>
+        </div>
       </div>
     </form>
   );
@@ -2861,6 +2991,16 @@ function SearchIcon() {
     <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="11" cy="11" r="6.5" />
       <path d="m20 20-4.2-4.2" />
+    </svg>
+  );
+}
+
+/** An arrow up, for Send — drawn here for `KeysIcon`'s reason, and an arrow because the paper plane is Telegram's. */
+function SendIcon() {
+  return (
+    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 19V5" />
+      <path d="m6 11 6-6 6 6" />
     </svg>
   );
 }
