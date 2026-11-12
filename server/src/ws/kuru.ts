@@ -68,6 +68,12 @@ export function kuruVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
       return true;
     }
 
+    case "kuru-tag": {
+      const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
+      if (key) kuru.tag(key, msg.id, msg.workspaceKey, msg.kept === true);
+      return true;
+    }
+
     case "kuru-replay": {
       const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
       const node = typeof msg.utterance === "string" ? nodeOfUtterance(msg.utterance) : null;

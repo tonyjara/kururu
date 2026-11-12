@@ -5407,41 +5407,111 @@ html.pill-page #root {
   align-items: center;
   gap: 3px;
 }
-/* Every node's Kuru in the one drawer: a chip per node under the header,
-   narrowing the list to one; a node that is away is greyed and keeps its
-   last items. The lit chip wears the accent the Telegram switch wears when
-   on, since it is the choice that is on. */
-.kuru-nodes {
+/* The row under the header that narrows the conversation to what it is
+   about (`KuruTags.tsx`): Todo, the nodes when there are others, then the
+   workspaces most recently talked about. One line that scrolls along inside
+   itself, never the list, with no bar drawn — a wheel over it scrolls it.
+   A lit chip wears the accent, as any choice that is on does; a workspace's
+   chip carries its hue as a dot, the node chips theirs as the band's dot. */
+.kuru-tags {
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
   padding: 6px calc(12px + var(--kuru-gutter));
   border-bottom: var(--border) solid var(--line);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
 }
-.kuru-node-chip {
+.kuru-tags::-webkit-scrollbar {
+  display: none;
+}
+.kuru-tag-chip {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  max-width: 18ch;
   padding: 2px 8px;
   border-radius: var(--radius-lg);
   border: var(--border) solid var(--line);
   color: var(--dim);
   font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.kuru-node-chip:hover {
+.kuru-tag-chip:hover {
   color: var(--text);
   border-color: var(--line-high);
 }
-.kuru-node-chip-on {
+.kuru-tag-chip-on,
+.kuru-tag-chip-on:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
-.kuru-node-chip-away {
+.kuru-tag-chip-away {
   opacity: 0.55;
 }
-:root[data-narrow] .kuru-node-chip {
+:root[data-narrow] .kuru-tag-chip {
   min-height: 32px;
   padding: 2px 12px;
+}
+.kuru-tags-rule {
+  flex: none;
+  align-self: stretch;
+  width: var(--border);
+  margin: 2px 2px;
+  background: var(--line);
+}
+.kuru-tag-dot {
+  flex: none;
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: var(--tag-hue, var(--dim));
+}
+/* A line's own tags, after its time: small, quiet, a door to that thread.
+   They take what the meta line leaves and wrap inside that, so the line's
+   buttons stay on its first row: pushed to a second one they are an empty
+   row, since they are drawn only on hover. A tag wider than the room is cut. */
+.kuru-line-tags {
+  flex: 1 1 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.kuru-line-tags + .kuru-reply-btn {
+  margin-left: 0;
+}
+.kuru-line-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 16ch;
+  padding: 0 6px;
+  border: var(--border) solid var(--line);
+  border-radius: var(--radius-lg);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kuru-line-tag:hover {
+  color: var(--text);
+  border-color: var(--tag-hue, var(--line-high));
+}
+.kuru-notice-row > .kuru-line-tags {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  max-width: 40%;
+  overflow: hidden;
 }
 .kuru-node-count {
   color: var(--accent);
@@ -5463,7 +5533,8 @@ html.pill-page #root {
    already taken the free space. */
 .kuru-reply-btn,
 .kuru-fold-btn,
-.kuru-pin-btn {
+.kuru-pin-btn,
+.kuru-tag-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5479,35 +5550,43 @@ html.pill-page #root {
 .kuru-item:hover .kuru-reply-btn,
 .kuru-item:hover .kuru-fold-btn,
 .kuru-item:hover .kuru-pin-btn,
+.kuru-item:hover .kuru-tag-btn,
 .kuru-notice:hover .kuru-reply-btn,
 .kuru-notice:hover .kuru-pin-btn,
+.kuru-notice:hover .kuru-tag-btn,
 .kuru-reply-btn:focus-visible,
 .kuru-fold-btn:focus-visible,
-.kuru-pin-btn:focus-visible {
+.kuru-pin-btn:focus-visible,
+.kuru-tag-btn:focus-visible,
+.kuru-tag-btn.kuru-tag-btn-open {
   opacity: 1;
 }
 .kuru-reply-btn:hover,
 .kuru-fold-btn:hover,
-.kuru-pin-btn:hover {
+.kuru-pin-btn:hover,
+.kuru-tag-btn:hover {
   color: var(--text);
   background: var(--chrome-high);
 }
 @media (hover: none) {
   .kuru-reply-btn,
   .kuru-fold-btn,
-  .kuru-pin-btn {
+  .kuru-pin-btn,
+  .kuru-tag-btn {
     opacity: 0.7;
   }
 }
 :root[data-narrow] .kuru-reply-btn,
 :root[data-narrow] .kuru-fold-btn,
-:root[data-narrow] .kuru-pin-btn {
+:root[data-narrow] .kuru-pin-btn,
+:root[data-narrow] .kuru-tag-btn {
   width: 28px;
   height: 28px;
   margin-block: -6px;
 }
 .kuru-fold-btn,
-.kuru-pin-btn {
+.kuru-pin-btn,
+.kuru-tag-btn {
   margin-left: 0;
 }
 /* A pinned line wears its pin always, in the accent, and that is the mark:
@@ -5789,7 +5868,8 @@ html.pill-page #root {
   flex: 1;
 }
 .kuru-notice-row > .kuru-reply-btn,
-.kuru-notice-row > .kuru-pin-btn {
+.kuru-notice-row > .kuru-pin-btn,
+.kuru-notice-row > .kuru-tag-btn {
   margin-left: 0;
 }
 .kuru-notice-line {

@@ -15,6 +15,18 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Kuru's conversation is tagged by project.** Every line — Kuru's replies,
+  your messages, kururu's notices — wears the workspaces it is about, read off
+  what is in it: a card code like HOL-81, a card reference, a path in a project,
+  a workspace's name (a mark on a window titled "WhatsApp · Holapy" counts). A
+  line that names nothing takes the one it answers. Kuru can also say what a
+  reply is about. The row under Kuru's header (All · mac · omarchy) is now
+  **Todo** and those tags, the most recent first: press one, or several, to see
+  only that thread, both sides of it; the nodes are still there when kururu is
+  linked with others. Press a tag on a line to see its thread from that line.
+  The tag button beside a line's pin adds or takes off a workspace by hand. The
+  whole history is tagged already. In the drawer and the floating chat.
+
 - **With the floating Kuru's chat open, what you hand Kuru goes there.**
   Reference in Kuru on a card, a quote from a card, a note, a document or the
   conversation, a file from the reader, the pen's marks, a dropped or pasted

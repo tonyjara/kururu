@@ -265,6 +265,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **A link to what an agent made is read off its last reply, never off everything
   it touched** (`shared/made.ts`), at most two per agent. →
   [more](docs/invariants.md#what-an-agent-made)
+- **A line of Kuru's chat is tagged by what it says, on every draw** — only
+  Kuru's `[tags: …]` line, taken off the reply at `/api/report`, and the
+  owner's corrections are written (`turn_tags`); `shared/kurutags.ts`. →
+  [voice](docs/voice.md#tags)
 - **What needs you is one rule, in `shared/needs.ts`, and three drawings of it**;
   no component decides it again, and nothing in it is dismissed by hand. →
   [more](docs/invariants.md#what-needs-you)

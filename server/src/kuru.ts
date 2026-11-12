@@ -276,14 +276,36 @@ export class Kuru {
     return pins;
   }
 
-  /** Each reply with the files it names beside it, for the drawer to draw as links. */
+  /**
+   * The owner adds a workspace to a line of the drawer's, or takes one off
+   * (`shared/kurutags.ts`). Only a turn, as a pin is, and only a workspace of
+   * the profile's; anything else is a stale page, refused in silence.
+   */
+  tag(profileKey: string, id: unknown, workspaceKey: unknown, kept: boolean): boolean {
+    const turnId = pinnedTurnId(id);
+    if (turnId === null || typeof workspaceKey !== "string" || !this.deps.store.tagTurn(profileKey, turnId, workspaceKey, kept)) return false;
+    this.changed();
+    return true;
+  }
+
+  /**
+   * Each reply with the files it names beside it, for the drawer to draw as
+   * links, and each turn with what Kuru and the owner said about its
+   * workspaces — one query for the lot, since this runs on every broadcast.
+   */
   private linked(profileKey: string, items: KuruItem[]): KuruItem[] {
     const files = this.deps.files;
-    if (!files) return items;
+    const ids = items.map((item) => (item.kind === "session" ? null : pinnedTurnId(item.id))).filter((id): id is number => id !== null);
+    const tags = ids.length ? this.deps.store.turnTags(ids) : new Map();
+    if (!files && !tags.size) return items;
     return items.map((item) => {
-      if (item.kind !== "kuru") return item;
-      const found = files(profileKey, item);
-      return found.length ? { ...item, files: found } : item;
+      if (item.kind === "session") return item;
+      const turnId = pinnedTurnId(item.id);
+      const said = turnId === null ? undefined : tags.get(turnId);
+      const tagged = said ? { ...item, tags: said } : item;
+      if (tagged.kind !== "kuru" || !files) return tagged;
+      const found = files(profileKey, tagged);
+      return found.length ? { ...tagged, files: found } : tagged;
     });
   }
 

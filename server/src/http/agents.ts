@@ -8,8 +8,9 @@
 import { countsAsAgent } from "../../../shared/model";
 import { AGY_CONVERSATION } from "../../../shared/agy";
 import { isUsageDimension, isUsageRange } from "../../../shared/usagereport";
+import { keysOfNames, splitReplyTags } from "../../../shared/kurutags";
 import { parseReport } from "../agents/report";
-import { activity, channels, harness, host, kuruKey, MAX_ACTIVITY, outbox, peerKurus, usageReader, voice, workspaces } from "../context";
+import { activity, channels, harness, host, kuruKey, MAX_ACTIVITY, outbox, peerKurus, store, usageReader, voice, workspaces } from "../context";
 import { recordTurn } from "../conversation";
 import { noteMade } from "../madelinks";
 import { noteReported, usageReportFor } from "../terminals";
@@ -97,6 +98,12 @@ export const agentRoutes: Route[] = [
           return;
         }
         host.report(agentId, parsed.report);
+        // Kuru's tag line, which says which workspaces its reply is about
+        // (`shared/kurutags.ts`), comes off here, before anything else reads
+        // the reply — the harness's last word, the voice, a channel, the
+        // record, the links under a row — so no reader ever has it to say,
+        // send or draw. Kept to be written beside the turn below.
+        const tagNames = harness.isHarness(agentId) ? takeTagLine(body as Record<string, unknown>) : [];
         // Antigravity names its own conversation and says which with its
         // first word; a card's run keeps it, as a Codex run's is kept once
         // found on disk (`sleep.ts`), so running the card again resumes it.
@@ -129,6 +136,14 @@ export const agentRoutes: Route[] = [
         // the reply on its way out, for the search and the drawer. Before the
         // cap below, which is the sidebar's and not the record's.
         const turn = recordTurn(agentId, parsed.report, body as Record<string, unknown>, utterance);
+        if (turn !== null && tagNames.length && spoken) {
+          const keys = keysOfNames(tagNames, workspaces.profile(spoken)?.workspaces ?? []);
+          try {
+            store.kuruTagTurn(turn, keys);
+          } catch (err) {
+            console.error(`kururu: a reply's tags could not be written down: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         // And the other nodes hear the reply of this node's Kuru, with what it
         // answered, under the id their drawers will see it by. See `peerkuru.ts`.
         if (answered && spokenKey === kuruKey() && typeof reply === "string" && reply.trim()) {
@@ -155,3 +170,16 @@ export const agentRoutes: Route[] = [
     },
   },
 ];
+
+/**
+ * Kuru's reply without its tag line, put back on the report, and the names
+ * that were on it. A reply that was only a tag line is left as it was: there
+ * is nothing else to say, and an empty reply would read as no reply at all.
+ */
+function takeTagLine(body: Record<string, unknown>): string[] {
+  if (typeof body.reply !== "string") return [];
+  const { text, names, found } = splitReplyTags(body.reply);
+  if (!found || !text.trim()) return [];
+  body.reply = text;
+  return names;
+}

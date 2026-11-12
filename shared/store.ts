@@ -27,6 +27,7 @@
 import type { Board, BoardLane, Card, CardDates, CardRun, CardWorktree, NeedsBy } from "./board";
 import { channelOfPrompt, readPeerMark, type ChannelKind } from "./channels";
 import { sameMade } from "./made";
+import type { TurnTags } from "./kurutags";
 import type { VoiceLang } from "./voice";
 import { randomHex } from "./text";
 
@@ -432,8 +433,12 @@ export interface ConversationExport extends Conversation {
   profileName: string;
 }
 
-/** A turn as the mirror writes it: without the ids, which a restore mints again, and with when it was pinned in Kuru's drawer, if it was. */
-export type TurnExport = Omit<Turn, "id" | "conversationId"> & { pinnedAt?: number };
+/**
+ * A turn as the mirror writes it: without the ids, which a restore mints
+ * again, and with when it was pinned in Kuru's drawer and what was said about
+ * its workspaces (`shared/kurutags.ts`), if anything was.
+ */
+export type TurnExport = Omit<Turn, "id" | "conversationId"> & { pinnedAt?: number; tags?: TurnTags };
 
 /** Every record a mirror tree holds that the database can be rebuilt from. */
 export interface DataExport {

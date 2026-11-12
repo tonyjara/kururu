@@ -22,6 +22,7 @@
 import { channelOfMessage, isChannelKind, readPeerMark, withoutChannelMark, type ChannelKind } from "./channels";
 import { CROSS_SESSION_TAG, NOTICE_SENDER } from "./harness";
 import type { KuruPin } from "./kurupin";
+import type { TurnTags } from "./kurutags";
 import type { MadeFile } from "./made";
 import { parseRemote } from "./remote";
 import { plainChips } from "./chips";
@@ -65,6 +66,8 @@ export interface YouItem {
   outboxId: string | null;
   /** The node it was written or spoken at, when that was another kururu's drawer: `[user@mac]`. */
   through?: string;
+  /** What Kuru and the owner said about its workspaces (`shared/kurutags.ts`); absent when neither said anything. */
+  tags?: TurnTags;
 }
 
 /**
@@ -93,6 +96,8 @@ export interface KuruReply {
    * only it can look at the disk; absent when the reply names none.
    */
   files?: KuruFile[];
+  /** Its tag line and the owner's corrections (`shared/kurutags.ts`). */
+  tags?: TurnTags;
 }
 
 /** A path in one of Kuru's replies, found on disk. */
@@ -128,6 +133,8 @@ export interface NoticeItem {
   event: "done" | "blocked" | "exited" | null;
   /** The whole message out of its wrapper, for a tap to show. */
   text: string;
+  /** The owner's corrections to its workspaces (`shared/kurutags.ts`). */
+  tags?: TurnTags;
 }
 
 /** An agent as a notice names it — `agentName`'s parts, read back. */

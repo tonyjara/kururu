@@ -263,7 +263,8 @@ Kuru's newest items (`kuru-turns`, `peerItems`, at most once a second and
 only when they changed). They arrive on every client as the `kuru` message's
 `peers`, and the drawer merges them with this node's own (`mergeNodes`):
 
-- A chip per node narrows the list to one. A node that is away is greyed,
+- The nodes are tags in the row under the header ([tags](voice.md#tags)),
+  and pressing one narrows the list to that node. A node that is away is greyed,
   says when it was last seen, and keeps its last items. Those are cached in
   `kuru-peers.json` in the state directory, so a restart while it is away
   still shows them.

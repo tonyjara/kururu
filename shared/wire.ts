@@ -1778,6 +1778,8 @@ export type ClientMessage =
    * told on the next `kuru` message, this one included.
    */
   | { type: "kuru-pin"; profileId: string; id: string; pinned: boolean }
+  /** Add a workspace to a line of Kuru's conversation, or take one off (`shared/kurutags.ts`). */
+  | { type: "kuru-tag"; profileId: string; id: string; workspaceKey: string; kept: boolean }
   /**
    * Say one reply again, from the drawer's speaker on that reply. `text` is
    * the reply as the drawer already shows it, for a reply the missed list no

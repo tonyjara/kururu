@@ -78,9 +78,8 @@
  * **Every node's Kuru, in the one drawer.** On a kururu linked with others
  * (`docs/nodes.md`), each other node's Kuru comes on the same message
  * (`peers`), and the list is all of them merged by time (`mergeNodes`),
- * each line of another node's wearing its name. A chip per node narrows it
- * to one; one that is away is greyed, with when it was last seen, and keeps
- * its last items. The composer is this node's Kuru's unless the message
+ * each line of another node's wearing its name. A tag per node narrows it
+ * to one; one that is away is greyed, and keeps its last items. The composer is this node's Kuru's unless the message
  * starts `@omarchy`, and a peer's reply has Reply, which starts the message
  * that way — the server sends it over the link into that node's outbox, the
  * door Telegram uses, so "delivered" still means that Kuru said it took it.
@@ -131,6 +130,13 @@
  * quote selects the words as drawn, which is what you saw. Why the reader's
  * renderer is not borrowed is at the top of `kurumd.ts`.
  *
+ * **Every line wears the workspaces it is about,** and the row under the
+ * header narrows the list to any of them (`shared/kurutags.ts`, drawn by
+ * `KuruTags.tsx`) — the row that held a chip per node until 2026-11-12, with
+ * the nodes among its tags. A filter keeps the line that was at the top of
+ * the list where it was, and reaches back a few pages for more of what it
+ * shows when what is loaded holds little of it.
+ *
  * **Any line can be pinned, to come back to.** A pin beside the fold, on the
  * same terms, and always shown in the accent on a line that is pinned; the
  * header's pin with a count opens the list of them under it, newest said
@@ -150,6 +156,8 @@ import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from 
 import { dropRefusal } from "../../../shared/drops";
 import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertLine, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, typedAddress, type CardRef, type KuruFile, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { canPin, sortPins, type KuruPin } from "../../../shared/kurupin";
+import { adoptTagFilter, passes, recentTags, tagBook, tagLines, type TagFilter } from "../../../shared/kurutags";
+import { isRemote } from "../../../shared/remote";
 import { matchItem, parseKuruQuery, splitHits, type KuruQuery } from "../../../shared/kurusearch";
 import { splitMentions } from "../../../shared/made";
 import type { AgentSnapshot, MascotConfig, Profile } from "../../../shared/model";
@@ -171,11 +179,11 @@ import { CHIP_ICONS, CHIP_WORD, ChipField, type ChipFieldHandle } from "./ChipFi
 import { Icon } from "./Icon";
 import { KuruInline, KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
 import { PinButton, PinsButton, PinsList } from "./KuruPins";
+import { LineTags, TagButton, TagRow, type TagName } from "./KuruTags";
 import { MadeInline } from "./MadeLinks";
 import { quotable } from "./Quote";
 import { Mascot } from "./Status";
 import { MicIcon, PenIcon, PlaneIcon, SpeakerIcon, SpeakerOffIcon } from "./VoiceIcons";
-import { hueStyle } from "./NodeChip";
 
 /** How close to the foot the list has to be for a new item to keep it there. Reading something older must not be yanked away. */
 const STICK_PX = 48;
@@ -191,24 +199,44 @@ const SEEN_BATCH_MS = 300;
  */
 const STOPPING_MS = 5000;
 
-/** Which node's conversation the list is narrowed to, remembered per viewer: null for every node. */
+/** What the list is narrowed to (`TagFilter`), remembered per viewer. */
+const TAGS_KEY = "kururu.kuru.tags";
+/** The node the list was narrowed to before the tags, read once so a device keeps what it had picked. */
 const NODE_KEY = "kururu.kuru.node";
+const NO_FILTER: TagFilter = { spaces: [], nodes: [] };
 
-function readNodeFilter(): string | null {
+function readTagFilter(): TagFilter {
   try {
-    return localStorage.getItem(NODE_KEY);
+    const kept = localStorage.getItem(TAGS_KEY);
+    if (kept) return adoptTagFilter(JSON.parse(kept));
+    const node = localStorage.getItem(NODE_KEY);
+    return node ? { spaces: [], nodes: [node] } : NO_FILTER;
   } catch {
-    return null;
+    return NO_FILTER;
   }
 }
 
-function writeNodeFilter(node: string | null) {
+function writeTagFilter(filter: TagFilter) {
   try {
-    if (node === null) localStorage.removeItem(NODE_KEY);
-    else localStorage.setItem(NODE_KEY, node);
+    localStorage.removeItem(NODE_KEY);
+    if (!filter.spaces.length && !filter.nodes.length) localStorage.removeItem(TAGS_KEY);
+    else localStorage.setItem(TAGS_KEY, JSON.stringify(filter));
   } catch {
     // Not remembered past this window.
   }
+}
+
+/** Under a filter, how many of its lines the list wants before it stops reaching back for more on its own. */
+const FILTER_FILL = 20;
+/** And how many pages it reaches back for them at most, per filter or press of "Show earlier". */
+const FILTER_PAGES = 8;
+
+/** What a line's row needs of the tags: what it wears, what is shown, and its tag button's menu where it can take one. */
+interface Tagging {
+  tags: TagName[];
+  filter: TagFilter;
+  onShow: (key: string) => void;
+  edit: { tagged: string[]; spaces: TagName[]; onSet: (key: string, on: boolean) => void } | null;
 }
 
 /** One of your messages as the drawer draws it: the server's states, and this page's two for a clip the server has not taken yet. */
@@ -272,13 +300,28 @@ export function KuruDrawer({
   const conversation = kuru.find((c) => c.profileId === profile.id) ?? null;
   const selfName = nodes?.self.name ?? "here";
   const peerNames = kuruPeers.map((peer) => peer.node.name);
-  const [nodeFilter, setNodeFilter] = useState<string | null>(readNodeFilter);
-  // A node that left the roster is not a filter any more.
-  const filter = nodeFilter !== null && nodeFilter !== selfName && !peerNames.includes(nodeFilter) ? null : nodeFilter;
-  const pickNode = (node: string | null) => {
-    setNodeFilter(node);
-    writeNodeFilter(node);
+  /**
+   * The workspaces the tags can name: this profile's own, not another node's
+   * shown here, whose lines are that node's to tag. Made once per change of
+   * them, since the book holds a pattern per name.
+   */
+  const spacesHere = useMemo(
+    () =>
+      profile.workspaces
+        .filter((w) => !isRemote(w.id))
+        .map((w) => ({ key: w.key, name: w.name, cards: new Set(w.board?.cards.map((c) => c.number) ?? []), cardIds: new Set(w.board?.cards.map((c) => c.id) ?? []), root: w.root })),
+    [profile.workspaces],
+  );
+  const book = useMemo(() => tagBook(spacesHere), [spacesHere]);
+  const nameOf = useMemo(() => new Map(spacesHere.map((space) => [space.key, space.name] as const)), [spacesHere]);
+  const [pickedFilter, setPickedFilter] = useState<TagFilter>(readTagFilter);
+  // A node that left the roster, or a workspace that went, is not a filter any more.
+  const filter: TagFilter = {
+    spaces: pickedFilter.spaces.filter((key) => nameOf.has(key)),
+    nodes: pickedFilter.nodes.filter((node) => node === selfName || peerNames.includes(node)),
   };
+  const filterOn = filter.spaces.length > 0 || filter.nodes.length > 0;
+  const filterKey = `${filter.spaces.join(",")}|${filter.nodes.join(",")}`;
   /**
    * A line's reply arrow was pressed: the composer quotes it, and has the
    * keyboard — and starts `@node ` for another node's line, so the reply goes
@@ -433,18 +476,44 @@ export function KuruDrawer({
 
   const context = viewing?.pages ?? null;
   // A page of `viewing`'s and a line of `known`'s can be the same line, and `known`'s is the live one.
-  const own = [...(context?.size ? new Map([...context, ...known]) : known).values()].sort((a, b) => a.at - b.at);
+  const own = useMemo(() => [...(context?.size ? new Map([...context, ...known]) : known).values()].sort((a, b) => a.at - b.at), [context, known]);
   const fetched = context?.size ? [...context.values()].sort((a, b) => a.at - b.at) : null;
   const first = (fetched ?? own)[0]?.at ?? null;
-  const merged = searching && hits ? hits : mergeNodes(own, kuruPeers);
-  const items = filter === null ? merged : merged.filter((item) => (item.node ?? selfName) === filter);
-  const away = filter !== null && !searching ? kuruPeers.find((peer) => peer.node.name === filter && peer.state !== "up") : undefined;
+  const merged = useMemo(() => (searching && hits ? hits : mergeNodes(own, kuruPeers)), [searching, hits, own, kuruPeers]);
+
+  /**
+   * Every loaded line's tags (`tagLines`), with the presses of a tag button
+   * not yet answered laid over them, so a tag comes and goes at once on a
+   * phone whose socket is slow. A press is forgotten once the server has
+   * spoken since.
+   */
+  const tagged = useMemo(() => tagLines(merged, book), [merged, book]);
+  const [tagPresses, setTagPresses] = useState<ReadonlyMap<string, ReadonlyMap<string, boolean>>>(() => new Map());
+  useEffect(() => setTagPresses(new Map()), [conversation]);
+  const tagsOf = (item: NodeKuruItem): string[] => {
+    const keys = tagged.get(item.id) ?? [];
+    const presses = tagPresses.get(item.id);
+    if (!presses) return keys;
+    const out = keys.filter((key) => presses.get(key) !== false);
+    for (const [key, on] of presses) if (on && !out.includes(key)) out.push(key);
+    return out;
+  };
+  const shows = (item: NodeKuruItem, by: TagFilter = filter): boolean => passes(by, tagsOf(item), item.node ?? selfName, item.kind === "session");
+  const items = filterOn ? merged.filter((item) => shows(item)) : merged;
+  const onlyNode = filter.nodes.length === 1 && !filter.spaces.length ? filter.nodes[0]! : null;
+  const away = onlyNode !== null && !searching ? kuruPeers.find((peer) => peer.node.name === onlyNode && peer.state !== "up") : undefined;
+  /** The workspaces the row offers: the ones the loaded lines are about, most recent first, then any picked that none of them is about now. */
+  const rowSpaces: TagName[] = [...recentTags(merged, tagged), ...filter.spaces]
+    .filter((key, i, all) => all.indexOf(key) === i && nameOf.has(key))
+    .map((key) => ({ key, name: nameOf.get(key)! }));
+  /** The tag button's list: the row's order, then the rest by name. */
+  const menuSpaces: TagName[] = [...rowSpaces, ...spacesHere.filter((space) => !rowSpaces.some((s) => s.key === space.key)).sort((a, b) => a.name.localeCompare(b.name))];
   const moreEarlier = searching ? false : fetched ? viewing!.older : more;
   /** The last line of what was fetched for a result, where the chat stops short of the newest. */
   const fetchedLast = fetched?.at(-1) ?? null;
   const gapAfter = viewing?.newer ? (fetchedLast?.id ?? null) : null;
   /** Lines a search matched that the answer left out to stay at its cap. They are this node's, so they do not count while the list is narrowed to another's. */
-  const leftOut = answer && query && answer.raw === query.raw && (filter === null || filter === selfName) ? Math.max(0, answer.total - answer.items.length) : 0;
+  const leftOut = answer && query && answer.raw === query.raw && !filterOn ? Math.max(0, answer.total - answer.items.length) : 0;
 
   /**
    * Which lines are folded to one row (`kurufold.ts`): open by default, or
@@ -674,7 +743,7 @@ export function KuruDrawer({
     if (item) openResult(item);
   };
   // The hits, and not `items`, which is the chat again while one of them is open.
-  const results = (hits ?? []).filter((item) => filter === null || (item.node ?? selfName) === filter);
+  const results = (hits ?? []).filter((item) => shows(item));
   const walkedAt = walked === null ? results.length - 1 : results.findIndex((item) => item.id === walked);
   /** The field's own keys: the arrows walk the results, Enter opens the one reached, Escape leaves. */
   const onSearchKey = (event: React.KeyboardEvent) => {
@@ -756,6 +825,93 @@ export function KuruDrawer({
   const onScroll = () => {
     const el = list.current;
     if (el) stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+  };
+
+  /**
+   * A filter picked, kept where the eye was. At the foot it stays at the foot.
+   * Otherwise the line it holds on to is the one pressed — a tag on a line —
+   * or the first line in view that the new filter shows, or the first after
+   * it, and that line keeps its distance from the list's top; a line that was
+   * below the view comes to the top. With none of them left, the foot.
+   */
+  const filterAnchor = useRef<{ id: string; top: number } | "foot" | null>(null);
+  const pickFilter = (next: TagFilter, hold: string | null) => {
+    const el = list.current;
+    if (el) {
+      const top = el.getBoundingClientRect().top;
+      const rows = [...el.querySelectorAll<HTMLElement>("[data-item]")];
+      const byId = new Map(merged.map((item) => [item.id, item] as const));
+      const kept = (row: HTMLElement) => {
+        const item = byId.get(row.dataset.item ?? "");
+        return item !== undefined && shows(item, next);
+      };
+      const held = hold ? rows.find((row) => row.dataset.item === hold) : undefined;
+      const first = rows.findIndex((row) => row.getBoundingClientRect().bottom > top);
+      const row = held ?? (stuck.current || first < 0 ? undefined : rows.slice(first).find(kept));
+      filterAnchor.current = row ? { id: row.dataset.item!, top: Math.min(row.getBoundingClientRect().top - top, el.clientHeight - 40) } : "foot";
+    }
+    setPickedFilter(next);
+    writeTagFilter(next);
+  };
+  // After the stick above, so a held line wins over the foot.
+  useLayoutEffect(() => {
+    const el = list.current;
+    const held = filterAnchor.current;
+    filterAnchor.current = null;
+    if (!el || !held) return;
+    const row = held === "foot" ? null : el.querySelector(`[data-item="${CSS.escape(held.id)}"]`);
+    if (held === "foot" || !row) {
+      el.scrollTop = el.scrollHeight;
+      stuck.current = true;
+      return;
+    }
+    el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - held.top;
+    stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+  }, [filterKey]);
+
+  /**
+   * Under a filter the sixty lines loaded may hold two of the ones it shows,
+   * so the list reaches back on its own, a page at a time, until it has
+   * `FILTER_FILL` of them or has read `FILTER_PAGES` pages; "Show earlier"
+   * asks for ten more the same way, so a press is never a page that added
+   * nothing to see. Each page keeps the eye where it was, as a press does.
+   */
+  const fill = useRef({ pages: 0, want: FILTER_FILL });
+  useEffect(() => {
+    fill.current = { pages: 0, want: FILTER_FILL };
+  }, [filterKey]);
+  useEffect(() => {
+    if (!filterOn || searching || loading || !moreEarlier) return;
+    if (items.length >= fill.current.want || fill.current.pages >= FILTER_PAGES) return;
+    fill.current.pages++;
+    earlier();
+  });
+  const showEarlier = () => {
+    if (filterOn) fill.current = { pages: 0, want: items.length + 10 };
+    earlier();
+  };
+  /** A tag on a line pressed: that workspace's thread, held at that line — or everything again, when it is what is shown. */
+  const showTag = (key: string, from: string) => pickFilter(filter.spaces.length === 1 && filter.spaces[0] === key ? { ...filter, spaces: [] } : { ...filter, spaces: [key] }, from);
+  /** What a row draws of the tags. */
+  const taggingOf = (item: NodeKuruItem): Tagging | null => {
+    if (item.node !== null || item.kind === "session") return null;
+    const keys = tagsOf(item);
+    const editable = canPin(item);
+    return {
+      tags: keys.filter((key) => nameOf.has(key)).map((key) => ({ key, name: nameOf.get(key)! })),
+      filter,
+      onShow: (key) => showTag(key, item.id),
+      edit: editable
+        ? {
+            tagged: keys,
+            spaces: menuSpaces,
+            onSet: (key, on) => {
+              setTagPresses((was) => new Map(was).set(item.id, new Map(was.get(item.id) ?? []).set(key, on)));
+              api.kuruTag(profile.id, item.id, key, on);
+            },
+          }
+        : null,
+    };
   };
 
   /**
@@ -900,8 +1056,13 @@ export function KuruDrawer({
   /** A quote was pressed: its line, opened when it is folded and in the middle of the list, lit for a moment as a reply the pill named is. */
   const [flash, setFlash] = useState<string | null>(null);
   const goTo = (id: string) => {
-    const item = items.find((line) => line.id === id);
-    if (!item) return;
+    let item = items.find((line) => line.id === id);
+    if (!item) {
+      // Hidden by the filter: the whole conversation, then the line.
+      item = merged.find((line) => line.id === id);
+      if (!item) return;
+      pickFilter(NO_FILTER, null);
+    }
     reveal(item, true);
     setFlash(id);
   };
@@ -946,8 +1107,9 @@ export function KuruDrawer({
       leaveSearch();
       putBack.current = false;
     }
-    if (filter !== null && filter !== selfName) pickNode(null);
     const item: NodeKuruItem = { ...pin.item, node: null };
+    // A pin of a line the filter hides opens on the whole conversation.
+    if (filterOn && !passes(filter, tagged.get(item.id) ?? tagLines([item], book).get(item.id) ?? [], selfName, false)) pickFilter(NO_FILTER, null);
     const show = (smooth: boolean) => {
       reveal(item, smooth);
       setFlash(item.id);
@@ -999,7 +1161,7 @@ export function KuruDrawer({
         </button>
       </header>
 
-      {kuruPeers.length > 0 && <NodeChips self={selfName} peers={kuruPeers} filter={filter} onPick={pickNode} />}
+      {(rowSpaces.length > 0 || kuruPeers.length > 0 || filterOn) && <TagRow filter={filter} spaces={rowSpaces} self={selfName} peers={kuruPeers} onPick={(next) => pickFilter(next, null)} />}
 
       {searchOpen && (
         <div className="kuru-search" role="search">
@@ -1043,9 +1205,14 @@ export function KuruDrawer({
         <ol className={`kuru-list ${searching ? "kuru-searching" : ""}`} ref={list} onScroll={onScroll} onClick={onListClick}>
           {moreEarlier && (
             <li className="kuru-earlier">
-              <button className="kuru-head-btn" onClick={earlier} disabled={loading}>
-                {loading ? "Loading…" : "Show earlier"}
+              <button className="kuru-head-btn" onClick={showEarlier} disabled={loading}>
+                {loading ? (filterOn ? "Looking further back…" : "Loading…") : "Show earlier"}
               </button>
+            </li>
+          )}
+          {filterOn && !searching && items.length === 0 && !loading && (
+            <li className="kuru-search-none" role="status">
+              {moreEarlier ? "Nothing loaded is about this yet. Show earlier looks further back." : "Nothing in this conversation is about this."}
             </li>
           )}
           {searching && results.length === 0 && settled && (
@@ -1086,6 +1253,7 @@ export function KuruDrawer({
                     folded={foldedOf(item) === true}
                     onFold={item.text ? () => toggleFold(item) : null}
                     pin={pinOf(item)}
+                    tagging={taggingOf(item)}
                   />
                 );
               })()
@@ -1101,6 +1269,7 @@ export function KuruDrawer({
                 flash={flash === item.id || (searching && walked === item.id)}
                 onResult={searching ? () => openResult(item) : null}
                 pin={pinOf(item)}
+                tagging={taggingOf(item)}
               />
             ) : (
               <Reply
@@ -1122,6 +1291,7 @@ export function KuruDrawer({
                 onCard={onCard}
                 onFile={onFile}
                 pin={pinOf(item)}
+                tagging={taggingOf(item)}
               />
             )),
           )}
@@ -1257,51 +1427,6 @@ function Live({ live, working, profileId, mascot, onTerminal }: { live: KuruLive
     );
   }
   return null;
-}
-
-/**
- * One chip per node, under the header, on a kururu linked with others:
- * every node's conversation, or one's. A node that is away is greyed, and
- * says since when in its title; its last items are still there to read.
- * Its count is its replies said here that nobody heard out, as the lines
- * themselves are marked.
- */
-function NodeChips({ self, peers, filter, onPick }: { self: string; peers: PeerKuru[]; filter: string | null; onPick: (node: string | null) => void }) {
-  return (
-    <nav className="kuru-nodes" aria-label="Whose conversation">
-      <button type="button" className={`kuru-node-chip ${filter === null ? "kuru-node-chip-on" : ""}`} aria-pressed={filter === null} onClick={() => onPick(null)}>
-        All
-      </button>
-      <button type="button" className={`kuru-node-chip ${filter === self ? "kuru-node-chip-on" : ""}`} aria-pressed={filter === self} onClick={() => onPick(self)} title="This node's Kuru">
-        {self}
-      </button>
-      {peers.map((peer) => {
-        const gone = peer.state !== "up";
-        const title = gone
-          ? `${peer.node.name} ${peer.state === "away" ? "is away" : "is not linked yet"}${peer.lastSeen ? `, last seen ${dayAt(peer.lastSeen)}` : ""}. Its last items are kept here.`
-          : peer.talks
-            ? `The Kuru on ${peer.node.name}. Start a message with @${peer.node.name} to talk to it.`
-            : `The kururu on ${peer.node.name} is too old to talk to; update it there.`;
-        return (
-          <button
-            key={peer.node.id}
-            type="button"
-            className={`kuru-node-chip ${filter === peer.node.name ? "kuru-node-chip-on" : ""} ${gone ? "kuru-node-chip-away" : ""}`}
-            aria-pressed={filter === peer.node.name}
-            onClick={() => onPick(peer.node.name)}
-            title={title}
-            /* The node's own hue, the one its band and chips wear when its
-               workspace is on screen, so the two read as one machine. */
-            style={hueStyle(peer.node.id)}
-          >
-            <span className="node-chip-dot" aria-hidden="true" />
-            {peer.node.name}
-            {peer.unheard > 0 && <span className="kuru-node-count">{peer.unheard}</span>}
-          </button>
-        );
-      })}
-    </nav>
-  );
 }
 
 /** A result opened in the chat: which line, what had to be fetched to show it, and whether that stops short of either end. */
@@ -1525,6 +1650,7 @@ function You({
   folded = false,
   onFold = null,
   pin = null,
+  tagging = null,
 }: {
   item: YouItem;
   state: RowState;
@@ -1547,6 +1673,8 @@ function You({
   onFold?: (() => void) | null;
   /** Its pin, or null for a line that cannot take one (`canPin`). */
   pin?: PinProps | null;
+  /** Its tags and its tag button; null for a line with none to wear, a clip still on its way or another node's. */
+  tagging?: Tagging | null;
 }) {
   const word = state === "queued" ? (item.typedAt !== null ? "Sent" : STATE_WORD.queued) : STATE_WORD[state];
   const channel = isChannelKind(item.via) ? item.via : null;
@@ -1577,6 +1705,7 @@ function You({
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         {item.via === "voice" && item.ms > 0 && <span className="kuru-length">{clipLength(item.ms)}</span>}
         {word && <span className={`kuru-state kuru-state-${state}`}>{word}</span>}
+        {!line && tagging && <LineTags tags={tagging.tags} filter={tagging.filter} onShow={tagging.onShow} />}
         {line && (
           <FoldLine more={line.more}>
             {words(line.line)}
@@ -1585,6 +1714,7 @@ function You({
         {onReplyTo && item.text && <ReplyButton onReply={onReplyTo} />}
         {onFold && <FoldButton folded={line !== null} onFold={onFold} />}
         {pin && <PinButton {...pin} />}
+        {tagging?.edit && <TagButton {...tagging.edit} />}
       </span>
       {!line && reply && !inline && <Quote quote={reply.ref} node={node ?? to} onOpen={onQuote} />}
       {line ? null : text ? (
@@ -1631,6 +1761,7 @@ function Reply({
   onCard,
   onFile,
   pin = null,
+  tagging = null,
 }: {
   item: KuruReply;
   /** Whose Kuru said it, when that is another node's. */
@@ -1652,6 +1783,7 @@ function Reply({
   /** A path in the reply was opened. */
   onFile: () => void;
   pin?: PinProps | null;
+  tagging?: Tagging | null;
 }) {
   const active = replaying || item.fate === "speaking";
   // Parsed once per reply, not per draw: the drawer draws again on every
@@ -1697,6 +1829,7 @@ function Reply({
         ) : item.fate === "unheard" ? (
           <span className="kuru-state kuru-state-unheard">Unheard</span>
         ) : null}
+        {!line && tagging && <LineTags tags={tagging.tags} filter={tagging.filter} onShow={tagging.onShow} />}
         {line && (
           <FoldLine more={line.more}>
             <KuruInline nodes={line.children} doors={doors} />
@@ -1705,6 +1838,7 @@ function Reply({
         <ReplyButton onReply={onReplyTo} />
         <FoldButton folded={line !== null} onFold={onFold} />
         {pin && <PinButton {...pin} />}
+        {tagging?.edit && <TagButton {...tagging.edit} />}
       </span>
       {tree && (
         <div className="kuru-text kuru-md" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>
@@ -1962,6 +2096,7 @@ function Notice({
   flash = false,
   onResult = null,
   pin = null,
+  tagging = null,
 }: {
   item: NoticeItem;
   node?: string | null;
@@ -1974,6 +2109,7 @@ function Notice({
   /** It is a search's result, and a press on the line opens it in the chat rather than opening the message under it. */
   onResult?: (() => void) | null;
   pin?: PinProps | null;
+  tagging?: Tagging | null;
 }) {
   const [opened, setOpen] = useState(false);
   const query = useContext(HitWords);
@@ -2024,8 +2160,11 @@ function Notice({
           </span>
           <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         </button>
+        {/* The workspace the line already says ("in Holapy") is not said twice. */}
+        {tagging && <LineTags tags={tagging.tags.filter((tag) => tag.name !== agent?.workspace)} filter={tagging.filter} onShow={tagging.onShow} />}
         <ReplyButton onReply={onReplyTo} />
         {pin && <PinButton {...pin} />}
+        {tagging?.edit && <TagButton {...tagging.edit} />}
       </span>
       {tree && (
         <div className="kuru-notice-text kuru-md" {...(quoteRef ? quotable(quoteRef, "body", "message") : {})}>

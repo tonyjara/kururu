@@ -389,6 +389,55 @@ pins, each line in full (`KuruConversation.pins`). Kuru reads them through its
 with or without words — chosen over a line in `kururu_status`, which is read on
 nearly every turn and would carry the openings each time.
 
+### Tags
+
+Every line wears the workspaces it is about, as small chips after its time, and
+the row under the header narrows the list to any of them: **Todo**, then the
+nodes when this kururu is linked with others, then the workspaces the loaded
+lines are about, most recently talked about first. Several pressed read as any
+of them; a node and workspaces together as that node's lines about any of them.
+It replaced the row of a chip per node (All · mac · omarchy) on 2026-11-12. A
+chip on a line shows that workspace's thread, held at that line; pressed again
+while it is all that is shown, everything. What is picked is this device's
+(`kururu.kuru.tags`).
+
+Where they come from (`shared/kurutags.ts`, pure, `server/test/kurutags.test.ts`):
+
+- **Read off the line, on every draw** — nothing is written, so the whole
+  history had tags the day this shipped. A card's code (`HOL-81`, the board
+  that has that card, or the only workspace with that prefix), a card's
+  reference by its id, a path under a workspace's root (`/Users/…` or `~/…`, or
+  a file the server found in a reply), and a workspace's name as a word of its
+  own, in any case — except a name that is an everyday word ("Research"), which
+  counts only as spelt, and a name that is a folder inside a path. That last
+  rule is how a mark on a window titled "WhatsApp · Holapy" tags Holapy. A
+  notice is its agent's workspace and card; its quoted reply is not read.
+- **Then the exchange.** A message of yours that names nothing takes the line
+  its reply arrow quoted, or else Kuru's reply to it; a reply of Kuru's that
+  names nothing takes the message it answered. One step, from what the other
+  line says itself.
+- **Kuru's tag line.** The role asks Kuru to end a reply about a workspace with
+  `[tags: Holapy, Pasapy]` on a last line of its own. `/api/report` takes that
+  line off the Stop report before anything reads the reply — the voice, a
+  channel, the record, the made links — and writes the workspaces to
+  `turn_tags` beside the turn. When Kuru said, that is the line's tags and the
+  rules are set aside. A line, not a tool: a dozen tokens and no round trip, in
+  the same breath as the reply, through the one door every reply comes through.
+  A Kuru resumed from before it sees the new role only once its conversation is
+  new or compacted.
+- **The owner's corrections**, last and over everything: the tag button beside
+  a line's pin opens the profile's workspaces as switches (`kuru-tag` on the
+  socket, `turn_tags` with `by = 'user'`). Only a turn takes one, as a pin.
+
+Another node's lines wear only their node: its workspaces are its own. A
+workspace has had no colour since 2026-10-12, so a tag's dot takes a hue off its
+key the way a node's does off its id (`nodeHue`). Under a filter the list
+reaches back a page at a time on its own until it has 20 of the lines it shows
+or has read 8 pages, and **Show earlier** asks for ten more the same way. A
+filter picked keeps the line at the top of the list where it was — or, from a
+line's own chip, that line — and at the foot it stays at the foot. A quote or a
+pin of a line the filter hides opens it on the whole conversation.
+
 The live line says what Kuru is doing now — the mascot hopping with
 "Thinking…" and **Stop**, "asking something in its terminal" with **Open
 terminal**, "not running" with **Start** — and the chip says the same in a

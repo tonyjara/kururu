@@ -1737,6 +1737,11 @@ export function kuruPin(profileId: string, id: string, pinned: boolean): void {
   send({ type: "kuru-pin", profileId, id, pinned });
 }
 
+/** Add a workspace to a line of the drawer's, or take it off. The next `kuru` message says it is done, everywhere. */
+export function kuruTag(profileId: string, id: string, workspaceKey: string, kept: boolean): void {
+  send({ type: "kuru-tag", profileId, id, workspaceKey, kept });
+}
+
 /**
  * Say one reply again, from the drawer's speaker. `text` is the reply as the
  * drawer already shows it, for when the one being replayed is already heard

@@ -83,6 +83,7 @@ import {
   mintWorkspaceKey,
 } from "../../shared/store";
 import { randomHex } from "../../shared/text";
+import { adoptKeys, type TurnTags } from "../../shared/kurutags";
 import type { SimRow } from "./slots";
 
 // ---------------------------------------------------------------------------
@@ -273,6 +274,12 @@ const MIGRATIONS: readonly (string | ((db: DatabaseSync) => void))[] = [SCHEMA, 
  *   written before anything is started: a second server on this file, or one
  *   restarted in the same second, is refused the insert and starts nothing.
  *   Not in the export yet; the backup carries them from a later phase.
+ * - `turn_tags`: the workspaces a line of Kuru's conversation is about where
+ *   somebody said so (`shared/kurutags.ts`) — Kuru's tag line (`by = 'kuru'`)
+ *   or the owner adding or taking one off (`by = 'user'`, `kept` 1 or 0). The
+ *   tags the rules read off a line are never written: they are worked out on
+ *   every draw. A table of its own for `turn_pins`'s reasons, and in the
+ *   export on its turn's line as `tags`, by workspace key, for the same one.
  */
 const SIM_POOL = `create table if not exists sim_pool (
   udid text primary key, project text not null, name text not null, runtime text not null,
@@ -287,6 +294,11 @@ const CARDS_AU = `create trigger cards_au after update of title, body on cards
 end`;
 
 const TURN_PINS = "create table if not exists turn_pins (turn_id integer primary key, pinned_at integer not null)";
+
+const TURN_TAGS = `create table if not exists turn_tags (
+  turn_id integer not null, workspace_key text not null, by text not null, kept integer not null,
+  primary key (turn_id, workspace_key, by)
+)`;
 
 const AUTOMATIONS = `create table if not exists automations (
   key text primary key, profile_key text not null, workspace_key text,
@@ -307,6 +319,7 @@ function keepShape(db: DatabaseSync): void {
   db.exec("create index if not exists turns_at on turns(at, id)");
   db.exec(SIM_POOL);
   db.exec(TURN_PINS);
+  db.exec(TURN_TAGS);
   db.exec(AUTOMATIONS);
   db.exec(AUTOMATION_RUNS);
   db.exec("create index if not exists automation_runs_by on automation_runs(automation_key, slot_at)");
@@ -1511,6 +1524,55 @@ export class Store {
     return rows.map((row) => ({ turn: turnOf(row), pinnedAt: row.pinned_at as number }));
   }
 
+  /**
+   * The owner adds a workspace to a line of Kuru's conversation, or takes one
+   * off (`shared/kurutags.ts`). Only a turn of that profile's harness
+   * conversations, and only one of that profile's workspaces: both ids come
+   * off a client. Says whether anything changed.
+   */
+  tagTurn(profileKey: string, turnId: number, workspaceKey: string, kept: boolean): boolean {
+    const ours = this.stmt(
+      "select 1 as x from turns t join conversations v on v.id = t.conversation_id where t.id = ? and v.profile_key = ? and v.kind = 'harness' and t.role <> 'agent'",
+    ).get(turnId, profileKey);
+    const space = this.stmt("select 1 as x from workspaces where key = ? and profile_key = ?").get(workspaceKey, profileKey);
+    if (!ours || !space) return false;
+    const done = this.stmt(
+      "insert into turn_tags(turn_id, workspace_key, by, kept) values (?, ?, 'user', ?) on conflict(turn_id, workspace_key, by) do update set kept = excluded.kept where kept <> excluded.kept",
+    ).run(turnId, workspaceKey, kept ? 1 : 0);
+    if (Number(done.changes) > 0) this.changes++;
+    return Number(done.changes) > 0;
+  }
+
+  /** The workspaces Kuru's tag line named for a reply it just gave, already resolved to keys. Written once, with the turn. */
+  kuruTagTurn(turnId: number, workspaceKeys: readonly string[]): void {
+    if (!workspaceKeys.length) return;
+    const insert = this.stmt("insert or ignore into turn_tags(turn_id, workspace_key, by, kept) values (?, ?, 'kuru', 1)");
+    this.tx(() => {
+      for (const key of workspaceKeys) insert.run(turnId, key);
+    });
+    this.changes++;
+  }
+
+  /** What was said about some turns' tags, by turn id; a turn nobody said anything about is absent. */
+  turnTags(turnIds: readonly number[]): Map<number, TurnTags> {
+    const out = new Map<number, TurnTags>();
+    // In slices, since a page is sixty and a search's answer a few hundred,
+    // and SQLite caps the numbered parameters of one statement.
+    for (let at = 0; at < turnIds.length; at += 400) {
+      const some = turnIds.slice(at, at + 400);
+      if (!some.length) continue;
+      const rows = this.db.prepare(`select turn_id, workspace_key, by, kept from turn_tags where turn_id in (${some.map(() => "?").join(",")}) order by rowid`).all(...some) as Row[];
+      for (const row of rows) {
+        const id = row.turn_id as number;
+        const tags = out.get(id) ?? {};
+        const kind: keyof TurnTags = row.by === "kuru" ? "kuru" : row.kept ? "add" : "drop";
+        (tags[kind] ??= []).push(row.workspace_key as string);
+        out.set(id, tags);
+      }
+    }
+    return out;
+  }
+
   conversations(profileKey: string | null, kind: ConversationKind | null): Conversation[] {
     const rows = this.stmt("select * from conversations where (? is null or profile_key = ?) and (? is null or kind = ?) order by started_at").all(profileKey, profileKey, kind, kind) as Row[];
     return rows.map(conversationOf);
@@ -1738,10 +1800,12 @@ export class Store {
       const rows = this.stmt("select t.*, p.pinned_at from turns t left join turn_pins p on p.turn_id = t.id where t.conversation_id = ? order by t.at, t.id").all(row.id as string) as Row[];
       conversations.push({
         header: { version: EXPORT_VERSION, ...conversationOf(row), profileName: row.profile_name as string },
-        turns: rows.map((turnRow) => {
-          const { id: _id, conversationId: _c, ...rest } = turnOf(turnRow);
-          return turnRow.pinned_at != null ? { ...rest, pinnedAt: turnRow.pinned_at as number } : rest;
-        }),
+        turns: ((tagged) =>
+          rows.map((turnRow) => {
+            const { id: _id, conversationId: _c, ...rest } = turnOf(turnRow);
+            const tags = tagged.get(turnRow.id as number);
+            return { ...rest, ...(turnRow.pinned_at != null ? { pinnedAt: turnRow.pinned_at as number } : {}), ...(tags ? { tags } : {}) };
+          }))(this.turnTags(rows.map((turnRow) => turnRow.id as number))),
       });
     }
     return { boards, conversations };
@@ -1752,6 +1816,16 @@ export class Store {
    * written, events and runs and deleted cards included; a row already here
    * is left alone, so running it twice adds nothing twice.
    */
+  /** A turn's tags as the mirror carries them, put back on the id the restore gave it. A tag already here is left alone. */
+  private importTags(turnId: number, tags: unknown): void {
+    if (!tags || typeof tags !== "object") return;
+    const record = tags as Record<string, unknown>;
+    const insert = this.stmt("insert or ignore into turn_tags(turn_id, workspace_key, by, kept) values (?, ?, ?, ?)");
+    for (const key of adoptKeys(record.kuru)) insert.run(turnId, key, "kuru", 1);
+    for (const key of adoptKeys(record.add)) insert.run(turnId, key, "user", 1);
+    for (const key of adoptKeys(record.drop)) insert.run(turnId, key, "user", 0);
+  }
+
   importExport(data: DataExport, at = Date.now()): ImportCounts {
     const counts: ImportCounts = { profiles: 0, workspaces: 0, boards: 0, cards: 0, turns: 0, outbox: 0, missed: 0 };
     this.tx(() => {
@@ -1829,6 +1903,7 @@ export class Store {
           const pinnedAt = typeof turn.pinnedAt === "number" && Number.isFinite(turn.pinnedAt) ? turn.pinnedAt : null;
           if (dup) {
             if (pinnedAt !== null) this.stmt("insert or ignore into turn_pins(turn_id, pinned_at) values (?, ?)").run(dup.id as number, pinnedAt);
+            this.importTags(dup.id as number, turn.tags);
             continue;
           }
           const inserted = this.stmt("insert into turns(conversation_id, at, role, via, text, lang, voice_id) values (?, ?, ?, ?, ?, ?, ?) returning id").get(
@@ -1841,6 +1916,7 @@ export class Store {
             turn.voiceId,
           ) as Row;
           if (pinnedAt !== null) this.stmt("insert or ignore into turn_pins(turn_id, pinned_at) values (?, ?)").run(inserted.id as number, pinnedAt);
+          this.importTags(inserted.id as number, turn.tags);
           counts.turns++;
         }
       }

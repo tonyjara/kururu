@@ -382,6 +382,20 @@ A Telegram reply carries the same reference; see
 again. Like every role section, it reaches a running Kuru when it is next
 started or resumed.
 
+## Which project a reply is about
+
+The drawer tags every line with the workspaces it is about ([voice](voice.md#tags)),
+mostly read off the words. The role asks Kuru to end a reply that is about a
+workspace with a last line of its own, `[tags: Holapy, Pasapy]` — at most three,
+spelt as `kururu_status` spells them, left off when the reply is about none.
+`takeTagLine` in `src/http/agents.ts` takes it off the Stop report before
+`harness.report`, the voice, the channels, `recordTurn` and the made links read
+the reply, and `store.kuruTagTurn` writes the workspaces beside the turn; a reply
+that was only a tag line is left as it was. The line stays in Kuru's own
+transcript, which is the one place it is meant for. Chosen over a tool, which
+would have to be called before the reply exists and held for a turn that might
+not come, and costs a round trip where the line costs a dozen tokens.
+
 ## A line folded to one row
 
 Beside the reply arrow, on the arrow's terms — on hover, and quietly always
