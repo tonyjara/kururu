@@ -516,6 +516,22 @@ everything typed or pasted into an agent, `labelWords` out of a mark's label,
 and `promptCarries` out of both sides when it looks for a message in Kuru's
 transcript.
 
+**Never typed twice.** A message the outbox typed and Kuru did not take —
+between turns for `CONFIRM_MS` since, or gone — is tried once more, and a
+Resend tries it again; each of those goes to the harness marked `again`.
+Before typing an `again` message, the harness reads Claude Code's prompt box
+off the screen (`promptBox`, the rows with their dim cells left out, since
+that is how the box draws its "Try …" placeholder; `promptBoxIn` finds the
+last `❯` row between two rules) and `retypeFor` decides: an empty box is
+typed into; a box holding these words and nothing else gets Enter alone;
+anything else — other words, two copies, no box to read — gets nothing, and
+the message fails with why. Clearing the box first was tried in a pty and
+left out: Ctrl-U takes one line of it, Esc Esc on a box that turned out empty
+opens the rewind menu, a second Ctrl-C quits, and the words in it may be the
+owner's. Checked against Claude Code 2.1.322 with a blocking prompt hook:
+words left in the box with their Enter lost were read as `enter` and
+submitted once; a box holding other words was left alone.
+
 **Why not the inbox.** Every Claude Code session since 2.1.224 binds a Unix
 socket and exports its path and a token to its hooks
 (`CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`), and the

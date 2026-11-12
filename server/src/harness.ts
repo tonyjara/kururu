@@ -86,6 +86,9 @@ import {
   trustAnswer,
   turnsFrom,
   typingPieces,
+  promptBoxIn,
+  retypeFor,
+  type Retype,
   type Hands,
   type HarnessFeatures,
   type Held,
@@ -329,12 +332,26 @@ export interface HeldEvents {
   typed: () => void;
   /** The agent went before they were typed. */
   dropped: () => void;
+  /** Words typed before were not typed again, and why: the prompt box held something else, or could not be read (`retypeFor`). */
+  refused?: (why: string) => void;
 }
 
 /** A message waiting to be typed, and who to tell when it is. */
 interface Waiting extends Held {
   events?: HeldEvents;
+  /**
+   * Typed into this terminal before and not taken, so the prompt box is
+   * read before it is typed again (`retypeFor`): it may still hold them.
+   * Typed alone, so that what is in the box is these words or is not.
+   */
+  again?: boolean;
 }
+
+/** What the outbox is told when words typed before were not typed again. */
+const REFUSED: Record<Exclude<Retype, "type" | "enter">, string> = {
+  occupied: "Kuru's prompt box has other words in it, so this was not typed again on top of them. Look at Kuru's prompt, or Resend once it is empty.",
+  unseen: "kururu could not read Kuru's prompt box, so this was not typed again in case it is still there. Look at Kuru's prompt, or Resend.",
+};
 
 /** Which agent a wait ended on, named when it ended — an exit is named before its tab is reaped, and not after. */
 interface Hit {
@@ -646,13 +663,13 @@ export class Harness {
    * them typed after a while anyway. `events` says when they are typed, or
    * dropped with a harness that went first; the outbox keeps them until then.
    */
-  async hear(profileId: string, text: string, events?: HeldEvents): Promise<{ outcome: "typed" | "held" | "starting"; agentId: string }> {
+  async hear(profileId: string, text: string, events?: HeldEvents, again = false): Promise<{ outcome: "typed" | "held" | "starting"; agentId: string }> {
     const ws = this.deps.workspaces;
     const profile = ws.profile(profileId);
     if (!profile) throw new Error("that profile is gone");
     const running = profile.harness?.agentId;
     if (running && this.deps.host.isLive(running) && !this.waking(running)) {
-      return { outcome: await this.speak(running, text, "now", events), agentId: running };
+      return { outcome: await this.speak(running, text, "now", events, again), agentId: running };
     }
     const { agentId } = running && this.deps.host.isLive(running) ? { agentId: running } : await this.open(profileId);
     if (!this.waking(agentId)) {
@@ -663,7 +680,7 @@ export class Harness {
       timer.unref();
       this.starting.set(agentId, timer);
     }
-    this.hold(agentId, { text, when: "now", events });
+    this.hold(agentId, { text, when: "now", events, ...(again ? { again: true, alone: true } : {}) });
     return { outcome: "starting", agentId };
   }
 
@@ -682,8 +699,8 @@ export class Harness {
    * draft the user left in the prompt box and walked away from: the paste
    * joins it, and the Enter sends both.
    */
-  private async speak(agentId: string, text: string, when: When, events?: HeldEvents): Promise<"typed" | "held"> {
-    const message: Waiting = { text, when, events };
+  private async speak(agentId: string, text: string, when: When, events?: HeldEvents, again = false): Promise<"typed" | "held"> {
+    const message: Waiting = { text, when, events, ...(again ? { again: true, alone: true } : {}) };
     this.hold(agentId, message);
     await this.pump(agentId);
     return this.held.get(agentId)?.includes(message) ? "held" : "typed";
@@ -703,6 +720,12 @@ export class Harness {
       if (this.pumps.get(agentId) === run) this.pumps.delete(agentId);
     });
     return run;
+  }
+
+  /** The words in an agent's prompt box as its screen shows them now, or null for no box (`promptBox`). */
+  private async promptBox(agentId: string): Promise<string | null> {
+    const { cols, rows } = this.deps.grid(agentId);
+    return promptBox(await this.deps.host.backlog(agentId), cols, rows);
   }
 
   /** Started and not yet listening: words for it wait for `report` to say it is. */
@@ -732,8 +755,24 @@ export class Harness {
     // these are being typed lands in what is left and waits its own turn.
     if (rest.length) this.held.set(agentId, rest);
     else this.held.delete(agentId);
+    const refused = new Set<Waiting>();
     for (const [i, text] of type.entries()) {
       if (i) await sleep(ENTER_DELAY_MS);
+      // Typed before and not taken: what the box holds now says whether to
+      // type, press Enter alone, or leave it (`retypeFor`).
+      const again = queue.find((m) => m.again && m.text === text && !rest.includes(m) && !refused.has(m));
+      if (again) {
+        const action = retypeFor(await this.promptBox(agentId), text);
+        if (action === "enter") {
+          this.deps.host.write(agentId, "\r");
+          continue;
+        }
+        if (action !== "type") {
+          refused.add(again);
+          again.events?.refused?.(REFUSED[action]);
+          continue;
+        }
+      }
       for (const [j, piece] of typingPieces(text).entries()) {
         if (j) await sleep(TYPE_GAP_MS);
         this.deps.host.write(agentId, piece);
@@ -741,7 +780,7 @@ export class Harness {
       await sleep(ENTER_DELAY_MS);
       this.deps.host.write(agentId, "\r");
     }
-    for (const message of queue) if (!rest.includes(message)) message.events?.typed();
+    for (const message of queue) if (!rest.includes(message) && !refused.has(message)) message.events?.typed();
   }
 
   /**
@@ -2348,6 +2387,33 @@ export async function screenText(data: string, cols: number, rows: number, lines
   }
 }
 
+/**
+ * A serialized screen's prompt box, as `promptBoxIn` reads it: the rows with
+ * their dim cells left out, which is how Claude Code draws the placeholder
+ * of an empty box. `screenText` would keep them, and a box saying "Try …"
+ * would read as a box with words in it.
+ */
+export async function promptBox(data: string, cols: number, rows: number): Promise<string | null> {
+  const term = new Terminal({ cols, rows, allowProposedApi: true, scrollback: 0 });
+  try {
+    await new Promise<void>((resolve) => term.write(data, resolve));
+    const buffer = term.buffer.active;
+    const out: string[] = [];
+    for (let y = 0; y < buffer.length; y++) {
+      const line = buffer.getLine(y);
+      let row = "";
+      for (let x = 0; line && x < cols; x++) {
+        const cell = line.getCell(x);
+        if (!cell || cell.getWidth() === 0) continue;
+        row += cell.isDim() ? " " : cell.getChars() || " ";
+      }
+      out.push(row.trimEnd());
+    }
+    return promptBoxIn(out);
+  } finally {
+    term.dispose();
+  }
+}
 
 function ok(text: string): McpResult {
   return { text: text.length > READ_MAX ? clip(text) : text };

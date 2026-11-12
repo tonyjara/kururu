@@ -66,11 +66,13 @@ import {
   trustAnswer,
   turnsFrom,
   typingPieces,
+  promptBoxIn,
+  retypeFor,
   withCompactSection,
   HARNESS_AGENTS_MD,
 } from "../../shared/harness";
 import { countsAsAgent, type AgentSnapshot } from "../../shared/model";
-import { Harness, SAY_ANSWERS, screenText, type HarnessDeps, type SayOutcome } from "../src/harness";
+import { Harness, SAY_ANSWERS, promptBox, screenText, type HarnessDeps, type SayOutcome } from "../src/harness";
 import { Workspaces } from "../src/workspaces";
 import { NEEDS_COLUMN, addCard, moveCard, type Board } from "../../shared/board";
 
@@ -1501,5 +1503,86 @@ describe("a workspace's root, from the harness", () => {
     const before = ws.active.workspaces.length;
     expect((await call("new_workspace", { name: "Nope", root: "/nowhere" })).isError).toBe(true);
     expect(ws.active.workspaces.length).toBe(before);
+  });
+});
+
+describe("typing a message again", () => {
+  const RULE = "─".repeat(60);
+  /** Claude Code's prompt box as its screen draws it: the placeholder of an empty one dim, as the real one is. */
+  const screen = (...box: string[]) => [`reply text`, "", `${RULE} harness ─`, ...box, RULE, "  ⏵⏵ bypass permissions on"].join("\r\n");
+  const EMPTY = screen(`❯ \x1b[2mTry "create a util logging.py that..."\x1b[22m`);
+
+  it("reads the box's words and none of its placeholder", async () => {
+    expect(await promptBox(EMPTY, 80, 12)).toBe("");
+    expect(await promptBox(screen("❯ hello there"), 80, 12)).toBe("hello there");
+    expect(await promptBox(screen("❯ line one", "  line two"), 80, 12)).toBe("line one\nline two");
+    expect(await promptBox("just a shell $ ", 80, 12)).toBeNull();
+  });
+
+  it("finds the last box, and none without a rule on both sides", () => {
+    expect(promptBoxIn(["❯ an old prompt", RULE, "❯ now", RULE])).toBe("now");
+    expect(promptBoxIn([RULE, "❯ cut off at the foot"])).toBeNull();
+    expect(promptBoxIn(["❯ no rule over it", RULE])).toBeNull();
+  });
+
+  it("presses Enter only on the words alone, types into an empty box, and leaves anything else", () => {
+    const said = "[voice] look at [mark 2 \u200eWhatsApp] it got big";
+    expect(retypeFor("", said)).toBe("type");
+    expect(retypeFor("[voice] look at [mark 2 WhatsApp]\n  it got big", said)).toBe("enter");
+    // Two copies: Enter would send both.
+    expect(retypeFor(`${said} ${said}`, said)).toBe("occupied");
+    expect(retypeFor("something the owner was writing", said)).toBe("occupied");
+    expect(retypeFor(null, said)).toBe("unseen");
+    expect(retypeFor("[Pasted text #1 +29 lines]", "two\nlines")).toBe("enter");
+    expect(retypeFor("[Pasted text #1 +29 lines]", "one line")).toBe("occupied");
+  });
+
+  /** A Kuru between turns whose screen is `shown`, and what is written into it. */
+  function rig(shown: string) {
+    const kuru = { ...terminal("h", "agent", "claude"), status: "done" as const };
+    const typed: string[] = [];
+    const profile = { id: "p", harness: { agentId: "h", cli: "claude" }, workspaces: [] };
+    const harness = new Harness({
+      workspaces: { profileOf: () => "p", profile: (id: string) => (id === "p" ? profile : undefined), agentsInWorkspace: () => [] },
+      host: { isLive: () => true, find: () => kuru, write: (_id: string, data: string) => typed.push(data), backlog: async () => shown },
+      grid: () => ({ cols: 80, rows: 12 }),
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+    } as unknown as HarnessDeps);
+    const said: string[] = [];
+    const events = { typed: () => said.push("typed"), dropped: () => said.push("dropped"), refused: (why: string) => said.push(`refused: ${why}`) };
+    return { harness, typed, said, events };
+  }
+
+  it("presses Enter alone when the words it typed before are still in the box", async () => {
+    const { harness, typed, said, events } = rig(screen("❯ [voice] hello there"));
+    await harness.hear("p", "[voice] hello there", events, true);
+    expect(typed).toEqual(["\r"]);
+    expect(said).toEqual(["typed"]);
+  });
+
+  it("types them into an empty box", async () => {
+    const { harness, typed, said, events } = rig(EMPTY);
+    await harness.hear("p", "[voice] hello there", events, true);
+    expect(typed).toEqual(["[voice] hello there", "\r"]);
+    expect(said).toEqual(["typed"]);
+  });
+
+  it("types nothing over other words, or into a box it cannot see, and says why", async () => {
+    for (const shown of [screen("❯ [voice] hello there [voice] hello there"), screen("❯ half a sentence"), "a dialog"]) {
+      const { harness, typed, said, events } = rig(shown);
+      await harness.hear("p", "[voice] hello there", events, true);
+      expect(typed).toEqual([]);
+      expect(said).toHaveLength(1);
+      expect(said[0]).toStartWith("refused: ");
+    }
+  });
+
+  it("does not look the first time", async () => {
+    const { harness, typed, said, events } = rig(screen("❯ half a sentence"));
+    await harness.hear("p", "[voice] hello there", events);
+    expect(typed).toEqual(["[voice] hello there", "\r"]);
+    expect(said).toEqual(["typed"]);
   });
 });

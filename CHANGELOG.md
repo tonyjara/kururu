@@ -224,6 +224,13 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **A message never reaches Kuru twice.** When Kuru did not take a message,
+  kururu used to type it again on top of the copy still sitting in its
+  prompt box, and both went when an Enter landed. Now it looks at the box
+  first: it presses Enter if the box holds just that message, types it into
+  an empty box, and otherwise leaves the box alone and marks the message as
+  not sent, with Resend, saying why.
+
 - **A voice message with marks on WhatsApp reaches Kuru, once.** WhatsApp's
   window title starts with an invisible direction mark, a mark's label
   quotes it, and Claude Code ignores the Enter after any line holding one:

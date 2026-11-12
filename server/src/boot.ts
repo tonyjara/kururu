@@ -793,10 +793,10 @@ export async function attach(port: Port): Promise<void> {
     profileIdOf: (key) => workspaces.profileIdOf(key),
     transcribe: (path, ms, timed) => voice.transcribe(path, ms, timed),
     screenWords: (setId, said) => finishScreenSet(setId, said),
-    deliver: (profileKey, text, events) => {
+    deliver: (profileKey, text, events, again) => {
       const profileId = workspaces.profileIdOf(profileKey);
       if (!profileId) return Promise.reject(new Error("that profile is gone"));
-      return harness.hear(profileId, text, events);
+      return harness.hear(profileId, text, events, again);
     },
     harness: (profileKey) => {
       const agentId = workspaces.profileByKey(profileKey)?.harness?.agentId;

@@ -27,9 +27,14 @@
  * its `UserPromptSubmit` hook, and writes it to its transcript, along with
  * anything it queued mid-turn; either carrying the words (`promptCarries`) is
  * delivery. One that Kuru has had its chance at — between turns for a while
- * since it was typed, or gone — and does not have is typed once more, and
- * after that is `failed`: twice in the prompt box is better than never, a
- * third time is a loop.
+ * since it was typed, or gone — and does not have is tried once more, and
+ * after that is `failed`. Tried, not typed: the words may still be sitting
+ * in the prompt box with their Enter lost, and typed on top of them they
+ * reach Kuru twice, as one voice message reached it six times on 2026-11-12.
+ * So the harness reads the box first (`retypeFor`): Enter alone when it
+ * holds these words and nothing else, typing into an empty one, and nothing
+ * at all — the message failed, saying why — when it holds anything else or
+ * cannot be read. A message never reaches Kuru twice.
  *
  * **It is also what holds Kuru quiet** between the key coming up and the
  * words reaching it, the stretch the window used to cover by waiting on the
@@ -132,12 +137,16 @@ export interface OutboxDeps {
   /**
    * Words to a profile's harness, as the user's — `Harness.hear`, starting
    * it if need be. `typed` is called when they are written into its terminal
-   * and `dropped` if the harness goes before they are.
+   * and `dropped` if the harness goes before they are. `again` says they
+   * were typed there before and not taken, and then the harness reads the
+   * prompt box first and may refuse (`refused`) rather than type a second
+   * copy (`retypeFor` in `shared/harness.ts`).
    */
   deliver: (
     profileKey: string,
     text: string,
-    events: { typed: () => void; dropped: () => void },
+    events: { typed: () => void; dropped: () => void; refused: (why: string) => void },
+    again: boolean,
   ) => Promise<{ outcome: "typed" | "held" | "starting" }>;
   /** The profile's harness, or null when none is running. */
   harness: (profileKey: string) => KuruNow | null;
@@ -178,6 +187,13 @@ export class Outbox {
   private readonly hush = new Map<string, object>();
   /** Who is waiting for that moment: an old page's upload, answered then. See `firstPass`. */
   private readonly passing = new Map<string, (() => void)[]>();
+  /**
+   * Messages typed into Kuru in this server's life, whatever has happened to
+   * them since. `typings` says the same across a restart but starts again at
+   * a Resend, and a Resend of a message whose Enter was lost is exactly the
+   * one that must not be typed over its own copy.
+   */
+  private readonly typedOnce = new Set<string>();
   /** How many times a Kuru exited holding a message, by message: twice, and starting a third is a loop, not a delivery. */
   private readonly drops = new Map<string, number>();
   /** When Kuru was last seen busy while a message waited on it, by message. */
@@ -357,6 +373,7 @@ export class Outbox {
   resend(id: string): void {
     const entry = this.entries.find((e) => e.id === id);
     if (!entry || entry.state !== "failed") return;
+    if (entry.typings > 0) this.typedOnce.add(entry.id);
     entry.attempts = 0;
     entry.typings = 0;
     entry.typedAt = null;
@@ -556,8 +573,14 @@ export class Outbox {
       // answer goes back to a phone as text.
       const channel = channelOfMessage(entry.id);
       const words = spokenMessage(entry) ? `${VOICE_PREFIX} ${entry.text}` : channel ? channelWords(channel, entry.text) : entry.text;
+      // Typed before and not taken: the harness looks in Kuru's prompt box
+      // first, so the words are never in it twice.
+      const again = entry.typings > 0 || this.typedOnce.has(entry.id);
       const { outcome } = await this.deps.deliver(entry.profileKey, words, {
         typed: () => this.typed(entry),
+        refused: (why) => {
+          if (entry.state === "queued") this.fail(entry, why);
+        },
         dropped: () => {
           // Kuru exited holding it: it goes back to the next one, once.
           this.handed.delete(entry.id);
@@ -567,7 +590,7 @@ export class Outbox {
           if (drops >= 2) this.fail(entry, "Kuru went twice before it could take this. Resend once it is running.");
           else this.later(entry.id, REHAND_MS, () => this.flow());
         },
-      });
+      }, again);
       if (entry.state === "queued" && entry.typedAt === null) {
         entry.note = outcome === "starting" ? "Kuru is starting; it hears this first." : "Kuru is busy or asking something; this is typed the moment it can be.";
         this.changed();
@@ -604,6 +627,7 @@ export class Outbox {
     if (entry.state !== "queued") return;
     entry.typedAt = Date.now();
     entry.typings++;
+    this.typedOnce.add(entry.id);
     entry.transcript = this.deps.harness(entry.profileKey)?.transcript ?? entry.transcript;
     entry.note = "Typed into Kuru's terminal; waiting for it to take it.";
     this.busySince.delete(entry.id);

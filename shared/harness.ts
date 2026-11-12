@@ -735,6 +735,61 @@ export function typingPieces(said: string): string[] {
 }
 
 /**
+ * The words in Claude Code's prompt box, read off its screen: `rows` are the
+ * screen's rows with the dim cells taken out, which is how the box draws its
+ * placeholder ("Try …"), so an empty box reads as empty. The box is the last
+ * `❯` row with a rule over it, down to the rule under it; each row loses the
+ * two columns of `❯ ` or its indent. Null when there is no such box on the
+ * screen — a dialog in its place, another program, a box taller than the
+ * screen — which is not the same as an empty one.
+ */
+export function promptBoxIn(rows: readonly string[]): string | null {
+  const rule = (row: string | undefined) => row !== undefined && /^─{8,}/.test(row.trimStart());
+  for (let i = rows.length - 1; i > 0; i--) {
+    if (!rows[i]!.startsWith("❯") || !rule(rows[i - 1])) continue;
+    const box: string[] = [];
+    for (let j = i; j < rows.length; j++) {
+      if (rule(rows[j])) return box.join("\n").trim();
+      box.push(rows[j]!.slice(2).trimEnd());
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * What to do with words the outbox has typed into Kuru before, which Kuru
+ * did not take, by what its prompt box holds now: type them into an empty
+ * box; press Enter alone when the box holds those words and nothing else;
+ * and otherwise touch nothing — `occupied` when the box holds anything else,
+ * `unseen` when there is no box to read.
+ *
+ * A message must never reach Kuru twice (the owner, 2026-11-12). Typing it
+ * again on top of a copy whose Enter was lost is how one voice message
+ * became six in one turn, and Enter on a box holding two copies sends both,
+ * so "the words and nothing else" is the only state Enter is pressed in.
+ * Clearing the box first was tried and left out: Ctrl-U takes one line of
+ * it, Esc Esc on a box that turned out empty opens Claude Code's rewind, a
+ * second Ctrl-C quits it, and what is in the box may be the owner's own
+ * half-written words. Compared without whitespace, since the box wraps and
+ * indents, and without bidi controls, which Claude Code strips from a box
+ * and `typingPieces` from what it types. A paste that long is drawn as
+ * `[Pasted text #1 +29 lines]`, which stands for words with a line break in
+ * them: those are taken to be the paste kururu made.
+ */
+export type Retype = "type" | "enter" | "occupied" | "unseen";
+
+export function retypeFor(box: string | null, words: string): Retype {
+  if (box === null) return "unseen";
+  const fold = (text: string) => withoutBidi(text).replace(/\s+/g, "").toLowerCase();
+  const held = fold(box);
+  if (!held) return "type";
+  if (held === fold(words)) return "enter";
+  if (/^\[pastedtext#\d+(\+\d+lines?)?\]$/.test(held) && /[\r\n]/.test(words)) return "enter";
+  return "occupied";
+}
+
+/**
  * The class a Claude Code session's permission mode falls in, as its peers
  * are asked to declare it: `bypass` for a session that runs tools without
  * asking, `prompting` for one that asks.
