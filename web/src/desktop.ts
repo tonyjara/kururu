@@ -240,6 +240,12 @@ export interface DesktopInk {
   pen(on?: boolean): void;
   /** Done: the owner is told to send. */
   done(): void;
+  /**
+   * Where this page's Kuru box has its pencil, in the page's pixels, or null
+   * once it has none: a pen-down there with the pen down is Done, since the
+   * ink is over the button. Optional: a window from before 2026-11-13 has none.
+   */
+  pencil?(rect: { x: number; y: number; width: number; height: number } | null): void;
   /** ✕: the marks dropped, and the owner told to drop its clip. */
   drop(): void;
   /**

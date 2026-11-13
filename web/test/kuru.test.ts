@@ -98,6 +98,14 @@ describe("insertInKuru", () => {
     expect(kuruDrawerNow().words).toBeNull();
   });
 
+  it("asks for the caret at the end only when told: marks do, a card's reference does not", () => {
+    insertInKuru("[mark 1]", true, true);
+    expect(kuruDrawerNow().words).toMatchObject({ text: "[mark 1]", line: true, end: true });
+    takeKuruWords(kuruDrawerNow().words!.n);
+    insertInKuru("[card A]");
+    expect(kuruDrawerNow().words?.end).toBeUndefined();
+  });
+
   it("waits out a drawer closed before the composer took it", () => {
     insertInKuru("[card A]");
     closeKuru();
@@ -192,5 +200,10 @@ describe("adoptGift", () => {
     expect(adoptGift({ text: "" })).toBeNull();
     expect(adoptGift({ text: "w", paths: ["", 4, "/a"], reply: { node: 1, at: 0, ref: {} } })).toEqual({ text: "w", line: false, paths: ["/a"] });
     expect(adoptGift({ text: "w", reply: { node: null, at: Number.NaN, ref: { who: "a", when: "b", quote: "c", id: null } } })).toEqual({ text: "w", line: false });
+  });
+
+  it("keeps the caret-to-the-end of a picture, a dictation or marks, and only a true one", () => {
+    expect(adoptGift({ text: "/tmp/a.png", paths: ["/tmp/a.png"], end: true })).toEqual({ text: "/tmp/a.png", line: false, paths: ["/tmp/a.png"], end: true });
+    expect(adoptGift({ text: "w", end: "yes" })).toEqual({ text: "w", line: false });
   });
 });

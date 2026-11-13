@@ -15,6 +15,14 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **The pencil in Kuru's box finishes a drawing.** Pressing it again while the
+  pen is down is the same as Done on the pill: the marks go into the box. It
+  used to draw a dot on the button instead. Needs the app rebuilt.
+- **After a picture, a dictation or a drawing, the box's cursor is at the
+  end.** Dropping or pasting a picture, dictating with the box's mic,
+  or finishing a drawing now puts the cursor after everything in the box and
+  scrolls the box down, ready for what you want to say about it.
+
 - **Kuru's chat is tagged by project inside a workspace.** A monorepo's sites
   are found by themselves — Shared Landings shows Yetapá, Parque Guasú, Agua
   Lomas and tonyjara — and a line about one wears it instead of the workspace:

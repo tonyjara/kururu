@@ -276,6 +276,9 @@ if (isPicker) {
       state: () => ipcRenderer.invoke("kururu:ink-state"),
       pen: (on) => ipcRenderer.send("kururu:ink-pen", typeof on === "boolean" ? on : null),
       done: () => ipcRenderer.send("kururu:ink-done"),
+      /** Where this page's Kuru box has its pencil, in the page's pixels, or null: a press there with the pen down is Done. */
+      pencil: (rect) =>
+        ipcRenderer.send("kururu:ink-pencil", rect && typeof rect === "object" ? { x: Number(rect.x), y: Number(rect.y), width: Number(rect.width), height: Number(rect.height) } : null),
       drop: () => ipcRenderer.send("kururu:ink-drop"),
       finish: (id, roll) => ipcRenderer.invoke("kururu:ink-finish", String(id), roll === true),
       undo: () => ipcRenderer.send("kururu:ink-undo"),

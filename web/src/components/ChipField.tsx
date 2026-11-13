@@ -52,6 +52,8 @@ export interface ChipFieldHandle {
   readonly selectionEnd: number;
   readonly focused: boolean;
   setSelectionRange(from: number, to: number): void;
+  /** The box scrolled to its last line. */
+  scrollToEnd(): void;
   focus(): void;
   blur(): void;
 }
@@ -502,6 +504,15 @@ export const ChipField = forwardRef<ChipFieldHandle, Props>(function ChipField(p
       setSelectionRange(from: number, to: number) {
         if (document.activeElement !== root.current) return;
         place(from, to);
+      },
+      scrollToEnd() {
+        const el = root.current;
+        if (!el) return;
+        // The box is the only thing that scrolls round it, in the drawer and the
+        // floating chat alike; `scrollIntoView` was left out, since it would
+        // also move a parent that clips with `overflow: hidden` and has no
+        // scroll bar to bring it back with.
+        el.scrollTop = el.scrollHeight;
       },
       focus() {
         root.current?.focus();

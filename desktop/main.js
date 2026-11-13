@@ -197,6 +197,8 @@ const ink = new Ink({
   whatAt: (global, under) => inkWhatAt(global, under),
   withVoice: () => readDesktop().inkWithVoice,
   penPanel: (on) => talk.forPen(on),
+  // The floating chat is over the window wherever both are; the window counts only while it has the keyboard.
+  pencilFront: (contents) => (float.isPanel(contents) ? (float.panel?.isVisible() ? 0 : null) : win && !win.isDestroyed() && contents.id === win.webContents.id && win.isFocused() ? 1 : null),
   debug: !PACKAGED,
 });
 
@@ -983,6 +985,7 @@ function referCard(cardId, quote) {
 function giftOf(gift) {
   if (!gift || typeof gift !== "object" || typeof gift.text !== "string") return null;
   const out = { text: gift.text.slice(0, 100000), line: gift.line === true };
+  if (gift.end === true) out.end = true;
   if (Array.isArray(gift.paths)) out.paths = gift.paths.filter((path) => typeof path === "string" && path.length > 0 && path.length < 4096).slice(0, 200);
   const reply = gift.reply;
   if (reply && typeof reply === "object" && reply.ref && typeof reply.ref === "object") {
@@ -1253,7 +1256,13 @@ ipcMain.handle("kururu:ink-state", () => ink.state());
 ipcMain.on("kururu:ink-pen", (event, on) => {
   if (ink.isOurs(event.sender) && ink.session) ink.setPen(typeof on === "boolean" ? on : !ink.session.pen);
 });
-ipcMain.on("kururu:ink-done", (event) => ink.send(event.sender));
+// The floating chat's pencil is Done for a session the window's drawer started, as the window's is for the chat's.
+ipcMain.on("kururu:ink-done", (event) => ink.send(float.isPanel(event.sender) ? null : event.sender));
+/** Where a Kuru box's pencil is, from the window or the floating chat, for a press on it with the pen down (`Ink.pencil`). */
+ipcMain.on("kururu:ink-pencil", (event, rect) => {
+  const fromWindow = Boolean(win && !win.isDestroyed() && event.sender.id === win.webContents.id);
+  if (fromWindow || float.isPanel(event.sender)) ink.pencil(event.sender, rect);
+});
 ipcMain.on("kururu:ink-drop", (event) => ink.drop(event.sender));
 ipcMain.handle("kururu:ink-finish", (event, id, roll) => ink.finish(event.sender, String(id), roll === true));
 ipcMain.on("kururu:ink-undo", (event) => {

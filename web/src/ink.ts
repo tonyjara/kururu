@@ -56,7 +56,12 @@ export function hasPen(): boolean {
   return Boolean(desktop()?.ink);
 }
 
-/** The drawer's pencil: a session with no voice, or Done on the one that is on, or the pen on a recording's. */
+/**
+ * The drawer's pencil: a session with no voice, or Done on the one that is
+ * on, or the pen on a recording's. A press that arrives here with a session
+ * on was made with the pen up; with it down the ink is over the button, and
+ * main takes the press there as Done (`pencilAt`).
+ */
 export function pencil(): void {
   const ink = desktop()?.ink;
   if (!ink) return;
@@ -64,6 +69,19 @@ export function pencil(): void {
   if (!ui.state.on) void ink.start(false);
   else if (!ui.state.voice) ink.done();
   else ink.pen();
+}
+
+/** The last place told for this page's pencil, so a render that moved nothing sends nothing. */
+let pencilTold = "null";
+
+/** Where the box's pencil is, for main to take a press on it with the pen down as Done (`Ink.pencil`); null once there is none. */
+export function pencilAt(el: Element | null): void {
+  const r = el?.getBoundingClientRect();
+  const rect = r && r.width > 0 && r.height > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+  const said = JSON.stringify(rect);
+  if (said === pencilTold) return;
+  pencilTold = said;
+  desktop()?.ink?.pencil?.(rect);
 }
 
 export function clearInkNote(): void {
@@ -154,7 +172,8 @@ async function keepSilent(id: string): Promise<void> {
     const bundle = await ink.finish(id);
     if (!bundle) return;
     const kept = await api.sendMarks(bundle);
-    insertInKuru(kept.lines.join("\n"), true);
+    // The marks are what the user goes on to write about: the caret after everything, not only after them.
+    insertInKuru(kept.lines.join("\n"), true, true);
   } catch (err) {
     set({ note: `The marks were not kept: ${err instanceof Error ? err.message : String(err)}.` });
   } finally {

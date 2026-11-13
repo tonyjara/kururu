@@ -175,7 +175,7 @@ import { REPLY_ME, replyClock, replyReference, splitReply, withReply, type Reply
 import { TAP_MS, type OutboxState, type VoiceSettings } from "../../../shared/voice";
 import { chipsIn, filesStillIn, piecesOf, type Chip } from "../../../shared/chips";
 import { escapePath, handoverFrom, isFileDrag } from "../drop";
-import { clearInkNote, hasPen, pencil, useInk } from "../ink";
+import { clearInkNote, hasPen, pencil, pencilAt, useInk } from "../ink";
 import { handToKuru, kuruBoxUsed, kuruLive, kuruWorking, replyInKuru, setKuruSearchExit, takeKuruSearch, takeKuruWords, useKuruDrawer, type KuruLive, type KuruQuoting } from "../kuru";
 import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong, withFold, writeFolds, type Folds } from "../kurufold";
 import { foldInline, replyTree } from "../kurumd";
@@ -2572,17 +2572,29 @@ function Composer({
    */
   const { words } = useKuruDrawer();
   const took = useRef(0);
-  const putIn = (words: string, line = false, paths: readonly string[] = []) => {
+  /**
+   * `end` is for what the user has just added themselves — a picture, a
+   * dictation, the pen's marks: they go in at the cursor all the same, and
+   * then the caret goes to the end of everything and the box scrolls there,
+   * since what comes next is the comment on them (the owner, 2026-11-13).
+   * A card's reference or a reply keeps the caret just after itself, as the
+   * start of a sentence written round it.
+   */
+  const putIn = (words: string, line = false, paths: readonly string[] = [], end = false) => {
     const el = field.current;
     const was = el?.value ?? readDraft(profileId);
     const at = el?.focused ? { from: el.selectionStart, to: el.selectionEnd } : (carets.get(profileId) ?? { from: was.length, to: was.length });
     const put = (line ? insertLine : insertWords)(was, at.from, at.to, words);
+    const caret = end ? put.text.length : put.caret;
     if (paths.length) keepFiles(put.text, paths);
     edit(put.text);
-    carets.set(profileId, { from: put.caret, to: put.caret });
+    carets.set(profileId, { from: caret, to: caret });
     if (el) {
       el.focus();
-      requestAnimationFrame(() => el.setSelectionRange(put.caret, put.caret));
+      requestAnimationFrame(() => {
+        el.setSelectionRange(caret, caret);
+        if (end) el.scrollToEnd();
+      });
     }
   };
   useEffect(() => {
@@ -2590,7 +2602,7 @@ function Composer({
     took.current = words.n;
     takeKuruWords(words.n);
     if (words.reply) replyHere(words.reply);
-    if (words.text) putIn(words.text, words.line, words.paths ?? []);
+    if (words.text) putIn(words.text, words.line, words.paths ?? [], words.end === true);
     // Only new words, not a re-render, touch the draft.
   }, [words?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   /**
@@ -2623,7 +2635,7 @@ function Composer({
       const words = escaped.join(" ");
       if (!words) return;
       // Handed on like a card's reference: into this box, or the floating Kuru's chat while it is open.
-      if (shown.current === profileId) handToKuru({ text: words, paths: escaped });
+      if (shown.current === profileId) handToKuru({ text: words, paths: escaped, end: true });
       else {
         const was = readDraft(profileId);
         const next = insertWords(was, was.length, was.length, words).text;
@@ -2708,7 +2720,7 @@ function Composer({
         if (outcome.why) setUnheard(outcome.why);
         return;
       }
-      if (field.current && shown.current === forProfile) putInNow.current(outcome.text);
+      if (field.current && shown.current === forProfile) putInNow.current(outcome.text, false, [], true);
       else {
         const was = readDraft(forProfile);
         writeDraft(forProfile, insertWords(was, was.length, was.length, outcome.text).text);
@@ -2726,13 +2738,35 @@ function Composer({
    * spot for this — `ink.ts` puts them in through `insertInKuru`, and the
    * user writes about them and sends. With
    * the pen down the overlay is over this window too, so the box's
-   * placeholder and the pencil's tooltip say how to get back to it.
+   * placeholder and the pencil's tooltip say how to get back to it, and a
+   * press on the pencil lands on the ink rather than the button: the page
+   * tells main where the pencil is for as long as a session is on
+   * (`pencilAt`), on every render and whenever the page is resized, and
+   * main takes a pen-down there as Done.
    */
   const ink = useInk();
   const penOn = ink.state.on && !ink.state.voice;
+  const penButton = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (penOn) pencilAt(penButton.current);
+  });
+  useEffect(() => {
+    if (!penOn) return;
+    const tell = () => pencilAt(penButton.current);
+    const moved = new ResizeObserver(tell);
+    moved.observe(document.documentElement);
+    const box = penButton.current?.closest(".kuru-composer");
+    if (box) moved.observe(box);
+    window.addEventListener("resize", tell);
+    return () => {
+      moved.disconnect();
+      window.removeEventListener("resize", tell);
+      pencilAt(null);
+    };
+  }, [penOn]);
   const penSaid = penOn
     ? ink.state.pen
-      ? `Drawing on the screen${ink.state.marks ? ` — ${ink.state.marks} mark${ink.state.marks === 1 ? "" : "s"}` : ""}. Done on the pill puts them here; Esc or ⌃⌥⌘D lifts the pen.`
+      ? `Drawing on the screen${ink.state.marks ? ` — ${ink.state.marks} mark${ink.state.marks === 1 ? "" : "s"}` : ""}. The pencil, or Done on the pill, puts them here; Esc or ⌃⌥⌘D lifts the pen.`
       : "The pen is up. Press the pencil, or Done on the pill, to put the marks here."
     : ink.keeping
       ? "Keeping the marks…"
@@ -2937,6 +2971,7 @@ function Composer({
           </button>
           {hasPen() && (
             <button
+              ref={penButton}
               type="button"
               className={`kuru-tool kuru-mic ${penOn ? "kuru-mic-listening" : ""}`}
               onMouseDown={(event) => event.preventDefault()}

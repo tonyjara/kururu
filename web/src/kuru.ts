@@ -176,6 +176,14 @@ export interface KuruGift {
   line?: boolean;
   paths?: string[];
   reply?: KuruQuoting;
+  /**
+   * The caret to the very end of the draft afterwards, and the box scrolled
+   * there, rather than just after what went in: a picture, a dictation or
+   * the pen's marks are what the user goes on to write about (the owner,
+   * 2026-11-13: "as soon as I draw, add or say something I'm gonna want to
+   * put a comment or something after").
+   */
+  end?: boolean;
 }
 
 /**
@@ -275,6 +283,7 @@ export function adoptGift(raw: unknown): KuruGift | null {
   const r = raw as Record<string, unknown>;
   if (typeof r.text !== "string") return null;
   const gift: KuruGift = { text: r.text, line: r.line === true };
+  if (r.end === true) gift.end = true;
   if (Array.isArray(r.paths)) gift.paths = r.paths.filter((path): path is string => typeof path === "string" && path.length > 0).slice(0, 200);
   const q = r.reply as Partial<KuruQuoting> | undefined;
   const ref = q?.ref as Partial<ReplyRef> | undefined;
@@ -292,8 +301,8 @@ export function adoptGift(raw: unknown): KuruGift | null {
  * box — so what was pointed at is the start of a sentence the user goes on
  * typing. `line` puts them in as a line of their own (`insertLine`).
  */
-export function insertInKuru(text: string, line = false): void {
-  handToKuru({ text, line });
+export function insertInKuru(text: string, line = false, end = false): void {
+  handToKuru(end ? { text, line, end } : { text, line });
 }
 
 /** A line of the conversation replied to: the box quotes it, addressed to its node, with the keyboard. */

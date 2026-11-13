@@ -561,7 +561,11 @@ or Escape, and neither throws the words away — nothing is sent by them, and a
 minute of speech lost to a reflex is the worse mistake. A tapped one is not
 ended by the window losing the focus, as a held one is. The words go in at the
 cursor (`putIn`, as a card's reference does), after whatever is already in the
-box, and the user presses send. Nothing is written over the box while it
+box, and the user presses send. Then the caret goes to the very end of the
+draft and the box scrolls there, as it does after a picture is dropped or
+pasted and after the pen's marks land (the gift's `end`): what
+comes next is a comment on what was just added (the owner, 2026-11-13). A
+card's reference, a quote or a reply keeps the caret just after itself. Nothing is written over the box while it
 listens or is heard — the mic is red, then waits in the accent, and that is
 all. Why nothing came, when nothing did, is the box's placeholder and the
 mic's tooltip until the next press or keystroke.
@@ -623,7 +627,13 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   `/api/marks` (`kind: "screen"`), then posts the clip naming the set, and the
   outbox hears it with word times and sends Kuru one line with each mark in
   the words (`shared/ink.ts`'s `alignMarks`). Without: the pill's Done or the pencil
-  puts the header and a line per mark into the box as chips. ✕, Escape with
+  puts the header and a line per mark into the box as chips, with the caret
+  after everything in the box. The pencil works with the pen down too
+  (2026-11-13): the ink is over the button then, so each box tells main where
+  its pencil is while a session is on (`pencilAt` → `kururu:ink-pencil` →
+  `Ink.pencil`), and a pen-down there is Done, not a mark — on the floating
+  chat while it is up, on the window only while it has the keyboard, since a
+  pencil behind another application is not there to press. ✕, Escape with
   the pen up, the owner's page going, or the helper dying end it with
   nothing kept.
 - **Phase 2's pen.** Two pens (red, blue) and a highlighter, each stroke keeping what it was drawn with; **Undo** and ⌘Z with

@@ -54,10 +54,45 @@ function pointOf(value) {
   return Number.isFinite(x) && Number.isFinite(y) ? /** @type {[number, number]} */ ([x, y]) : null;
 }
 
+/** How far round the box's pencil a pen-down still counts as a press on it, in points: a hand's slop on a 28-point button. */
+const PENCIL_SLOP = 4;
+
+/** A pencil's place off the wire, in its page's CSS pixels: four finite numbers and a size, or nothing. */
+function rectOf(value) {
+  if (!value || typeof value !== "object") return null;
+  const x = Number(value.x);
+  const y = Number(value.y);
+  const width = Number(value.width);
+  const height = Number(value.height);
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0 || width > 1000 || height > 1000) return null;
+  return { x, y, width, height };
+}
+
+/**
+ * Whether a pen-down at `global` (the whole desktop's points) is on a Kuru
+ * box's pencil. `windows` are the pages that have one up, each as its
+ * window's content bounds, its zoom and the pencil in the page's own pixels,
+ * in order from the front: the first window that holds the point decides,
+ * so a press on the floating chat where it sits over the window is the
+ * chat's, and a stroke anywhere else on it is a stroke.
+ */
+function pencilHit(global, windows) {
+  for (const { bounds, zoom, pencil } of windows) {
+    if (global.x < bounds.x || global.y < bounds.y || global.x >= bounds.x + bounds.width || global.y >= bounds.y + bounds.height) continue;
+    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    const left = bounds.x + pencil.x * z - PENCIL_SLOP;
+    const top = bounds.y + pencil.y * z - PENCIL_SLOP;
+    const right = bounds.x + (pencil.x + pencil.width) * z + PENCIL_SLOP;
+    const bottom = bounds.y + (pencil.y + pencil.height) * z + PENCIL_SLOP;
+    return global.x >= left && global.x < right && global.y >= top && global.y < bottom;
+  }
+  return false;
+}
+
 /** A window's number as the window server knows it, out of `getMediaSourceId()`'s `window:<id>:<n>`; null for anything else. */
 function windowNumberOf(sourceId) {
   const match = /^window:(\d+):/.exec(String(sourceId));
   return match ? Number(match[1]) : null;
 }
 
-module.exports = { BURST_GAP_MS, FRAME_LONG_EDGE, CROP_MARGIN_MIN, MARKS_MAX, strokesBox, cropRect, pointOf, windowNumberOf };
+module.exports = { BURST_GAP_MS, FRAME_LONG_EDGE, CROP_MARGIN_MIN, MARKS_MAX, PENCIL_SLOP, strokesBox, cropRect, pointOf, rectOf, pencilHit, windowNumberOf };

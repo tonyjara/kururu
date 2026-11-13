@@ -69,6 +69,17 @@
  * the desktop, once, which is a mark on nothing — so the window under the
  * ink's centre is asked for when the burst closes, then under where the pen
  * last lifted, and only then the one under the first pen-down.
+ *
+ * **The Kuru box's pencil, pressed again, is Done** (2026-11-13, asked for
+ * by the owner: "if I press on the pen again, then it's like if I press
+ * done"). With the pen down the overlay is over the box too, so the press
+ * lands on the ink and never reaches the button. Each page with a box says
+ * where its pencil is while a session without a voice is on (`pencil`),
+ * and a pen-down there sends the session instead of starting a mark. Only
+ * a window that is in front for it counts (`pencilFront`): the floating
+ * chat while it is up, the window while it has the keyboard — a pencil
+ * behind another application's window is not there to be pressed, and a
+ * mark begun over that spot must stay a mark.
  */
 const { BrowserWindow, globalShortcut, screen, shell } = require("electron");
 const { spawn } = require("node:child_process");
@@ -79,7 +90,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { createInterface } = require("node:readline");
 const { neverActivates, staysUp } = require("./stays");
-const { BURST_GAP_MS, FRAME_LONG_EDGE, MARKS_MAX, cropRect, pointOf, strokesBox, windowNumberOf } = require("./inkshape");
+const { BURST_GAP_MS, FRAME_LONG_EDGE, MARKS_MAX, cropRect, pencilHit, pointOf, rectOf, strokesBox, windowNumberOf } = require("./inkshape");
 
 /** The shortcut that starts a session with the voice, and toggles the pen in one. Needs no permission. */
 const SHORTCUT = "Control+Alt+Command+D";
@@ -126,9 +137,10 @@ class Ink extends EventEmitter {
    * @param {((global: {x: number, y: number}, under: any) => Promise<any>) | null} [options.whatAt]  what kururu's own window says is at a point, or null
    * @param {() => boolean} [options.withVoice]  whether every recording starts with the pen down (Settings → Voice → Screen pen)
    * @param {(on: boolean) => void} [options.penPanel]  the pill shown for a session whose tools are not already in it, and let go after
+   * @param {(contents: import("electron").WebContents) => number | null} [options.pencilFront]  how near the front a page's window is for a press on its pencil, lower nearer; null for one that is not in front
    * @param {boolean} options.debug
    */
-  constructor({ helperPath, pagePath, preloadPath, voiceClient, mainWindow, pill, denyList = () => DENY_DEFAULT, whatAt = null, withVoice = () => true, penPanel = () => {}, debug = false }) {
+  constructor({ helperPath, pagePath, preloadPath, voiceClient, mainWindow, pill, denyList = () => DENY_DEFAULT, whatAt = null, withVoice = () => true, penPanel = () => {}, pencilFront = () => null, debug = false }) {
     super();
     this.helperPath = helperPath;
     this.pagePath = pagePath;
@@ -140,6 +152,9 @@ class Ink extends EventEmitter {
     this.pill = pill;
     this.denyList = denyList;
     this.whatAt = whatAt;
+    this.pencilFront = pencilFront;
+    /** @type {Map<number, { contents: import("electron").WebContents, rect: { x: number, y: number, width: number, height: number } }>} the boxes' pencils, by page */
+    this.pencils = new Map();
     this.debug = debug;
     /** @type {any} */
     this.session = null;
@@ -629,6 +644,11 @@ class Ink extends EventEmitter {
     const p = pointOf(raw?.point);
     const t = Number(raw?.t);
     if (!session || !at || !p || !Number.isFinite(t) || !session.pen || session.ending) return;
+    if (!session.voice && this.onPencil({ x: at.display.bounds.x + p[0], y: at.display.bounds.y + p[1] })) {
+      // Done, once: the overlay's dot under the press goes with the overlay.
+      if (!session.sendTimer) this.send(null);
+      return;
+    }
     const now = t - session.at;
     let burst = session.open;
     if (burst && (burst.display !== at.display.id || now - burst.t1 > BURST_GAP_MS)) {
@@ -857,6 +877,40 @@ class Ink extends EventEmitter {
     this.inkBurst(burst);
     if (overlay && !overlay.isDestroyed()) overlay.webContents.send("ink:flash");
     this.changed();
+  }
+
+  // --- the box's pencil ----------------------------------------------------------------
+
+  /** Where a page's pencil is now, in its own pixels, or null for gone; kept until the page says otherwise or goes. */
+  pencil(contents, raw) {
+    const rect = rectOf(raw);
+    if (!rect) {
+      this.pencils.delete(contents.id);
+      return;
+    }
+    if (!this.pencils.has(contents.id)) contents.once("destroyed", () => this.pencils.delete(contents.id));
+    this.pencils.set(contents.id, { contents, rect });
+  }
+
+  /** Whether a point on the whole desktop is on the pencil of a box in front. */
+  onPencil(global) {
+    const windows = [];
+    for (const [id, { contents, rect }] of this.pencils) {
+      if (contents.isDestroyed()) {
+        this.pencils.delete(id);
+        continue;
+      }
+      const win = BrowserWindow.fromWebContents(contents);
+      if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized()) continue;
+      let front = null;
+      try {
+        front = this.pencilFront(contents);
+      } catch {}
+      if (typeof front !== "number") continue;
+      windows.push({ front, bounds: win.getContentBounds(), zoom: contents.getZoomFactor(), pencil: rect });
+    }
+    windows.sort((a, b) => a.front - b.front);
+    return pencilHit(global, windows);
   }
 
   // --- the end ------------------------------------------------------------------------
