@@ -26,11 +26,19 @@
  * for a whole window: the first click, given to the room the page draws the
  * window's three buttons in and nowhere else (`firstClick`; `stay.m` says
  * why).
+ *
+ * And it finishes what Electron's `type: "panel"` leaves half done
+ * (`neverActivates`). Such a panel tells AppKit it is non-activating but
+ * never told the window server, so a click on the floating Kuru could bring
+ * kururu to the front — and a workspace switcher that follows the app in
+ * front, as the owner's does, then left the workspace they were in for the
+ * one with kururu's window. Every panel kururu makes is told as it is made,
+ * before it is first shown, which is the only time the telling takes.
  */
 const { app } = require("electron");
 const path = require("node:path");
 
-/** @type {{ stays: (handle: Buffer, stays: boolean) => boolean, firstClick?: (handle: Buffer, x: number, y: number, width: number, height: number) => boolean, read: (handle: Buffer) => Record<string, unknown> | undefined } | null | undefined} */
+/** @type {{ stays: (handle: Buffer, stays: boolean) => boolean, firstClick?: (handle: Buffer, x: number, y: number, width: number, height: number) => boolean, neverActivates?: (handle: Buffer) => boolean, read: (handle: Buffer) => Record<string, unknown> | undefined } | null | undefined} */
 let addon;
 
 function load() {
@@ -56,6 +64,23 @@ function staysUp(win) {
   if (!native || win.isDestroyed()) return false;
   try {
     return native.stays(win.getNativeWindowHandle(), true);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * This panel's clicks never activate the app, for the window server too
+ * (`stay.m` has why). Called as the panel is made, before its first show,
+ * which is the only moment it reaches the window server. True if the addon
+ * took it; a build or a Mac without it leaves the panel as Electron made it.
+ * @param {import("electron").BrowserWindow} win
+ */
+function neverActivates(win) {
+  const native = load();
+  if (!native?.neverActivates || win.isDestroyed()) return false;
+  try {
+    return native.neverActivates(win.getNativeWindowHandle());
   } catch {
     return false;
   }
@@ -102,7 +127,7 @@ function firstClick(win, room) {
 /**
  * What AppKit says about a window — `canHide`, `visible`, `level`,
  * `behavior` (the collection behaviour), `appHidden`, `firstClick` (a room
- * is set) — for a test or a
+ * is set), `preventsActivation` — for a test or a
  * debugging session to check against; nothing in the app reads it.
  * @param {import("electron").BrowserWindow} win
  */
@@ -112,4 +137,4 @@ function nativeState(win) {
   return native.read(win.getNativeWindowHandle());
 }
 
-module.exports = { staysUp, nativeState, firstClick, firstClickRoom };
+module.exports = { staysUp, neverActivates, nativeState, firstClick, firstClickRoom };

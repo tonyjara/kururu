@@ -49,6 +49,7 @@
 const { BrowserWindow, Menu, screen, shell } = require("electron");
 const { EventEmitter } = require("node:events");
 const { editMenuTemplate } = require("./editmenu");
+const { neverActivates } = require("./stays");
 const {
   NOTE_HEAD,
   NOTE_MIN,
@@ -214,6 +215,8 @@ class NoteWindows extends EventEmitter {
         nodeIntegration: false,
       },
     });
+    // What the header promises, kept for the window server as well as for AppKit (`stays.js`).
+    neverActivates(win);
     win.setAlwaysOnTop(true, "floating");
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     win.setOpacity(UNFOCUSED_OPACITY);

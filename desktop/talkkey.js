@@ -46,7 +46,7 @@ const { appendFileSync, existsSync, mkdirSync, renameSync, statSync } = require(
 const path = require("node:path");
 const { createInterface } = require("node:readline");
 const { stateDir } = require("./runner");
-const { staysUp } = require("./stays");
+const { neverActivates, staysUp } = require("./stays");
 
 /** Where macOS keeps the switch the helper needs. */
 const INPUT_MONITORING = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
@@ -623,6 +623,8 @@ class TalkKey extends EventEmitter {
         backgroundThrottling: false,
       },
     });
+    // Pressed over other apps, and docked beside the floating Kuru: never kururu's way to the front (`stays.js`).
+    neverActivates(panel);
     panel.setAlwaysOnTop(true, "floating");
     panel.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     // Over every app means while kururu is hidden too, and docked to the

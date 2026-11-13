@@ -1,6 +1,7 @@
 /*
- * Two window properties Electron does not reach: NSWindow's `canHide`, and
- * a first click that acts in one corner of a window and nowhere else.
+ * Three window properties Electron does not reach: NSWindow's `canHide`, a
+ * first click that acts in one corner of a window and nowhere else, and a
+ * panel that really never activates the app (`NeverActivates`, below).
  *
  * Hiding an application (⌘H, the Dock, or another app's
  * `NSRunningApplication.hide`, which is how a workspace switcher puts away
@@ -20,6 +21,7 @@
  * (`-undefined dynamic_lookup`).
  */
 #import <AppKit/AppKit.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 #include <math.h>
 #include <stdbool.h>
@@ -130,6 +132,55 @@ static napi_value FirstClick(napi_env env, napi_callback_info info) {
   return result;
 }
 
+/*
+ * A panel that never activates the app, for the window server as well as
+ * for AppKit.
+ *
+ * Electron's `type: "panel"` is an NSPanel whose `styleMask` getter adds
+ * NSWindowStyleMaskNonactivatingPanel to whatever was set (`ElectronNSPanel`),
+ * because AppKit reserves that bit for an NSPanel made with it. AppKit asks
+ * the getter, so the panel is non-activating as far as it is concerned —
+ * but the window was never *made* with the bit, so the one thing a real
+ * non-activating panel does at its making was never done: telling the
+ * window server that a click on it must not make its application the
+ * frontmost one. A click on the floating Kuru's logo or chat therefore
+ * could, now and then, bring kururu to the front over the browser being
+ * used; and the owner's workspace switcher, seeing kururu come forward,
+ * took them to the workspace that holds kururu's window (2026-11-13).
+ *
+ * AppKit's own setter for that, `_setPreventsActivation:`, is what NSPanel
+ * calls for the bit, and what this calls. It reaches the window server only
+ * when the window is next put on screen for the first time — set on a window
+ * already shown, AppKit's flag changes and the window server's does not — so
+ * it is called as each panel is made, before it is shown, and it holds from
+ * then through every hide, show, focus and resize. It is private, so it is
+ * asked for by name and skipped, false, on a macOS without it; a real
+ * non-activating NSPanel says yes to `_preventsActivation` and Electron's
+ * says no, which is how this was found and how `read` checks it.
+ */
+static SEL preventsSetter;
+static SEL preventsGetter;
+
+static BOOL PreventsActivation(NSWindow *window) {
+  if (!preventsGetter) preventsGetter = NSSelectorFromString(@"_preventsActivation");
+  return [window respondsToSelector:preventsGetter] && ((BOOL (*)(id, SEL))objc_msgSend)(window, preventsGetter);
+}
+
+/** `neverActivates(handle)`: a panel's click never activates the app. True if it now says so; false on a window that is not a panel, or a macOS without the setter. */
+static napi_value NeverActivates(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1];
+  napi_value result;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  NSWindow *window = argc >= 1 ? windowOf(env, argv[0]) : nil;
+  if (!preventsSetter) preventsSetter = NSSelectorFromString(@"_setPreventsActivation:");
+  // Electron's panel is no NSPanel (`ElectronNSPanel` is its own window class), so it is known by the bit its getter adds.
+  BOOL panel = window && (window.styleMask & NSWindowStyleMaskNonactivatingPanel);
+  if (panel && [window respondsToSelector:preventsSetter]) ((void (*)(id, SEL, BOOL))objc_msgSend)(window, preventsSetter, YES);
+  napi_get_boolean(env, panel && PreventsActivation(window), &result);
+  return result;
+}
+
 /** `read(handle)`: what AppKit says about the window, for a test to check. */
 static napi_value Read(napi_env env, napi_callback_info info) {
   size_t argc = 1;
@@ -159,6 +210,8 @@ static napi_value Read(napi_env env, napi_callback_info info) {
   napi_set_named_property(env, result, "behavior", value);
   napi_create_int64(env, (int64_t)[window styleMask], &value);
   napi_set_named_property(env, result, "style", value);
+  napi_get_boolean(env, PreventsActivation(window), &value);
+  napi_set_named_property(env, result, "preventsActivation", value);
   napi_get_boolean(env, objc_getAssociatedObject(window, &roomKey) != nil, &value);
   napi_set_named_property(env, result, "firstClick", value);
   return result;
@@ -170,6 +223,8 @@ __attribute__((visibility("default"))) napi_value napi_register_module_v1(napi_e
   napi_set_named_property(env, exports, "stays", fn);
   napi_create_function(env, "firstClick", (size_t)-1, FirstClick, NULL, &fn);
   napi_set_named_property(env, exports, "firstClick", fn);
+  napi_create_function(env, "neverActivates", (size_t)-1, NeverActivates, NULL, &fn);
+  napi_set_named_property(env, exports, "neverActivates", fn);
   napi_create_function(env, "read", (size_t)-1, Read, NULL, &fn);
   napi_set_named_property(env, exports, "read", fn);
   return exports;

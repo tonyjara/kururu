@@ -164,6 +164,16 @@ Kept short on purpose; the detail is in git history.
   held at opacity 0 and click-through by patching `BrowserWindow.prototype`.
   Not pressed with a real mouse on a hidden kururu, and no full-screen space
   was made.
+- **A panel that never activates the app** (2026-11-13). Whether a click on
+  a window can make its app frontmost is the window server's to decide, so
+  it is read off the window server: `CGSGetWindowTags(CGSMainConnectionID(),
+  windowNumber, tags, 64)` from SkyLight in a scratch addon, where bit
+  `0x10000` of the first word is "prevents activation". A native NSPanel
+  made with `NSWindowStyleMaskNonactivatingPanel` has it; Electron's
+  `type: "panel"` does not, though AppKit calls it non-activating. AppKit's
+  `_preventsActivation` getter says the same as the bit, but setting it on a
+  window already shown changes AppKit's flag and not the window server's,
+  so check the tag, not the getter, and set it before the first show.
 - **The window's buttons, pressed** (2026-11-10). A mouse event posted to
   a process from outside (`CGEvent.postToPid`) reaches nothing from a
   kururu pty, with no Accessibility grant, so the press is made inside the

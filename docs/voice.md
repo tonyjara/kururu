@@ -1094,6 +1094,22 @@ Edges, said plainly:
   the app active (`NSApp.isActive`, a non-activating panel's key window) but
   neither unhides it nor takes the front; checked against a real hide. Only
   the floating windows' own switch, or quitting, takes them off the screen.
+- **A click on it never brings kururu forward, for the window server
+  either.** Electron's `type: "panel"` only *says* it is non-activating (its
+  `styleMask` getter adds the bit), so the window server was never told, as
+  it is for a real non-activating NSPanel, that a click there must not make
+  kururu the frontmost app. Now and then one did, and Tile Bandit, which
+  follows the app in front, took the owner from the workspace they were in
+  to the one holding kururu's window (2026-11-13: "sometimes when I click on
+  the floating kuru it switches to the tile bandit workspace that has kuru
+  open"). `neverActivates` (`desktop/stays.js`, `stay.m`) calls AppKit's
+  own `_setPreventsActivation:` on every panel kururu makes — the logo, the
+  chat, the pill, the ink, the notes — as it is made, because the window
+  server hears it only at the window's first showing. Checked in a bare
+  Electron by the window server's tags: bit `0x10000`, which a native
+  non-activating panel has and Electron's did not, is there after and stays
+  through hide, show, focus and resize; `nativeState` reports it as
+  `preventsActivation`. Not yet pressed with a real mouse.
 
 Verified 2026-11-10 in a hidden, isolated copy of the app (`docs/testing.md`),
 and then used by the owner the same evening. Staying up through a hide was

@@ -78,7 +78,7 @@ const { existsSync, mkdtempSync, readFileSync, rmSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createInterface } = require("node:readline");
-const { staysUp } = require("./stays");
+const { neverActivates, staysUp } = require("./stays");
 const { BURST_GAP_MS, FRAME_LONG_EDGE, MARKS_MAX, cropRect, pointOf, strokesBox, windowNumberOf } = require("./inkshape");
 
 /** The shortcut that starts a session with the voice, and toggles the pen in one. Needs no permission. */
@@ -454,6 +454,8 @@ class Ink extends EventEmitter {
       });
       // Over the menu bar and every app's floating windows; the pill is
       // raised to the same level after, so its buttons stay over the ink.
+      // A stroke over another app leaves that app in front (`stays.js`).
+      neverActivates(win);
       win.setAlwaysOnTop(true, "screen-saver");
       win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       // The pen draws on whatever is on the screen, kururu hidden or not (`stays.js`).

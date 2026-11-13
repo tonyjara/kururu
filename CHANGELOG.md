@@ -250,6 +250,14 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **Clicking the floating Kuru no longer takes you to kururu's workspace.**
+  A click on the logo or in its chat could now and then bring kururu to the
+  front, and a workspace switcher that follows the app in front (Tile
+  Bandit) then left the workspace you were in for the one holding kururu's
+  window. The logo, the chat, the pill, the pen's ink and the notes now
+  never bring kururu forward; only something in the chat that asks for the
+  window — a card, a terminal, a file — still does. Needs the app updated.
+
 - **A message never reaches Kuru twice.** When Kuru did not take a message,
   kururu used to type it again on top of the copy still sitting in its
   prompt box, and both went when an Enter landed. Now it looks at the box
