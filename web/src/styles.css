@@ -2235,6 +2235,101 @@ a.machine-name:hover {
   color: var(--danger);
 }
 
+/* A tunnel (`Tunnels.tsx`): two lines under the dev server it serves, or
+   under the terminal it runs in. The first says whether its address
+   answers — a dot, the kind, the word and the time it was looked at, and the
+   arrow that opens it — and the second is the address, pressed to copy it.
+   Two lines because a sidebar is narrow and an address is long: on one line
+   it was the address that gave way, and the address is the thing to read.
+   Indented under a dev server's row so that it reads as that row's. */
+.tun-line {
+  flex-basis: 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  padding: 0 8px 5px 22px;
+  font-size: var(--fs-sm);
+  color: var(--dimmer);
+}
+.dev-item-tunnel .tun-line {
+  padding: 5px 8px;
+}
+.tun-under-agent {
+  flex-basis: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tun-under-agent .tun-line {
+  padding: 0 8px 6px;
+}
+.tun-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--idle);
+}
+.tun-dot-up {
+  background: var(--accent);
+}
+.tun-dot-down,
+.tun-dot-gone {
+  background: var(--danger);
+}
+.tun-kind {
+  flex: none;
+  font-family: var(--mono);
+}
+.tun-url {
+  order: 9;
+  flex-basis: 100%;
+  min-width: 0;
+  padding-left: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  text-align: left;
+  border-radius: var(--radius-sm);
+}
+button.tun-url:hover,
+button.tun-url:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+.tun-url-none {
+  font-style: italic;
+  color: var(--dimmer);
+}
+.tun-port {
+  flex: none;
+  font-family: var(--mono);
+}
+.tun-state {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.tun-down .tun-state,
+.tun-gone .tun-state {
+  color: var(--danger);
+}
+.tun-open {
+  flex: none;
+  display: inline-flex;
+  color: var(--dimmer);
+}
+.tun-open:hover,
+.tun-open:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
 /* --------------------------------------------------------------------------
    Automations (`Automations.tsx`): a row each under the agents — a dot for
    the state, the name, and the one fact on the right — and the sheet with

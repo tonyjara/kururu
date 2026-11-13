@@ -68,6 +68,7 @@ import {
   snapshot,
   snapshots,
   state,
+  state as found,
   store,
   syncRosterChannels,
   usageLaunches,
@@ -343,6 +344,7 @@ function admitClient(ws: WebSocket, watcher: string | null, deltas: boolean): vo
   // same chunk (phase 0, finding 2).
   if (watcher) return;
   send(ws, { type: "dev-servers", servers: state.devServers });
+  send(ws, { type: "tunnels", tunnels: state.tunnels });
   send(ws, { type: "branches", branches: state.branches });
   send(ws, { type: "databases", databases: state.databases });
   send(ws, { type: "usage", usage: usageSnapshot() });
@@ -614,6 +616,8 @@ export async function attach(port: Port): Promise<void> {
     cardHistory: cardHistoryOf,
     reloadWindow: (why, timeoutMs) => reloads.ask(why, "Kuru", timeoutMs),
     madeOf: (agentId) => madeFiles.of(agentId),
+    // The module's `state`, by another name: `attach` has one of its own, the host's hello.
+    tunnels: () => ({ tunnels: found.tunnels, devServers: found.devServers }),
     showFile: showFileFor,
     sendPicture: sendPictureFor,
     movePlan: (profileId, workspaceId, nodeId, folder) => mover.plan(profileId, workspaceId, nodeId, folder),

@@ -215,6 +215,45 @@ export interface DevServer {
 }
 
 /**
+ * A tunnel — ngrok or cloudflared — putting a port on this machine on a
+ * public address, and whether that address answered when it was last asked.
+ * See `server/src/tunnels.ts` for how each is found and checked, and
+ * `shared/tunnels.ts` for how one is paired with the dev server it serves.
+ */
+export interface Tunnel {
+  /** Stable while the process and its address are: `<kind>:<pid>:<url or port>`. */
+  id: string;
+  kind: TunnelKind;
+  pid: number;
+  /** The public address, `https://….ngrok-free.dev`; null until one has been found. */
+  url: string | null;
+  /** The port on this machine it forwards to, when it forwards to this machine at all. */
+  port: number | null;
+  /** What it forwards to, as configured: `http://localhost:3006`. */
+  target: string | null;
+  /** How it was started, with anything that looks like a token taken out. */
+  command: string;
+  /** The kururu terminal it runs in, when it runs in one. */
+  agentId?: string;
+  health: TunnelHealth;
+  /** Why it is down, or what the last check saw: "HTTP 200", "nothing on :3006". */
+  why: string;
+  /** When it was last looked at, by any check. */
+  checkedAt: number | null;
+  /** When its public address was last asked, and what came back. */
+  publicAt: number | null;
+  /** When `health` took the value it has. */
+  since: number;
+}
+
+export type TunnelKind = "ngrok" | "cloudflared";
+/** `gone` is a tunnel whose process has ended, kept a while so its going is seen. */
+export type TunnelHealth = "up" | "down" | "unknown" | "gone";
+
+/** How often each tunnel is looked at, locally; the public address is asked on its own beat (`tunnels.ts`). */
+export const TUNNEL_CHECK_MS = 60_000;
+
+/**
  * The branch a workspace is on.
  *
  * Live and per-workspace: it is learnt by looking at the disk rather than
@@ -438,6 +477,8 @@ export type ServerMessage =
   | { type: "delta"; delta: SnapshotDelta }
   /** Sent on connect and whenever the set of listening dev servers changes. */
   | { type: "dev-servers"; servers: DevServer[] }
+  /** Sent on connect and whenever a tunnel appears, goes, or is found up or down. See `Tunnel`. */
+  | { type: "tunnels"; tunnels: Tunnel[] }
   /**
    * Sent on connect and whenever any workspace's branch changes. A whole list
    * rather than a delta for the snapshot's reason: there are never more than a

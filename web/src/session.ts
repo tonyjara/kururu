@@ -32,6 +32,7 @@ import type {
   CodexUsage,
   ClientMessage,
   DevServer,
+  Tunnel,
   EditorChoice,
   GitAction,
   Notification,
@@ -78,6 +79,8 @@ export interface KururuState {
    * — and which the preview pane, PLAN.md item 5, will want as well.
    */
   devServers: DevServer[];
+  /** The ngrok and cloudflared tunnels on this machine, and whether each answers. See `server/src/tunnels.ts`. */
+  tunnels: Tunnel[];
   /**
    * The branch each workspace is on, for the workspaces that are in a repo.
    *
@@ -159,6 +162,7 @@ let state: KururuState = {
   connected: false,
   snapshot: null,
   devServers: [],
+  tunnels: [],
   branches: [],
   projects: [],
   usage: null,
@@ -358,6 +362,9 @@ function connect(): void {
       }
       case "dev-servers":
         set({ devServers: msg.servers });
+        break;
+      case "tunnels":
+        set({ tunnels: msg.tunnels });
         break;
       case "branches":
         set({ branches: msg.branches });

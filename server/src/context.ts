@@ -21,7 +21,7 @@ import type { WorkspaceDatabase } from "../../shared/databases";
 import type { AgentSnapshot, HostInfo, LoginSummary, SessionSnapshot } from "../../shared/model";
 import { BY_MAX, oneLine, reloaderName } from "../../shared/reload";
 import { diffFrames, type Frame, Framer, type SnapshotDelta } from "../../shared/snapdelta";
-import type { DevServer, ServerMessage, WorkspaceBranch, WorkspaceProject } from "../../shared/wire";
+import type { DevServer, ServerMessage, Tunnel, WorkspaceBranch, WorkspaceProject } from "../../shared/wire";
 import { readAppearance } from "./appearance";
 import { delivery, type Delivery, liveness, SNAPSHOT_HOLD } from "./backpressure";
 import { Backup } from "./backup";
@@ -277,6 +277,7 @@ function forWatcher(msg: ServerMessage): boolean {
 
 export const state = {
   devServers: [] as DevServer[],
+  tunnels: [] as Tunnel[],
   branches: [] as WorkspaceBranch[],
   projects: [] as WorkspaceProject[],
   databases: [] as WorkspaceDatabase[],

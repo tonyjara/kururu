@@ -586,6 +586,15 @@ user first.
 
 ## Hearing back
 
+**Tunnels.** `kururu_status` ends its agents with a `tunnels:` part when
+ngrok or cloudflared is running on this Mac: each address, up or down and
+why, when it was looked at and when it was last asked from outside, the dev
+server on the port it forwards to, and the terminal it runs in. A tunnel
+that was up and is down on two looks a minute apart is announced as
+`[kururu] Tunnel down: ngrok https://… — nothing is listening on :3006, since
+1 min ago. It serves the dev server on :3006 (…), in <terminal>. …`, and its
+coming back as `[kururu] Tunnel back up: …`. See `server/src/tunnels.ts`.
+
 `noticeStatuses` is the one place transitions are observed. On every `done` or
 `blocked` edge — the same events a person is notified of — and on every exit,
 `Harness.noticed` answers any `wait_agent` on that agent and posts a line to

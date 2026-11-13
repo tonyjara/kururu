@@ -103,9 +103,11 @@ import { lendableText, type LendAsk, type Lendable } from "../../shared/secrets"
 import { BOARD_VERBS, nodesText, summaryAgentName, type BoardVerb, type NodeStatus, type SummaryAgent } from "../../shared/nodes";
 import { parseRemote } from "../../shared/remote";
 import type { MadeFile } from "../../shared/made";
+import type { DevServer, Tunnel } from "../../shared/wire";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "../../shared/model";
 import { isNotifyEvent } from "../../shared/notify";
 import { readScreen } from "../../shared/onscreen";
+import { tunnelsText } from "./tunnels";
 import type { MissedReply } from "../../shared/voice";
 import { RELOAD_TIMEOUT_MAX_MS, RELOAD_TIMEOUT_MIN_MS, RELOAD_TIMEOUT_MS, WHY_MAX, oneLine, outcomeText, type ReloadOutcome } from "../../shared/reload";
 import { COLUMN_LABELS } from "../../shared/board";
@@ -293,6 +295,8 @@ export interface HarnessDeps {
   reloadWindow: (why: string, timeoutMs: number) => Promise<ReloadOutcome>;
   /** The links under an agent's row: what its last turn made. See `shared/made.ts`. */
   madeOf: (agentId: string) => readonly MadeFile[];
+  /** The tunnels on this Mac and the dev servers they may serve, for `kururu_status`. See `tunnels.ts`. */
+  tunnels?: () => { tunnels: readonly Tunnel[]; devServers: readonly DevServer[] };
   /** What `handover` returns changed: the blob the host keeps for the next server is due again. */
   kept?: () => void;
   /**
@@ -2227,6 +2231,9 @@ export class Harness {
       }
     }
     if (!any) out.push("  (none)");
+    const seen = this.deps.tunnels?.();
+    const tunnels = seen && tunnelsText(seen.tunnels, seen.devServers, (id) => this.nameOf(id), Date.now());
+    if (tunnels) out.push("", tunnels);
     const slots = this.deps.slots?.status((id) => this.nameOf(id));
     if (slots) out.push("", slots);
     if (this.deps.nodes) out.push(...nodesText(this.deps.nodes()));
@@ -2331,7 +2338,7 @@ export class Harness {
   }
 
   /** The same by id, for an agent that may have gone. */
-  private nameOf(agentId: string): string {
+  nameOf(agentId: string): string {
     const agent = this.deps.host.find(agentId);
     return agent ? this.name(agent) : `an agent that has gone (id ${agentId})`;
   }

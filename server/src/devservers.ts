@@ -399,6 +399,23 @@ async function listeners(pid?: number): Promise<Map<number, number[]>> {
 }
 
 /**
+ * The listening TCP ports of a few processes, by pid — the tunnels' question
+ * (`tunnels.ts`): which port is this ngrok's API on, which is cloudflared's
+ * metrics. One `lsof -p a,b,c` rather than one per process; `ss` has no such
+ * narrowing and is filtered after.
+ */
+export async function listenersOf(pids: readonly number[]): Promise<Map<number, number[]>> {
+  if (!pids.length) return new Map();
+  const wanted = new Set(pids);
+  const keep = (all: Map<number, number[]>) => new Map([...all].filter(([pid]) => wanted.has(pid)));
+  if (process.platform === "linux") {
+    const found = parseSsListeners(await run(["ss", "-ltnpH"]));
+    if (found.size) return keep(found);
+  }
+  return keep(parseListeners(await run(["lsof", "-nP", "-a", "-p", pids.join(","), "-iTCP", "-sTCP:LISTEN", "-F", "pn"])));
+}
+
+/**
  * Every dev server listening right now, lowest port first — ports are what the
  * user recognises ("the one on 5173"), so that is the sort.
  */

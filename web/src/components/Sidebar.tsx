@@ -74,6 +74,8 @@ import { Menu, Popover, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
+import { TerminalTunnels, TunnelLine } from "./Tunnels";
+import { anyTunnelDown, tunnelsOn, unpairedTunnels } from "../../../shared/tunnels";
 import { AutomationsSection } from "./Automations";
 import { SectionToggle, useDisclosure } from "./SectionToggle";
 import { NameField } from "./NameField";
@@ -937,6 +939,8 @@ export function Sidebar({
         {agent.made?.length ? (
           <MadeLinks className="agent-made" files={agent.made} workspaceId={at?.workspaceId ?? null} onOpened={navigated} />
         ) : null}
+        {/* A tunnel typed into this terminal, with whether its address answers. */}
+        {!agent.exited && <TerminalTunnels agentId={agent.id} />}
       </li>
     );
   };
@@ -1729,7 +1733,7 @@ const STOP_ASK_MS = 4000;
  * meant to prevent, a little later.
  */
 function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
-  const { devServers, projects } = useKururu();
+  const { devServers, projects, tunnels } = useKururu();
   /* Each workspace's project folder with its name, for the label: a row says
      which workspace the server came from (`previewLabel`). */
   const names = new Map(workspaces.map((w) => [w.id, w.name] as const));
@@ -1754,7 +1758,13 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
     return () => clearTimeout(timer);
   }, [asking]);
 
-  if (devServers.length === 0) return null;
+  if (devServers.length === 0 && tunnels.length === 0) return null;
+  /* Tunnels to a port no dev server is on: rows of their own, at the foot,
+     because "nothing is serving what ngrok forwards to" is the one to see. */
+  const loose = unpairedTunnels(tunnels, devServers);
+  /* The heading's dot, so a shut section still says when a tunnel is down:
+     red for one down or stopped, green when every one answers. */
+  const tunnelDot = !tunnels.length ? null : anyTunnelDown(tunnels) ? "down" : tunnels.every((t) => t.health === "up") ? "up" : "unknown";
 
   const stop = (dev: DevServer) => {
     setAsking(null);
@@ -1770,7 +1780,14 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
     <section className="side-section side-dev">
       <h2>
         <SectionToggle open={open} onToggle={toggle} label="Dev servers">
-          <span className="side-toggle-n">{devServers.length}</span>
+          {tunnelDot && (
+            <span
+              className={`tun-dot tun-dot-${tunnelDot} side-toggle-dot`}
+              title={tunnelDot === "down" ? "A tunnel is down" : tunnelDot === "up" ? "Every tunnel answers" : "Tunnels being checked"}
+              aria-label={tunnelDot === "down" ? "A tunnel is down" : "Tunnels"}
+            />
+          )}
+          <span className={`side-toggle-n ${tunnelDot ? "side-toggle-n-after" : ""}`}>{devServers.length}</span>
         </SectionToggle>
       </h2>
       {open && (
@@ -1826,9 +1843,17 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
                     {said.text}
                   </button>
                 )}
+                {tunnelsOn(dev.port, tunnels).map((t) => (
+                  <TunnelLine key={t.id} tunnel={t} />
+                ))}
               </li>
             );
           })}
+          {loose.map((t) => (
+            <li key={t.id} className="dev-item dev-item-tunnel">
+              <TunnelLine tunnel={t} showPort />
+            </li>
+          ))}
         </ul>
       )}
     </section>

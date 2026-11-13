@@ -20,8 +20,8 @@ import { DEV_SCAN_MS, GIT_SCAN_MS, MACHINE_POLL_MS, OPENROUTER_POLL_MS, USAGE_PO
 import { PING_MS } from "./backpressure";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
 import { agyUsageSnapshot, pollAgyUsage } from "./agy";
-import { broadcast, checkLiveness, clients, host, memory, overlay, pushSnapshot, state, usageReader, windows, workspaces } from "./context";
-import { scanDevServers, stopDevServer } from "./devservers";
+import { broadcast, checkLiveness, clients, harness, host, memory, overlay, pushSnapshot, state, usageReader, windows, workspaces } from "./context";
+import { listenersOf, scanDevServers, stopDevServer } from "./devservers";
 import { NVIM_SCAN_MS, nvimCensus, pollEditors } from "./editors";
 import { allowRoot } from "./files";
 import { childIndex as footChildren, hostPidOf, readFootTable, readTree } from "./footprint";
@@ -38,6 +38,10 @@ import { closePreview, openPreview, openPreviews } from "./proxy";
 import { pollBranches } from "./repostatus";
 import { dueForReading, readSpecs, specsSnapshot } from "./specs";
 import { sweep } from "./sweep";
+import { screenRows } from "./onscreen";
+import { ownedGrid } from "./terminals";
+import { askedFile, localJson, probeUrl, readTextFile, reachablePort } from "./tunnelio";
+import { tunnelNotice, Tunnels } from "./tunnels";
 import { refreshClaudeReady } from "./thisnode";
 import { pollUsage, usageSnapshot } from "./usage";
 import { recordClaudeLimits } from "./usage/limits";
@@ -141,6 +145,39 @@ export async function stopListedDevServer(port: unknown, pid: unknown): Promise<
   });
   await pollDevServers();
   return { stopped: stopped.length };
+}
+
+// ---------------------------------------------------------------------------
+// Tunnels
+// ---------------------------------------------------------------------------
+
+/**
+ * The ngroks and cloudflareds, and whether their addresses answer — see
+ * `tunnels.ts`. Seen off the process sweep's table, looked at on a minute's
+ * beat of their own; a change goes to every page, and a tunnel that went down
+ * or came back to the Kuru of the profile whose terminal it runs in (the one
+ * on screen, for one started outside kururu).
+ */
+export const tunnels = new Tunnels({
+  listening: listenersOf,
+  localJson,
+  probe: probeUrl,
+  reachable: reachablePort,
+  screen: (agentId) => screenRows(host, agentId, { ...ownedGrid(agentId), rows: 200 }),
+  readText: readTextFile,
+  asked: askedFile,
+  changed: (list) => {
+    state.tunnels = list;
+    broadcast({ type: "tunnels", tunnels: list });
+  },
+  tell: (tunnel, event) => {
+    const profileId = (tunnel.agentId && workspaces.profileOf(tunnel.agentId)) || workspaces.active.id;
+    harness.announce(profileId, tunnelNotice(tunnel, event, state.devServers, (id) => harness.nameOf(id)));
+  },
+});
+
+function seeTunnels(procs: ProcRows): void {
+  tunnels.see(procs, new Map(memRoots().map(([agentId, pid]) => [pid, agentId] as const)));
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +438,7 @@ const sweepProcesses = sweep("processes", async () => {
     sweep("dev servers", () => pollDevServers(procs))(),
     sweep("memory", () => pollMemory(procs))(),
     sweep("programs", () => pollPrograms(procs))(),
+    sweep("tunnels", async () => seeTunnels(procs))(),
   ]);
 });
 let procTimer: ReturnType<typeof setTimeout> | null = null;
@@ -448,11 +486,13 @@ export function startSweeps(): void {
   ];
   void procTick();
   void sweepBranches();
+  tunnels.start();
 }
 
 /** What `shutdown` stops of the above, first, so that nothing is read while the rest closes. */
 export function stopSweeps(): void {
   for (const timer of timers) clearInterval(timer);
+  tunnels.stop();
   procHalted = true;
   if (procTimer) clearTimeout(procTimer);
 }

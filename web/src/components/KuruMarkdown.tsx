@@ -189,7 +189,7 @@ function Fence({ text, lang, doors }: { text: string; lang: string | null; doors
  * textarea nobody sees, and `execCommand` — still works in every browser
  * kururu is drawn in.
  */
-async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);

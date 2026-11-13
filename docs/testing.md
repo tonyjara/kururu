@@ -409,6 +409,11 @@ Kept short on purpose; the detail is in git history.
   A tab crosses panes and workspaces and splits a pane on the edge it was dropped
   on; a pane swaps without deepening the tree; a pane a drag emptied is pruned
   while a deliberately empty one stays.
+- **Tunnels:** `server/test/tunnels.test.ts` over made-up process tables and
+  answers; by hand with a throwaway `cloudflared tunnel --url
+  http://localhost:<port>` in front of `python3 -m http.server` in an empty
+  folder — never the owner's ngrok, whose free plan every request counts
+  against.
 - **Dev servers:** discovery from both ends, restart in the same tab, recovery in
   a fresh one after a cold start; the preview proxy including HMR websockets with
   subprotocol negotiation; traversal-safe file browsing. Stopping one, against
