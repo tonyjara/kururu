@@ -166,7 +166,7 @@ import { CHANNEL_NAMES, channelReady, isChannelKind, type TelegramStatus } from 
 import { dropRefusal } from "../../../shared/drops";
 import { KURU_SEEN_MS, addressMatches, addressOf, addressQuery, clipLength, insertLine, insertWords, mergeNodes, pickAddress, quotedLine, replyRefOf, splitCardCodes, typedAddress, type CardRef, type KuruFile, type KuruItem, type KuruReply, type NodeKuruItem, type NoticeItem, type PeerKuru, type YouItem } from "../../../shared/kuru";
 import { canPin, sortPins, type KuruPin } from "../../../shared/kurupin";
-import { adoptTagFilter, passes, recentTags, tagBook, tagLines, type TagFilter } from "../../../shared/kurutags";
+import { adoptTagFilter, chipTags, passes, recentTags, tagBook, tagLines, tagProjects, type TagFilter } from "../../../shared/kurutags";
 import { isRemote } from "../../../shared/remote";
 import { matchItem, parseKuruQuery, splitHits, type KuruQuery } from "../../../shared/kurusearch";
 import { splitMentions } from "../../../shared/made";
@@ -319,15 +319,40 @@ export function KuruDrawer({
     () =>
       profile.workspaces
         .filter((w) => !isRemote(w.id))
-        .map((w) => ({ key: w.key, name: w.name, cards: new Set(w.board?.cards.map((c) => c.number) ?? []), cardIds: new Set(w.board?.cards.map((c) => c.id) ?? []), root: w.root })),
+        .map((w) => {
+          // Its projects (`shared/subprojects.ts`), and, only when it has
+          // some, its cards' words, for a card that names one.
+          const projects = tagProjects(w.key, w.subprojects);
+          return {
+            key: w.key,
+            name: w.name,
+            cards: new Set(w.board?.cards.map((c) => c.number) ?? []),
+            cardIds: new Set(w.board?.cards.map((c) => c.id) ?? []),
+            root: w.root,
+            projects,
+            cardWords: projects.length ? (w.board?.cards ?? []) : undefined,
+          };
+        }),
     [profile.workspaces],
   );
-  const book = useMemo(() => tagBook(spacesHere), [spacesHere]);
-  const nameOf = useMemo(() => new Map(spacesHere.map((space) => [space.key, space.name] as const)), [spacesHere]);
+  const anyProjects = spacesHere.some((space) => space.projects.length > 0);
+  // The profile's own board, whose cards ("MV-94 Yetapa") may name a project; read only when there is one to name.
+  const profileCards = anyProjects ? profile.board.cards : null;
+  const book = useMemo(() => tagBook(spacesHere, profileCards ? { name: profile.name, cards: profileCards } : undefined), [spacesHere, profileCards, profile.name]);
+  /** Every workspace, and every project shown in one under it, as a tag names it. */
+  const tagNames: TagName[] = useMemo(
+    () =>
+      spacesHere.flatMap((space) => [
+        { key: space.key, name: space.name },
+        ...space.projects.map((project) => ({ key: project.key, name: project.name, parent: { key: space.key, name: space.name }, names: project.names })),
+      ]),
+    [spacesHere],
+  );
+  const tagOf = useMemo(() => new Map(tagNames.map((tag) => [tag.key, tag] as const)), [tagNames]);
   const [pickedFilter, setPickedFilter] = useState<TagFilter>(readTagFilter);
   // A node that left the roster, or a workspace that went, is not a filter any more.
   const filter: TagFilter = {
-    spaces: pickedFilter.spaces.filter((key) => nameOf.has(key)),
+    spaces: pickedFilter.spaces.filter((key) => tagOf.has(key)),
     nodes: pickedFilter.nodes.filter((node) => node === selfName || peerNames.includes(node)),
   };
   const filterOn = filter.spaces.length > 0 || filter.nodes.length > 0;
@@ -540,10 +565,12 @@ export function KuruDrawer({
   const away = onlyNode !== null && !searching ? kuruPeers.find((peer) => peer.node.name === onlyNode && peer.state !== "up") : undefined;
   /** The workspaces the row offers: the ones the loaded lines are about, most recent first, then any picked that none of them is about now. */
   const rowSpaces: TagName[] = [...recentTags(merged, tagged), ...filter.spaces]
-    .filter((key, i, all) => all.indexOf(key) === i && nameOf.has(key))
-    .map((key) => ({ key, name: nameOf.get(key)! }));
-  /** The tag button's list: the row's order, then the rest by name. */
-  const menuSpaces: TagName[] = [...rowSpaces, ...spacesHere.filter((space) => !rowSpaces.some((s) => s.key === space.key)).sort((a, b) => a.name.localeCompare(b.name))];
+    .filter((key, i, all) => all.indexOf(key) === i && tagOf.has(key))
+    .map((key) => tagOf.get(key)!);
+  /** The tag button's list: every workspace by name, each with its projects under it. */
+  const menuSpaces: TagName[] = [...tagNames.filter((tag) => !tag.parent)]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap((space) => [space, ...tagNames.filter((tag) => tag.parent?.key === space.key)]);
   /** Whether there is anything to filter by: a workspace, or another node. */
   const canFilter = spacesHere.length > 0 || kuruPeers.length > 0 || filterOn;
   canFilterNow.current = canFilter;
@@ -950,7 +977,7 @@ export function KuruDrawer({
     const keys = tagsOf(item);
     const editable = canPin(item);
     return {
-      tags: keys.filter((key) => nameOf.has(key)).map((key) => ({ key, name: nameOf.get(key)! })),
+      tags: chipTags(keys.filter((key) => tagOf.has(key))).map((key) => tagOf.get(key)!),
       filter,
       onShow: (key) => showTag(key, item.id),
       edit: editable
@@ -1214,10 +1241,10 @@ export function KuruDrawer({
       </header>
 
       {filterOpen && (
-        <FilterPanel filter={filter} self={selfName} peers={kuruPeers} lately={rowSpaces.map((space) => space.key)} spaces={spacesHere} onPick={(next) => pickFilter(next, null)} onClose={closeFilter} onEditing={onEditing} />
+        <FilterPanel filter={filter} self={selfName} peers={kuruPeers} lately={rowSpaces.map((space) => space.key)} spaces={tagNames} onPick={(next) => pickFilter(next, null)} onClose={closeFilter} onEditing={onEditing} />
       )}
 
-      {filterOn && <FilterStrip filter={filter} nameOf={nameOf} peers={kuruPeers} onPick={(next) => pickFilter(next, null)} />}
+      {filterOn && <FilterStrip filter={filter} tagOf={tagOf} peers={kuruPeers} onPick={(next) => pickFilter(next, null)} />}
 
       {searchOpen && (
         <div className="kuru-search" role="search">
@@ -2226,7 +2253,7 @@ function Notice({
           <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
         </button>
         {/* The workspace the line already says ("in Holapy") is not said twice. */}
-        {tagging && <LineTags tags={tagging.tags.filter((tag) => tag.name !== agent?.workspace)} filter={tagging.filter} onShow={tagging.onShow} />}
+        {tagging && <LineTags tags={tagging.tags.filter((tag) => tag.parent || tag.name !== agent?.workspace)} filter={tagging.filter} onShow={tagging.onShow} />}
         <ReplyButton onReply={onReplyTo} />
         {pin && <PinButton {...pin} />}
         {tagging?.edit && <TagButton {...tagging.edit} />}

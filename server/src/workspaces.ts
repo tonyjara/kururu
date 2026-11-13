@@ -29,6 +29,7 @@ import type { MadeFile } from "../../shared/made";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
 import { adoptRoot } from "../../shared/workspaceroot";
+import { adoptSubprojects, type FoundProject, type ProjectEdit } from "../../shared/subprojects";
 import { homedir } from "node:os";
 import { paneInHalf, type Half } from "../../shared/halves";
 import type { HarnessState, Profile, ProfileSummary, Workspace } from "../../shared/model";
@@ -237,6 +238,9 @@ function adopt(stored: Profile): Profile {
       // so it is read as a client's would be.
       root: adoptRoot(workspace.root, homedir()),
       mobile: workspace.mobile === true,
+      // Absent before workspaces had projects. What was found rides along
+      // until the next look under the root replaces it.
+      subprojects: adoptSubprojects(workspace.subprojects),
     }))),
   };
 }
@@ -1507,6 +1511,24 @@ export class Workspaces {
     return true;
   }
 
+  /**
+   * What the server found under a workspace's root (`server/src/subprojects.ts`).
+   * Laid on only when it differs, so a quiet look sends nobody anything.
+   */
+  setFoundProjects(profileId: string, workspaceId: string, found: FoundProject[]): void {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace || JSON.stringify(workspace.subprojects?.found ?? []) === JSON.stringify(found)) return;
+    this.mutate(profileId, workspaceId, (w) => ({ ...w, subprojects: { edits: w.subprojects?.edits ?? [], found } }));
+  }
+
+  /** The owner's edits to a workspace's projects, whole — see `Workspace.subprojects`. Already read through `adoptProjectEdits`. */
+  setProjectEdits(profileId: string, workspaceId: string, edits: ProjectEdit[]): boolean {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace) return false;
+    if (JSON.stringify(workspace.subprojects?.edits ?? []) !== JSON.stringify(edits)) this.mutate(profileId, workspaceId, (w) => ({ ...w, subprojects: { found: w.subprojects?.found ?? [], edits } }));
+    return true;
+  }
+
   /** Whether a workspace builds a mobile app — see `Workspace.mobile`. */
   setWorkspaceMobile(profileId: string, workspaceId: string, on: boolean): void {
     const workspace = this.workspaceIn(profileId, workspaceId);
@@ -1998,6 +2020,7 @@ export class Workspaces {
       machine: null,
       root: root ?? null,
       mobile: false,
+      subprojects: { found: [], edits: [] },
     };
   }
 

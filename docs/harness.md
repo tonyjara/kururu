@@ -386,7 +386,8 @@ started or resumed.
 
 The drawer tags every line with the workspaces it is about ([voice](voice.md#tags)),
 mostly read off the words. The role asks Kuru to end a reply that is about a
-workspace with a last line of its own, `[tags: Holapy, Pasapy]` — at most three,
+workspace with a last line of its own, `[tags: Holapy, Pasapy]` — a project inside
+one as `Shared Landings/Yetapá`, or alone when its name is nobody else's — at most three,
 spelt as `kururu_status` spells them, left off when the reply is about none.
 `takeTagLine` in `src/http/agents.ts` takes it off the Stop report before
 `harness.report`, the voice, the channels, `recordTurn` and the made links read

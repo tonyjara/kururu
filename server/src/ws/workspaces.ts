@@ -15,6 +15,8 @@ import { saveProject } from "../look";
 import { findMachine } from "../machines";
 import { fillPane, killAll, rootToStore } from "../terminals";
 import { reply, replyAsync } from "./reply";
+import { lookForProjects } from "../subprojects";
+import { adoptProjectEdits } from "../../../shared/subprojects";
 
 export function workspaceVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): boolean {
   switch (msg.type) {
@@ -86,7 +88,21 @@ export function workspaceVerbs(ws: WebSocket, st: ClientState, msg: ClientMessag
         if (typeof msg.profileId !== "string" || typeof msg.workspaceId !== "string") throw new Error("No workspace named.");
         const root = rootToStore(msg.root);
         if (!workspaces.setWorkspaceRoot(msg.profileId, msg.workspaceId, root)) throw new Error("That workspace is gone.");
+        // A new root is a new place to look for its projects.
+        void lookForProjects(msg.profileId, msg.workspaceId);
         return root;
+      });
+      return true;
+
+    case "set-workspace-projects":
+      if (typeof msg.profileId === "string" && typeof msg.workspaceId === "string") workspaces.setProjectEdits(msg.profileId, msg.workspaceId, adoptProjectEdits(msg.edits));
+      return true;
+
+    case "look-for-projects":
+      replyAsync(ws, msg.id, async () => {
+        if (typeof msg.profileId !== "string" || typeof msg.workspaceId !== "string") throw new Error("No workspace named.");
+        await lookForProjects(msg.profileId, msg.workspaceId);
+        return true;
       });
       return true;
 

@@ -38,7 +38,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSPropert
 import type { PeerKuru } from "../../../shared/kuru";
 import type { TagFilter } from "../../../shared/kurutags";
 import { nodeHue } from "../../../shared/remote";
-import { dropLast, filterGroups, onlyRow, pressRow, rowId, rowOn, type FilterNode, type FilterRow } from "../kurufilter";
+import { dropLast, filterGroups, onlyRow, pressRow, rowCovered, rowId, rowOn, type FilterNode, type FilterRow } from "../kurufilter";
 import { fingerPointer } from "../terminals";
 import { Icon } from "./Icon";
 import { Menu, type MenuAt } from "./Menu";
@@ -49,10 +49,24 @@ export function tagHue(key: string): CSSProperties {
   return { "--tag-hue": `var(--ws-${nodeHue(key)})` } as CSSProperties;
 }
 
-/** A workspace as a tag draws it. */
+/**
+ * A workspace or a project as a tag draws it. A project wears its
+ * workspace's hue, so the four of Shared Landings read as one family, and
+ * says which workspace it is in where there is room and on hover where there
+ * is not.
+ */
 export interface TagName {
   key: string;
   name: string;
+  /** A project's workspace; absent for a workspace. */
+  parent?: { key: string; name: string };
+  /** A project's other names, which the filter's field finds it by. */
+  names?: readonly string[];
+}
+
+/** The hue a tag wears: its own workspace's, a project's workspace's. */
+function hueOf(tag: { key: string; parent?: { key: string } | null }): CSSProperties {
+  return tagHue(tag.parent?.key ?? tag.key);
 }
 
 /** What a node's row or chip says when hovered: how its link stands, and how to talk to it. */
@@ -200,8 +214,8 @@ export function FilterPanel({
             className="kuru-filter-field"
             type="text"
             value={typed}
-            placeholder={peers.length ? "Workspace or node…" : "Workspace…"}
-            aria-label="Find a workspace or a node"
+            placeholder={peers.length ? "Workspace, project or node…" : spaces.some((space) => space.parent) ? "Workspace or project…" : "Workspace…"}
+            aria-label="Find a workspace, a project or a node"
             role="combobox"
             aria-expanded
             aria-controls={listId}
@@ -233,6 +247,7 @@ export function FilterPanel({
               {group.rows.map((row) => {
                 const id = rowId(row);
                 const on = rowOn(filter, row);
+                const covered = !on && rowCovered(filter, row);
                 const peer = row.kind === "node" && row.id !== null ? peers.find((p) => p.node.id === row.id) : undefined;
                 const gone = row.kind === "node" && row.state !== "up";
                 return (
@@ -242,9 +257,21 @@ export function FilterPanel({
                     data-row={id}
                     role="option"
                     aria-selected={on}
-                    className={`kuru-filter-row ${on ? "kuru-filter-row-on" : ""} ${at === id ? "kuru-filter-row-at" : ""} ${gone ? "kuru-filter-row-away" : ""}`}
-                    title={row.kind === "todo" ? "The whole conversation" : peer ? peerTitle(peer) : row.kind === "node" ? "This node's Kuru" : undefined}
-                    style={row.kind === "space" ? tagHue(row.key) : row.kind === "node" && row.id !== null ? hueStyle(row.id) : undefined}
+                    className={`kuru-filter-row ${on ? "kuru-filter-row-on" : ""} ${covered ? "kuru-filter-row-covered" : ""} ${row.kind === "space" && row.depth === 1 ? "kuru-filter-row-inner" : ""} ${at === id ? "kuru-filter-row-at" : ""} ${gone ? "kuru-filter-row-away" : ""}`}
+                    title={
+                      row.kind === "todo"
+                        ? "The whole conversation"
+                        : peer
+                          ? peerTitle(peer)
+                          : row.kind === "node"
+                            ? "This node's Kuru"
+                            : covered
+                              ? `In ${row.parent!.name}, which is picked`
+                              : row.kind === "space" && row.parent
+                                ? `${row.name}, a project in ${row.parent.name}`
+                                : undefined
+                    }
+                    style={row.kind === "space" ? hueOf(row) : row.kind === "node" && row.id !== null ? hueStyle(row.id) : undefined}
                     // The field keeps the keyboard, so the next thing typed still narrows the rows.
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => press(row)}
@@ -253,6 +280,7 @@ export function FilterPanel({
                     {row.kind === "space" ? <span className="kuru-tag-dot" aria-hidden="true" /> : row.kind === "node" && row.id !== null ? <span className="node-chip-dot" aria-hidden="true" /> : null}
                     <span className="kuru-filter-name">{row.kind === "todo" ? "Todo" : row.name}</span>
                     {row.kind === "todo" && <span className="kuru-filter-hint">the whole conversation</span>}
+                    {row.kind === "space" && row.parent && row.depth === 0 && <span className="kuru-filter-hint">{row.parent.name}</span>}
                     {row.kind === "node" && row.id === null && <span className="kuru-filter-hint">this node</span>}
                     {row.kind === "node" && gone && <span className="kuru-filter-hint">{row.state === "away" ? "away" : "not linked yet"}</span>}
                     {row.kind === "node" && !gone && !row.talks && <span className="kuru-filter-hint">too old</span>}
@@ -301,13 +329,13 @@ export function FilterPanel({
  */
 export function FilterStrip({
   filter,
-  nameOf,
+  tagOf,
   peers,
   onPick,
 }: {
   filter: TagFilter;
-  /** A workspace's name by its key. */
-  nameOf: ReadonlyMap<string, string>;
+  /** A workspace or a project by its key. */
+  tagOf: ReadonlyMap<string, TagName>;
   peers: readonly PeerKuru[];
   onPick: (next: TagFilter) => void;
 }) {
@@ -339,20 +367,24 @@ export function FilterStrip({
           </button>
         );
       })}
-      {filter.spaces.map((key) => (
-        <button
-          key={`space-${key}`}
-          type="button"
-          className="kuru-tag-chip kuru-tag-chip-on"
-          onClick={() => onPick({ ...filter, spaces: filter.spaces.filter((k) => k !== key) })}
-          title={`Stop showing only ${nameOf.get(key) ?? key}`}
-          style={tagHue(key)}
-        >
-          <span className="kuru-tag-dot" aria-hidden="true" />
-          <span className="kuru-tag-name">{nameOf.get(key) ?? key}</span>
-          <Icon name="close" className="kuru-tag-x" />
-        </button>
-      ))}
+      {filter.spaces.map((key) => {
+        const tag = tagOf.get(key) ?? { key, name: key };
+        return (
+          <button
+            key={`space-${key}`}
+            type="button"
+            className="kuru-tag-chip kuru-tag-chip-on"
+            onClick={() => onPick({ ...filter, spaces: filter.spaces.filter((k) => k !== key) })}
+            title={`Stop showing only ${tag.name}${tag.parent ? ` (in ${tag.parent.name})` : ""}`}
+            style={hueOf(tag)}
+          >
+            <span className="kuru-tag-dot" aria-hidden="true" />
+            <span className="kuru-tag-name">{tag.name}</span>
+            {tag.parent && <span className="kuru-tag-in">{tag.parent.name}</span>}
+            <Icon name="close" className="kuru-tag-x" />
+          </button>
+        );
+      })}
     </nav>
   );
 }
@@ -371,14 +403,14 @@ export function LineTags({ tags, filter, onShow }: { tags: readonly TagName[]; f
           <button
             key={tag.key}
             type="button"
-            className="kuru-line-tag"
-            style={tagHue(tag.key)}
+            className={`kuru-line-tag ${tag.parent ? "kuru-line-tag-project" : ""}`}
+            style={hueOf(tag)}
             onMouseDown={(event) => event.preventDefault()}
             onClick={(event) => {
               event.stopPropagation();
               onShow(tag.key);
             }}
-            title={only ? "Show the whole conversation" : `Show only what was said about ${tag.name}`}
+            title={`${tag.parent ? `${tag.name}, in ${tag.parent.name}. ` : ""}${only ? "Show the whole conversation" : `Show only what was said about ${tag.name}`}`}
           >
             <span className="kuru-tag-dot" aria-hidden="true" />
             {tag.name}
@@ -398,8 +430,11 @@ export function LineTags({ tags, filter, onShow }: { tags: readonly TagName[]; f
  */
 export function TagButton({ tagged, spaces, onSet }: { tagged: readonly string[]; spaces: readonly TagName[]; onSet: (key: string, on: boolean) => void }) {
   const [at, setAt] = useState<MenuAt | null>(null);
-  // Its own first, then the rest as the row orders them.
-  const rows = [...spaces.filter((s) => tagged.includes(s.key)), ...spaces.filter((s) => !tagged.includes(s.key))];
+  // Every workspace with its projects under it, as given; the ones the line
+  // wears, or wears a project of, first, so what it is tagged with is in view.
+  const families = spaces.filter((s) => !s.parent).map((top) => [top, ...spaces.filter((s) => s.parent?.key === top.key)]);
+  const wears = (family: TagName[]) => family.some((s) => tagged.includes(s.key));
+  const rows = [...families.filter(wears), ...families.filter((family) => !wears(family))].flat();
   return (
     <>
       <button
@@ -411,7 +446,7 @@ export function TagButton({ tagged, spaces, onSet }: { tagged: readonly string[]
           const box = event.currentTarget.getBoundingClientRect();
           setAt({ x: box.right, y: box.bottom + 2, fromRight: true });
         }}
-        title="Which workspaces this is about"
+        title="Which workspaces and projects this is about"
         aria-label="Tags"
         aria-haspopup="menu"
       >
@@ -425,7 +460,13 @@ export function TagButton({ tagged, spaces, onSet }: { tagged: readonly string[]
             rows.length
               ? rows.map((space) => {
                   const on = tagged.includes(space.key);
-                  return { label: space.name, on, run: () => onSet(space.key, !on) };
+                  return {
+                    label: space.name,
+                    on,
+                    indent: space.parent !== undefined,
+                    title: space.parent ? `${space.name}, a project in ${space.parent.name}` : undefined,
+                    run: () => onSet(space.key, !on),
+                  };
                 })
               : [{ label: "No workspaces in this profile", disabled: true, run: () => {} }]
           }

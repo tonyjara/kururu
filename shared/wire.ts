@@ -1022,6 +1022,14 @@ export type ClientMessage =
    * is the path it stored. See `Workspace.root`.
    */
   | { type: "set-workspace-root"; id: number; profileId: string; workspaceId: string; root: string }
+  /**
+   * The owner's edits to a workspace's projects, whole (`shared/subprojects.ts`):
+   * names, other names, hidden or shown, and the ones added by hand. Read
+   * through `adoptProjectEdits`; anything else in the list is left out.
+   */
+  | { type: "set-workspace-projects"; profileId: string; workspaceId: string; edits: unknown }
+  /** Look under a workspace's root for its projects again, now. The reply comes once the look is done. */
+  | { type: "look-for-projects"; id: number; profileId: string; workspaceId: string }
 
   /**
    * Put the server back on current source. It owns no ptys, so this costs a

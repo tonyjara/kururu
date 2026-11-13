@@ -8,7 +8,7 @@
 import { countsAsAgent } from "../../../shared/model";
 import { AGY_CONVERSATION } from "../../../shared/agy";
 import { isUsageDimension, isUsageRange } from "../../../shared/usagereport";
-import { keysOfNames, splitReplyTags } from "../../../shared/kurutags";
+import { keysOfNames, splitReplyTags, tagProjects } from "../../../shared/kurutags";
 import { parseReport } from "../agents/report";
 import { activity, channels, harness, host, kuruKey, MAX_ACTIVITY, outbox, peerKurus, store, usageReader, voice, workspaces } from "../context";
 import { recordTurn } from "../conversation";
@@ -137,7 +137,9 @@ export const agentRoutes: Route[] = [
         // cap below, which is the sidebar's and not the record's.
         const turn = recordTurn(agentId, parsed.report, body as Record<string, unknown>, utterance);
         if (turn !== null && tagNames.length && spoken) {
-          const keys = keysOfNames(tagNames, workspaces.profile(spoken)?.workspaces ?? []);
+          // Its projects too (`shared/subprojects.ts`): `Shared Landings/Yetapá`, or `Yetapá` alone.
+          const spaces = (workspaces.profile(spoken)?.workspaces ?? []).map((w) => ({ key: w.key, name: w.name, projects: tagProjects(w.key, w.subprojects) }));
+          const keys = keysOfNames(tagNames, spaces);
           try {
             store.kuruTagTurn(turn, keys);
           } catch (err) {

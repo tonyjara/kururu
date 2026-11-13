@@ -122,6 +122,7 @@ import { vaultAskpassPath, writeVaultCommand } from "./vaultbin";
 import { usesPath, VaultRuns } from "./vaultrun";
 import { specsSnapshot } from "./specs";
 import { dataDir, dbPath, Store } from "./store";
+import { startSubprojectScan, stopSubprojectScan } from "./subprojects";
 import { pollAccountUsage, pollOpenRouterAccount, pollServers, stopSweeps, wakeProcesses, web } from "./sweeps";
 import {
   agentCommandFor,
@@ -1064,6 +1065,8 @@ export async function attach(port: Port): Promise<void> {
     startMarkSweep();
     // The clock, once there is a node name to be home to and a port to serve the runs it starts.
     void automations?.start();
+    // The projects inside each workspace's root, for Kuru's tags (`subprojects.ts`).
+    startSubprojectScan(workspaces);
     /**
      * Minted now on a server that will ask for it, rather than when somebody
      * first asks: a child has no Share dialog to ask, and a box whose tools
@@ -1358,6 +1361,7 @@ export function shutdown(): Promise<void> {
   if (stopping) return stopping;
   stopping = (async () => {
     stopSweeps();
+    stopSubprojectScan();
     slots?.stop();
     // Before the connections are closed below, which would otherwise read
     // as every waiting caller hanging up and cancel their asks.

@@ -41,6 +41,7 @@
  * is what it calls.
  */
 import { randomUUID } from "node:crypto";
+import { NO_SUBPROJECTS, visibleProjects } from "../../shared/subprojects";
 import { open, stat } from "node:fs/promises";
 import { connect } from "node:net";
 import { homedir } from "node:os";
@@ -2191,7 +2192,10 @@ export class Harness {
               ? " · on screen when the user leaves the Dashboard (the profile's board) they are looking at"
               : " · on screen"
           : "";
-      out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${root}${runsOn}${shown}`);
+      // Its projects, spelt as the tag line takes them (`shared/subprojects.ts`).
+      const projects = visibleProjects(workspace.key, workspace.subprojects ?? NO_SUBPROJECTS);
+      const inside = projects.length ? ` · projects ${projects.map((p) => (p.dir ? `${p.name} (${p.dir})` : p.name)).join(", ")}` : "";
+      out.push(`  - ${workspace.name} (${workspace.id}) · ${ids.length} agent${ids.length === 1 ? "" : "s"} · ${counts}${root}${runsOn}${inside}${shown}`);
     }
     // By name, which is what open_shell takes and what the user says.
     const machines = this.deps.machines();

@@ -15,6 +15,18 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Kuru's chat is tagged by project inside a workspace.** A monorepo's sites
+  are found by themselves — Shared Landings shows Yetapá, Parque Guasú, Agua
+  Lomas and tonyjara — and a line about one wears it instead of the workspace:
+  its folder, any of its names (accents and a possessive "s" don't matter), its
+  domain, a card about it, an agent working on it. Older lines are tagged too.
+  In the filter the projects hang under their workspace and can be picked on
+  their own; picking the workspace still shows everything in it, and typing
+  "yeta" finds Yetapá. Settings → Workspaces → Projects renames one, gives it
+  other names, turns one on or off, or adds one by hand. Folders that are parts
+  of one product (web, server, mobile…) start off, so Platypost, Pasapy and
+  AltoTecho get none. Kuru can write `[tags: Shared Landings/Yetapá]`.
+
 - **Kuru's conversation is tagged by project.** Every line — Kuru's replies,
   your messages, kururu's notices — wears the workspaces it is about, read off
   what is in it: a card code like HOL-81, a card reference, a path in a project,

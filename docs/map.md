@@ -29,6 +29,7 @@ in this folder.
 | `reload.ts` | An agent reloading the window: what holds a reload, who asked in words, what the agent is told. Pure, tested |
 | `kuru.ts` | The conversation with Kuru as one list: turns, your messages' states and each reply's fate merged, the chip's two counts, the card codes in a reply. Pure, tested |
 | `reply.ts` | A message that answers one line, as the words Kuru reads: `[reply to Kuru 18:42 "…" (t1234)]` written, read back, put after an `@node`, and cut. No imports, since `kuru.ts` and `channels.ts` both write one. Pure, tested. See [harness](harness.md#a-message-the-user-replies-to) |
+| `subprojects.ts` | The projects inside a workspace (a monorepo's sites): what the server found, the owner's edits laid over it, which start hidden (`ROLE_WORDS`, a lone site), their keys `<workspace>/<slug>`. Pure, tested. See [voice](voice.md#tags) |
 | `kurutags.ts` | Which workspaces a line of Kuru's chat is about: read off its words (codes, card references, paths under a root, names), then the exchange, then Kuru's `[tags: …]` line and the owner's corrections; the filter. Pure, tested. See [voice](voice.md#tags) |
 | `kurusearch.ts` | What a search of Kuru's chat matches and which words it lights: exact or a typo away, every word of the query, on the words a line draws, ranges kept through accent folding. Pure, tested. See [voice](voice.md#the-drawer) |
 | `made.ts` | What an agent made: the paths in a reply, which of them are the deliverable (a document presented or changed alone, code presented and few), and the drawer's split of a reply into words and paths. Pure, tested. See [layout](layout.md#what-an-agent-made) |
@@ -183,6 +184,7 @@ in this folder.
 | `src/devservers.ts` | lsof + ps discovery of what is listening, and what started it — and stopping one: the named command's tree, never a terminal's (`stopTargets`). Never kururu itself (`isKururu`) |
 | `src/drops.ts` | `POST /api/drop`'s write: a pasted picture or a phone's file kept `0600` in `drops/` under the data directory, never over another, never backed up |
 | `src/pictures.ts` | the Telegram chat's pictures on disk: `telegram/inbox/` for what came in, a checked copy in `telegram/outbox/` for what goes out, HEIC to JPEG, and which folders a picture may go out from |
+| `src/subprojects.ts` | Looks under each local workspace's root for a monorepo's `apps/*` and `sites/*` (on start, when a root is set, on Settings' Look now, every five minutes) and lays what it found on the workspace when it differs. See [voice](voice.md#tags) |
 | `src/proxy.ts` | Per-dev-server reverse proxy (HTTP + WS) for phone access |
 | `src/files.ts` | Traversal-safe file listing and reading |
 | `src/fileops.ts` | The file tree's edits: new, rename, move, copy, Trash — the only writer |

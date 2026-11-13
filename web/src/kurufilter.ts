@@ -22,6 +22,14 @@
  * else by name, since a list scanned for a name is scanned alphabetically.
  * A workspace is in one group only: a switch drawn twice is two switches to
  * keep in step by eye.
+ *
+ * **A workspace's projects hang under it** (`shared/subprojects.ts`),
+ * indented, each a switch of its own: Shared Landings is everything in it,
+ * Yetapá is Yetapá. A project lately talked about stands in Lately by itself,
+ * with its workspace's name beside it, and is not drawn again under its
+ * workspace. Typing finds a project by any of its names, accents aside, so
+ * "yeta" is Yetapá and "guasu" is Parque Guasú; a workspace found brings its
+ * projects with it.
  */
 import type { TagFilter } from "../../shared/kurutags";
 
@@ -39,7 +47,28 @@ export interface FilterNode {
   talks: boolean;
 }
 
-export type FilterRow = { kind: "todo" } | ({ kind: "node" } & FilterNode) | { kind: "space"; key: string; name: string };
+/** A workspace or a project as the panel is given it. */
+export interface FilterSpace {
+  key: string;
+  name: string;
+  /** A project's workspace; absent for a workspace. */
+  parent?: { key: string; name: string };
+  /** A project's other names, which typing finds it by too. */
+  names?: readonly string[];
+}
+
+export type FilterRow =
+  | { kind: "todo" }
+  | ({ kind: "node" } & FilterNode)
+  | {
+      kind: "space";
+      key: string;
+      name: string;
+      /** A project's workspace, by key and by name for the hint beside it; null for a workspace. */
+      parent: { key: string; name: string } | null;
+      /** 1 for a project drawn under its workspace, which needs no hint. */
+      depth: 0 | 1;
+    };
 
 export interface FilterGroup {
   /** Null for the rows that need no heading: Todo, and what a search found. */
@@ -75,34 +104,52 @@ export function filterGroups(input: {
   typed: string;
   /** This node first, then the others; empty on a kururu linked with none. */
   nodes: readonly FilterNode[];
-  /** Workspace keys, the most recently talked about first. */
+  /** Workspace and project keys, the most recently talked about first. */
   lately: readonly string[];
-  /** Every workspace of the profile. */
-  spaces: readonly { key: string; name: string }[];
+  /** Every workspace of the profile, and every project shown in one. */
+  spaces: readonly FilterSpace[];
 }): FilterGroup[] {
   const { typed, nodes, lately, spaces } = input;
-  const byName = [...spaces].sort((a, b) => a.name.localeCompare(b.name));
+  const tops = spaces.filter((space) => !space.parent);
+  const projectsOf = (key: string) => spaces.filter((space) => space.parent?.key === key).sort((a, b) => a.name.localeCompare(b.name));
+  const byName = [...tops].sort((a, b) => a.name.localeCompare(b.name));
   const nodeRow = (node: FilterNode): FilterRow => ({ kind: "node", ...node });
-  const spaceRow = (space: { key: string; name: string }): FilterRow => ({ kind: "space", key: space.key, name: space.name });
+  const spaceRow = (space: FilterSpace, depth: 0 | 1 = 0): FilterRow => ({ kind: "space", key: space.key, name: space.name, parent: space.parent ?? null, depth });
+  /** A workspace's row with its projects under it, but for the ones drawn elsewhere. */
+  const withProjects = (space: FilterSpace, elsewhere: ReadonlySet<string>): FilterRow[] => [
+    spaceRow(space),
+    ...projectsOf(space.key)
+      .filter((p) => !elsewhere.has(p.key))
+      .map((p) => spaceRow(p, 1)),
+  ];
   if (typed.trim()) {
-    const found = [...nodes.map(nodeRow), ...byName.map(spaceRow)]
-      .map((row) => ({ row, score: row.kind === "todo" ? 0 : nameMatch(row.name, typed) }))
+    const score = (space: FilterSpace) => Math.max(nameMatch(space.name, typed), ...(space.names ?? []).map((n) => nameMatch(n, typed))) as 0 | 1 | 2;
+    const hits = [...nodes.map((node) => ({ row: nodeRow(node), space: null as FilterSpace | null, score: nameMatch(node.name, typed) })), ...[...spaces].sort((a, b) => a.name.localeCompare(b.name)).map((space) => ({ row: spaceRow(space), space, score: score(space) }))]
       .filter((hit) => hit.score > 0)
       // A stable sort: within a score, the nodes stay first and the names in order.
-      .sort((a, b) => b.score - a.score)
-      .map((hit) => hit.row);
-    return found.length ? [{ title: null, rows: found }] : [];
+      .sort((a, b) => b.score - a.score);
+    const foundTops = new Set(hits.filter((hit) => hit.space && !hit.space.parent).map((hit) => hit.space!.key));
+    const rows: FilterRow[] = [];
+    for (const hit of hits) {
+      if (!hit.space) rows.push(hit.row);
+      // A project whose workspace was found too is drawn under it.
+      else if (hit.space.parent && foundTops.has(hit.space.parent.key)) continue;
+      else if (hit.space.parent) rows.push(hit.row);
+      else rows.push(...withProjects(hit.space, new Set()));
+    }
+    return rows.length ? [{ title: null, rows }] : [];
   }
   const recent = lately
     .filter((key, i, all) => all.indexOf(key) === i)
     .map((key) => spaces.find((space) => space.key === key))
-    .filter((space): space is { key: string; name: string } => space !== undefined)
+    .filter((space): space is FilterSpace => space !== undefined)
     .slice(0, LATELY_MAX);
-  const rest = byName.filter((space) => !recent.some((r) => r.key === space.key));
+  const inLately = new Set(recent.map((space) => space.key));
+  const rest = byName.filter((space) => !inLately.has(space.key));
   const groups: FilterGroup[] = [{ title: null, rows: [{ kind: "todo" }] }];
   if (nodes.length > 1) groups.push({ title: "Nodes", rows: nodes.map(nodeRow) });
-  if (recent.length) groups.push({ title: "Lately", rows: recent.map(spaceRow) });
-  if (rest.length) groups.push({ title: recent.length ? "Everything else" : "Workspaces", rows: rest.map(spaceRow) });
+  if (recent.length) groups.push({ title: "Lately", rows: recent.flatMap((space) => (space.parent ? [spaceRow(space)] : withProjects(space, inLately))) });
+  if (rest.length) groups.push({ title: recent.length ? "Everything else" : "Workspaces", rows: rest.flatMap((space) => withProjects(space, inLately)) });
   return groups;
 }
 
@@ -126,6 +173,11 @@ export function pressRow(filter: TagFilter, row: FilterRow): TagFilter {
 export function onlyRow(row: FilterRow): TagFilter {
   if (row.kind === "todo") return { spaces: [], nodes: [] };
   return row.kind === "node" ? { spaces: [], nodes: [row.name] } : { spaces: [row.key], nodes: [] };
+}
+
+/** Whether a project's row is covered by its workspace being picked: drawn as on, more quietly, since the workspace is everything in it. */
+export function rowCovered(filter: TagFilter, row: FilterRow): boolean {
+  return row.kind === "space" && row.parent !== null && filter.spaces.includes(row.parent.key);
 }
 
 /** Backspace in the empty field: the last one picked is let go — a workspace before a node, since the strip draws the workspaces last. */

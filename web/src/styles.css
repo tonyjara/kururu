@@ -5142,6 +5142,10 @@ html.pill-page #root {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A row that belongs to the one above it: a workspace's project under it. */
+.menu-indent .menu-label {
+  padding-left: 1.2em;
+}
 /* Pushed to the right and quieter than the label, because it is the answer to a
    question you did not ask — a count you glance at, not a thing you read. */
 .menu-hint {
@@ -5539,6 +5543,21 @@ html.pill-page #root {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A picked project's workspace, after its name in the strip, quieter, and
+   the first to give way: the chip has the room of two names, and the
+   project's own is the one being read. */
+.kuru-tag-chip:has(.kuru-tag-in) {
+  max-width: 32ch;
+}
+.kuru-tag-in {
+  flex: 0 100 auto;
+  min-width: 0;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dimmer);
+  font-size: var(--fs-xs);
+}
 /* The ✕ on a picked chip: what a press on it does. */
 .kuru-tag-x {
   flex: none;
@@ -5678,6 +5697,28 @@ html.pill-page #root {
   width: 28%;
   height: 58%;
   border: solid var(--on-accent);
+  border-width: 0 0.16em 0.16em 0;
+  transform: rotate(45deg);
+}
+/* A workspace's project, under it: indented by the width of a check and its
+   gap, so its box stands under the workspace's name. */
+.kuru-filter-row-inner {
+  padding-left: calc(8px + 1.1em + 7px);
+}
+/* A project whose workspace is picked is shown already, so its box says so,
+   quieter than one picked itself. */
+.kuru-filter-row-covered .kuru-filter-check {
+  border-color: var(--accent);
+  opacity: 0.5;
+}
+.kuru-filter-row-covered .kuru-filter-check::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: 8%;
+  width: 28%;
+  height: 58%;
+  border: solid var(--accent);
   border-width: 0 0.16em 0.16em 0;
   transform: rotate(45deg);
 }
@@ -6865,8 +6906,14 @@ button.kc {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Where a quote came from may be a long file name, and gives way with an
+   ellipsis rather than running past a bubble at the floating chat's 320 px. */
 .kc-from {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--mono);
   color: var(--dim);
 }
@@ -7596,6 +7643,7 @@ a.needs-go {
 }
 .st-card > * + *,
 .st-sub > * + *,
+.st-project > * + *,
 .st-step + .st-step,
 .st-step-body > * + * {
   border-top: var(--border) solid var(--line);
@@ -8082,6 +8130,10 @@ label.st-row {
   font-size: var(--fs-sm);
   color: var(--dim);
   overflow-wrap: anywhere;
+}
+/* Settings → Workspaces → Projects: one that is not a tag reads quieter. */
+.st-project-off .st-item-name {
+  color: var(--dim);
 }
 /* Settings → Specs (`Specs.tsx`). A part whose reading is not what is typed
    says so in the text's own ink rather than the hint's dim, behind the

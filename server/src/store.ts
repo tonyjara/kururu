@@ -84,6 +84,7 @@ import {
 } from "../../shared/store";
 import { randomHex } from "../../shared/text";
 import { adoptKeys, type TurnTags } from "../../shared/kurutags";
+import { spaceOfKey } from "../../shared/subprojects";
 import type { SimRow } from "./slots";
 
 // ---------------------------------------------------------------------------
@@ -1534,7 +1535,9 @@ export class Store {
     const ours = this.stmt(
       "select 1 as x from turns t join conversations v on v.id = t.conversation_id where t.id = ? and v.profile_key = ? and v.kind = 'harness' and t.role <> 'agent'",
     ).get(turnId, profileKey);
-    const space = this.stmt("select 1 as x from workspaces where key = ? and profile_key = ?").get(workspaceKey, profileKey);
+    // A project's key is its workspace's with a slash and a slug (`shared/subprojects.ts`): the workspace is what must be the profile's.
+    const space = this.stmt("select 1 as x from workspaces where key = ? and profile_key = ?").get(spaceOfKey(workspaceKey), profileKey);
+    if (adoptKeys([workspaceKey]).length !== 1) return false;
     if (!ours || !space) return false;
     const done = this.stmt(
       "insert into turn_tags(turn_id, workspace_key, by, kept) values (?, ?, 'user', ?) on conflict(turn_id, workspace_key, by) do update set kept = excluded.kept where kept <> excluded.kept",

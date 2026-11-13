@@ -79,6 +79,8 @@ interface MenuRow {
   unread?: boolean;
   /** What a pointer resting on the row is told, for what the row has no room to say. */
   title?: string;
+  /** A row that belongs to the one above it — a workspace's project under the workspace — drawn indented. */
+  indent?: boolean;
 }
 
 /** A row that does something. */
@@ -436,7 +438,7 @@ function Row({
     <button
       ref={rowRef}
       role={on === undefined ? "menuitem" : "menuitemcheckbox"}
-      className={`menu-item ${item.danger ? "menu-danger" : ""} ${item.sep ? "menu-sep" : ""} ${open ? "menu-item-open" : ""}`}
+      className={`menu-item ${item.danger ? "menu-danger" : ""} ${item.sep ? "menu-sep" : ""} ${item.indent ? "menu-indent" : ""} ${open ? "menu-item-open" : ""}`}
       disabled={item.disabled}
       title={item.title}
       aria-checked={on}

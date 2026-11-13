@@ -30,6 +30,7 @@ import { adoptBoard, adoptProfileBoard, type Board } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
 import { adoptRoot } from "../../shared/workspaceroot";
+import { adoptProjectEdits, type ProjectEdit } from "../../shared/subprojects";
 import { homedir } from "node:os";
 import type { HarnessState } from "../../shared/model";
 import { isStoreKey, mintProfileKey, mintWorkspaceKey } from "../../shared/store";
@@ -104,6 +105,8 @@ interface StoredWorkspace {
   root?: string | null;
   /** Whether it builds a mobile app — see `Workspace.mobile`. Absent is no. */
   mobile?: boolean;
+  /** The owner's edits to its projects — see `Workspace.subprojects`. What was found is looked for again, never stored. Absent is none. */
+  projects?: ProjectEdit[];
   /**
    * The workspace's cards, from a file written before boards lived in the
    * database — or by a build from before it, run against this one. Only
@@ -228,6 +231,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         ...(workspace.machine ? { machine: workspace.machine } : {}),
         ...(workspace.root ? { root: workspace.root } : {}),
         ...(workspace.mobile ? { mobile: true } : {}),
+        ...(workspace.subprojects?.edits.length ? { projects: workspace.subprojects.edits } : {}),
         layout: strip(workspace.layout),
       })),
     })),
@@ -433,6 +437,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         machine: adoptPin(w.machine),
         root: adoptRoot(w.root, homedir()),
         mobile: w.mobile === true,
+        subprojects: { found: [], edits: adoptProjectEdits(w.projects) },
       };
       workspaces.push(workspace);
     }

@@ -443,6 +443,47 @@ Where they come from (`shared/kurutags.ts`, pure, `server/test/kurutags.test.ts`
   a line's pin opens the profile's workspaces as switches (`kuru-tag` on the
   socket, `turn_tags` with `by = 'user'`). Only a turn takes one, as a pin.
 
+**Projects inside a workspace** (`shared/subprojects.ts`, the owner on
+2026-11-12: "shared landings has a lot of projects in it … I want to see the
+last things we said about Yetapa"). Shared Landings is one monorepo and four
+sites — Yetapá, Parque Guasú, Agua Lomas, tonyjara — and a line about one wears
+that project, keyed `<workspace key>/<slug>`, the slug being the folder's name.
+
+- **Found, then corrected.** `server/src/subprojects.ts` looks under each local
+  root on start, when a root is set, when Settings asks and every five minutes:
+  only a root that says it is a monorepo (`pnpm-workspace.yaml`, `turbo.json`,
+  `nx.json`, `lerna.json`, `go.work`, `rush.json`, package.json `workspaces`,
+  Cargo `[workspace]`), only `apps/*` and `sites/*`, only a folder with a
+  manifest; never `packages/`. A folder named for a part of a product (`web`,
+  `server`, `mobile`, `native`… `ROLE_WORDS`) starts off, and so does the one
+  site left when fewer than two are: Platypost, AltoTecho and Pasapy are one
+  product each and get none. Its README's first heading (domain in brackets
+  taken out), package name, folder and domain label are names it answers to.
+  What was found rides on `Workspace.subprojects.found`, looked for again and
+  never written; the owner's names, other names, switches and added projects
+  are `edits`, written to the session file (`projects`) and set whole by
+  `set-workspace-projects`, from Settings → Workspaces → Projects.
+- **The same rules, one level down.** A path under its folder (from the root,
+  from `~`, or written relative as `apps/yetapa` or `shared_landings/apps/yetapa`
+  — another repository's `apps/yetapa` is not it), a reply's file there, any of
+  its names in the words with accents aside and a possessive "s" ("yetapas
+  logo"), a card whose title names it, else whose body does — by code or
+  reference, on the workspace's board or the profile's own ("MV-94 Yetapa") —
+  and a notice's agent whose name does. Workspace names are compared with their
+  accents off too.
+- **Kuru's line** takes `[tags: Shared Landings/Yetapá]`, or `[tags: Yetapá]`
+  when no other workspace has a project by that name. A line that names only
+  the workspace keeps the projects its words name beside it.
+- **It counts for its workspace.** Shared Landings picked in the filter is
+  everything in it (`covers`); a line's chip shows "Yetapá" in its workspace's
+  hue, with "in Shared Landings" on hover, and the workspace's own chip is left
+  off when one of its projects is there (`chipTags`). The panel draws projects
+  indented under their workspace, a project lately talked about in Lately with
+  its workspace's name beside it, finds one by any of its names ("yeta",
+  "guasu"), and a project under a picked workspace shows its box quietly ticked.
+  The tag button lists each workspace with its projects under it.
+- `kururu_status` prints a workspace's shown projects after `projects`.
+
 Another node's lines wear only their node: its workspaces are its own. A
 workspace has had no colour since 2026-10-12, so a tag's dot takes a hue off its
 key the way a node's does off its id (`nodeHue`). Under a filter the list

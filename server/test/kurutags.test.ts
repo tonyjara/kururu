@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { KuruItem, KuruReply, NoticeItem, YouItem } from "../../shared/kuru";
-import { adoptKeys, adoptTagFilter, keysOfNames, ownTags, passes, recentTags, splitReplyTags, tagBook, tagLines, type TagSpace, type TaggedLine } from "../../shared/kurutags";
+import { adoptKeys, adoptTagFilter, chipTags, keysOfNames, ownTags, passes, recentTags, splitReplyTags, tagBook, tagLines, tagProjects, type CardWords, type TagSpace, type TaggedLine } from "../../shared/kurutags";
 
 const space = (key: string, name: string, cards: number[] = [], root: string | null = null, ids: string[] = []): TagSpace => ({ key, name, cards: new Set(cards), cardIds: new Set(ids), root });
 
@@ -130,5 +130,81 @@ describe("the filter", () => {
     expect(adoptTagFilter({ spaces: ["wk1", 3], nodes: "mac" })).toEqual({ spaces: ["wk1"], nodes: [] });
     expect(adoptTagFilter(null)).toEqual({ spaces: [], nodes: [] });
     expect(adoptKeys(["wk1", "bad key", 4, "wk_2"])).toEqual(["wk1", "wk_2"]);
+  });
+});
+
+describe("projects inside a workspace", () => {
+  const LANDINGS_ROOT = "/Users/me/Desktop/Nyto/shared_landings";
+  const projects = tagProjects("wksl", {
+    found: [
+      { dir: "apps/agualomas", title: "O&D Lomas", pkg: "agualomas", domain: "agualomas.com" },
+      { dir: "apps/parqueguasu", title: "Parque Guasu", pkg: "parqueguasu", domain: "parqueguasu.org" },
+      { dir: "apps/tonyjara", title: "tonyjara", pkg: "tonyjara", domain: "tonyjara.com" },
+      { dir: "apps/yetapa", title: "Yetapa Tours", pkg: "yetapa", domain: "yetapatours.com" },
+    ],
+    edits: [
+      { slug: "yetapa", name: "Yetapá" },
+      { slug: "parqueguasu", name: "Parque Guasú", aliases: ["Guasu"] },
+      { slug: "agualomas", name: "Agua Lomas", aliases: ["AguaLomas"] },
+      { slug: "tonyjara", aliases: ["Tony Jara"] },
+    ],
+  });
+  const cards: CardWords[] = [
+    { id: "csha37", number: 37, title: "Research: getting Yetapá on GetYourGuide", body: "" },
+    { id: "csha40", number: 40, title: "Platypost strategy", body: "Load the social plan for yetapa into Platypost." },
+    { id: "csha41", number: 41, title: "Shared footer", body: "Next to Yetapa, Parque Guasu and tonyjara." },
+  ];
+  const landings: TagSpace = { ...space("wksl", "Shared Landings", [37, 40, 41], LANDINGS_ROOT, ["csha37", "csha40", "csha41"]), projects, cardWords: cards };
+  const spaces = [...SPACES, landings];
+  const pbook = tagBook(spaces, { name: "MV", cards: [{ id: "cmv94", number: 94, title: "Yetapa", body: "" }] });
+  const tags = (item: KuruItem) => ownTags(item, pbook);
+
+  test("a name with or without its accent, any case, and a possessive", () => {
+    expect(tags(you("t1", "can you send me yetapas logo?"))).toEqual(["wksl/yetapa"]);
+    expect(tags(reply("t1", "I sent the bird with \"Yetapá Tours\" under it."))).toEqual(["wksl/yetapa"]);
+    expect(tags(reply("t1", "Parque Guasu and AguaLomas are live, and the guasú form too"))).toEqual(["wksl/agualomas", "wksl/parqueguasu"]);
+    expect(tags(reply("t1", "Agua Lomas and tony jara"))).toEqual(["wksl/agualomas", "wksl/tonyjara"]);
+  });
+  test("its domain names it, and so does a path under its folder, from the root or written relative", () => {
+    expect(tags(reply("t1", "treat the live yetapatours.com as the truth"))).toEqual(["wksl/yetapa"]);
+    expect(tags(reply("t1", `see ${LANDINGS_ROOT}/apps/parqueguasu/src/app/page.tsx`))).toEqual(["wksl/parqueguasu", "wksl"]);
+    expect(tags(reply("t1", "it is in `apps/tonyjara/src/app` now"))).toEqual(["wksl/tonyjara"]);
+    expect(tags(reply("t1", "~/Desktop/Nyto/shared_landings/apps/yetapa/public/logo.png"))).toEqual(["wksl/yetapa", "wksl"]);
+    // Another repository's apps/ folder is not this one's.
+    expect(tags(reply("t1", "~/Desktop/Nyto/platypost/apps/yetapa"))).toEqual([]);
+  });
+  test("a reply's file under a project's folder", () => {
+    expect(tags(reply("t1", "done", { files: [{ root: LANDINGS_ROOT, path: "apps/yetapa/README.md", line: null, text: "", exists: true } as never] }))).toEqual(["wksl", "wksl/yetapa"]);
+  });
+  test("a card whose title names it, else whose body does, by code or reference; and the profile's own cards", () => {
+    expect(tags(you("t1", "how is SHA-37 going?"))).toEqual(["wksl", "wksl/yetapa"]);
+    expect(tags(you("t1", "and SHA-40?"))).toEqual(["wksl", "wksl/yetapa"]);
+    expect(tags(you("t1", "SHA-41"))).toEqual(["wksl", "wksl/parqueguasu", "wksl/tonyjara", "wksl/yetapa"]);
+    expect(tags(you("t1", '[card SHA-40 "Platypost strategy" (w9/csha40)] ok'))).toContain("wksl/yetapa");
+    expect(tags(you("t1", "MV-94 is done?"))).toEqual(["wksl/yetapa"]);
+  });
+  test("a notice: its agent's name says which project of its workspace", () => {
+    expect(tags(notice("t1", { agent: { name: "Research: getting Yetapá on GetYourGuide", program: "claude", workspace: "Shared Landings", card: null } }))).toEqual(["wksl", "wksl/yetapa"]);
+    expect(tags(notice("t1", { agent: { name: "Fix the build", program: "claude", workspace: "Shared Landings", card: "SHA-37" } }))).toEqual(["wksl", "wksl/yetapa"]);
+  });
+  test("Kuru's line: Workspace/Project, a project alone, and a workspace alone refined by the words", () => {
+    expect(keysOfNames(["Shared Landings/Yetapá", "guasu", "Agua Lomas", "Nope/Yetapa"], spaces)).toEqual(["wksl/yetapa", "wksl/parqueguasu", "wksl/agualomas"]);
+    const twin: TagSpace = { ...space("wkx", "Other"), projects: [{ key: "wkx/yetapa", name: "Yetapa", names: ["Yetapa"], dir: null }] };
+    expect(keysOfNames(["Yetapa"], [...spaces, twin])).toEqual([]);
+    expect(keysOfNames(["Other/Yetapa"], [...spaces, twin])).toEqual(["wkx/yetapa"]);
+    const lines = tagLines([reply("t1", "The Yetapá logo is in iCloud.", { tags: { kuru: ["wksl"] } }), reply("t2", "Done.", { tags: { kuru: ["wksl/parqueguasu"] } })], pbook);
+    expect(lines.get("t1")).toEqual(["wksl", "wksl/yetapa"]);
+    expect(lines.get("t2")).toEqual(["wksl/parqueguasu"]);
+  });
+  test("a project's tag counts for its workspace in the filter, and its chip stands for both", () => {
+    expect(passes({ spaces: ["wksl"], nodes: [] }, ["wksl/yetapa"], "mac", false)).toBe(true);
+    expect(passes({ spaces: ["wksl/yetapa"], nodes: [] }, ["wksl"], "mac", false)).toBe(false);
+    expect(passes({ spaces: ["wksl/yetapa"], nodes: [] }, ["wksl/parqueguasu"], "mac", false)).toBe(false);
+    expect(chipTags(["wksl", "wksl/yetapa", "wkhol"])).toEqual(["wksl/yetapa", "wkhol"]);
+    expect(adoptKeys(["wksl/yetapa", "wksl/a/b", "wk sl"])).toEqual(["wksl/yetapa"]);
+  });
+  test("a hidden project is no tag", () => {
+    const quiet = tagProjects("wkpl", { found: [{ dir: "apps/web", title: null, pkg: null, domain: null }, { dir: "apps/server", title: null, pkg: null, domain: null }], edits: [] });
+    expect(quiet).toEqual([]);
   });
 });

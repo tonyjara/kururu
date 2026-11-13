@@ -1,6 +1,7 @@
 /**
  * Settings → General → Workspaces: a workspace's root folder and the machine
- * it runs on, whether it builds a mobile app, and what a card's worktree
+ * it runs on, the projects inside it that Kuru's chat is tagged by, whether
+ * it builds a mobile app, and what a card's worktree
  * gets, for the repository each workspace is in.
  *
  * Drawn per workspace and stored per repository: a person thinks in
@@ -19,10 +20,11 @@ import type { Card } from "../../../shared/board";
 import type { Workspace } from "../../../shared/model";
 import { projectSettingsFor, worktreeDir, type ProjectSettings, type ProjectSettingsMap, type WorktreeOutcome } from "../../../shared/projects";
 import type { WorkspaceProject } from "../../../shared/wire";
+import { addProject, editProject, NO_SUBPROJECTS, parseAliases, removeProject, subprojectsOf, type ProjectEdit, type Subproject } from "../../../shared/subprojects";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { desktop } from "../desktop";
-import { Btn, Bullets, Choice, Danger, Details, Empty, errorText, Field, Group, Mono, Outcome, P, plural, Readout, Row, Segments, TextBox, Toggle } from "./ui";
+import { AddRow, Btn, Bullets, Choice, Danger, Details, Empty, errorText, Field, Group, IconBtn, Item, Mono, Outcome, P, plural, Readout, Row, Segments, TextBox, Toggle } from "./ui";
 
 export function WorkspacesPage({
   profileId,
@@ -55,6 +57,7 @@ export function WorkspacesPage({
       </Group>
 
       {shown && <Root key={shown.id} profileId={profileId} workspace={shown} />}
+      {shown && <Projects key={`projects-${shown.id}`} profileId={profileId} workspace={shown} />}
       {shown && <Mobile profileId={profileId} workspace={shown} />}
 
       {shown && !root && (
@@ -142,6 +145,118 @@ function Root({ profileId, workspace }: { profileId: string; workspace: Workspac
             <TextBox mono value={workspace.root ?? ""} placeholder="~/projects/name" onCommit={setRoot} aria-label="Root folder" />
             {bridge?.pickFolder && <Btn onClick={choose}>Choose…</Btn>}
           </span>
+        </Row>
+      )}
+    </Group>
+  );
+}
+
+/**
+ * The projects inside the workspace, which Kuru's conversation is tagged and
+ * filtered by beside it (`shared/subprojects.ts`): what the server found
+ * under the root, each with a switch, a name and other names, and the ones
+ * added by hand.
+ *
+ * Every row is drawn, hidden ones too, because "why is web not a tag" is
+ * answered by the row that says it is a part of the product, and its switch
+ * is the way to make it one anyway. The list is sent whole on every change:
+ * it is a few short lines, and the server reads it as a file would be read.
+ */
+function Projects({ profileId, workspace }: { profileId: string; workspace: Workspace }) {
+  const state = workspace.subprojects ?? NO_SUBPROJECTS;
+  const projects = subprojectsOf(workspace.key, state);
+  const [open, setOpen] = useState<string | null>(null);
+  const [looking, setLooking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (workspace.machine && !projects.length) return null;
+  const save = (edits: ProjectEdit[]) => api.setWorkspaceProjects(profileId, workspace.id, edits);
+  const edit = (slug: string, patch: Parameters<typeof editProject>[2]) => save(editProject(state.edits, slug, patch));
+  const look = () => {
+    setLooking(true);
+    setError(null);
+    api
+      .lookForProjects(profileId, workspace.id)
+      .catch((err: unknown) => setError(errorText(err)))
+      .finally(() => setLooking(false));
+  };
+  const why = (project: Subproject) =>
+    project.quiet === "role" ? "a part of one product, so off until you turn it on" : project.quiet === "alone" ? "the only app here, so off until you turn it on" : "off";
+  const shown = projects.filter((p) => !p.hidden).length;
+
+  return (
+    <Group
+      title="Projects"
+      foot={
+        <>
+          A line of Kuru's chat that names a project — its folder, one of its names, a card about it — is tagged with it, and the chat's filter shows it under {workspace.name}.{" "}
+          {workspace.root
+            ? "Found in a monorepo's apps/ and sites/ folders; a folder named for a part of a product (web, server, mobile…) starts off, and packages/ is never read."
+            : "Give the workspace a root folder and its monorepo's apps are found by themselves."}
+          {error && (
+            <>
+              {" "}
+              <Outcome bad>{error}</Outcome>
+            </>
+          )}
+        </>
+      }
+    >
+      {projects.length === 0 && <Empty>{workspace.root ? `No projects found in ${workspace.name}. It is one project, or add one by name below.` : "None yet."}</Empty>}
+      {projects.map((project) => {
+        const also = [...project.aliases, ...project.found].filter((n, i, all) => n !== project.name && all.indexOf(n) === i);
+        return (
+          <div key={project.slug} className={`st-project${project.hidden ? " st-project-off" : ""}`}>
+            <Item
+              name={project.name}
+              sub={
+                <>
+                  {project.dir ? <Mono>{project.dir}</Mono> : "added by hand"}
+                  {project.hidden ? ` · ${why(project)}` : also.length ? ` · also ${also.join(", ")}` : ""}
+                </>
+              }
+            >
+              <IconBtn icon="edit" label={open === project.slug ? "Done" : `Rename ${project.name} or give it other names`} on={open === project.slug} onClick={() => setOpen(open === project.slug ? null : project.slug)} />
+              {project.added && <IconBtn icon="close" label={`Remove ${project.name}`} danger onClick={() => save(removeProject(state.edits, project.slug))} />}
+              <input
+                type="checkbox"
+                className="st-switch"
+                role="switch"
+                aria-label={`Tag lines with ${project.name}`}
+                title={project.hidden ? "Not a tag. Turn on to tag lines with it" : "A tag of its own"}
+                aria-checked={!project.hidden}
+                checked={!project.hidden}
+                onChange={(event) => edit(project.slug, { hidden: !event.target.checked })}
+              />
+            </Item>
+            {open === project.slug && (
+              <>
+                <Field label="Name" hint="What its tag says." value={project.name} onCommit={(name) => edit(project.slug, { name })} ariaLabel={`${project.name}'s name`} />
+                <Field
+                  label="Other names"
+                  hint={`Comma-separated; accents never matter.${project.found.length ? ` Found already: ${project.found.join(", ")}.` : ""}`}
+                  value={project.aliases.join(", ")}
+                  placeholder="Guasu, Parque Guasu"
+                  onCommit={(typed) => edit(project.slug, { aliases: parseAliases(typed) })}
+                  ariaLabel={`${project.name}'s other names`}
+                />
+              </>
+            )}
+          </div>
+        );
+      })}
+      <AddRow
+        placeholder="Add a project by name"
+        label="Add"
+        onAdd={(name) => {
+          const added = addProject(state.edits, projects.map((p) => p.slug), name);
+          if (added) save(added.edits);
+        }}
+      />
+      {workspace.root && !workspace.machine && (
+        <Row label="Look again" hint={`${plural(shown, "project")} tagged. Looked for on start and every few minutes.`}>
+          <Btn onClick={look} disabled={looking}>
+            {looking ? "Looking…" : "Look now"}
+          </Btn>
         </Row>
       )}
     </Group>

@@ -22,6 +22,7 @@
  * terminal somebody can see asks for its history again and catches up.
  */
 import type { RunView } from "../../shared/automation";
+import type { ProjectEdit } from "../../shared/subprojects";
 import { useSyncExternalStore } from "react";
 import type { Direction } from "../../shared/layout";
 import type { Action } from "../../shared/keys";
@@ -2032,6 +2033,16 @@ export function setAgentsKururuMcpOnly(profileId: string, on: boolean): void {
 /** A workspace's root folder, or "" for none. Resolves with the path the server stored; rejects with why it was refused. See `Workspace.root`. */
 export function setWorkspaceRoot(profileId: string, workspaceId: string, root: string): Promise<string | null> {
   return request((id) => ({ type: "set-workspace-root", id, profileId, workspaceId, root })) as Promise<string | null>;
+}
+
+/** The owner's edits to a workspace's projects, whole. See `shared/subprojects.ts`. */
+export function setWorkspaceProjects(profileId: string, workspaceId: string, edits: ProjectEdit[]): void {
+  send({ type: "set-workspace-projects", profileId, workspaceId, edits });
+}
+
+/** Look under a workspace's root for its projects again; resolves once the server has looked. */
+export function lookForProjects(profileId: string, workspaceId: string): Promise<unknown> {
+  return request((id) => ({ type: "look-for-projects", id, profileId, workspaceId }));
 }
 
 export function setWorkspaceMobile(profileId: string, workspaceId: string, on: boolean): void {

@@ -5,7 +5,7 @@
  * beside the others.
  */
 import { describe, expect, it } from "bun:test";
-import { LATELY_MAX, dropLast, filterGroups, nameMatch, onlyRow, pressRow, rowId, rowOn, type FilterNode, type FilterRow } from "../src/kurufilter";
+import { LATELY_MAX, dropLast, filterGroups, nameMatch, onlyRow, pressRow, rowCovered, rowId, rowOn, type FilterNode, type FilterRow } from "../src/kurufilter";
 
 const spaces = ["kururu", "Fastermenu", "Platypost", "Pasapy", "Empanada Avatar", "MV Landing", "MV Admin", "Tile Bandit", "Research"].map((name, i) => ({ key: `k${i + 1}`, name }));
 const mac: FilterNode = { name: "mac", id: null, state: "up", unheard: 0, talks: true };
@@ -117,5 +117,50 @@ describe("dropLast", () => {
     expect(dropLast(filter)).toEqual({ spaces: ["k1"], nodes: ["omarchy"] });
     expect(dropLast({ spaces: [], nodes: ["mac", "omarchy"] })).toEqual({ spaces: [], nodes: ["mac"] });
     expect(dropLast({ spaces: [], nodes: [] })).toEqual({ spaces: [], nodes: [] });
+  });
+});
+
+describe("projects in the panel", () => {
+  const sl = { key: "wksl", name: "Shared Landings" };
+  const withProjects = [
+    ...spaces,
+    sl,
+    { key: "wksl/yetapa", name: "Yetapá", parent: sl, names: ["Yetapá", "yetapa", "Yetapa Tours", "yetapatours"] },
+    { key: "wksl/parqueguasu", name: "Parque Guasú", parent: sl, names: ["Parque Guasú", "Guasu", "parqueguasu"] },
+    { key: "wksl/agualomas", name: "Agua Lomas", parent: sl, names: ["Agua Lomas", "agualomas", "O&D Lomas"] },
+  ];
+  const rowsOf = (typed: string, lately: string[] = []) => filterGroups({ typed, nodes: [], lately, spaces: withProjects });
+  const drawn = (rows: readonly FilterRow[]) => rows.map((row) => (row.kind === "space" ? `${"  ".repeat(row.depth)}${row.name}${row.parent && !row.depth ? ` · ${row.parent.name}` : ""}` : row.kind === "todo" ? "Todo" : row.name));
+
+  it("hang under their workspace, by name, and not among the workspaces", () => {
+    const all = rowsOf("").flatMap((group) => group.rows);
+    const at = drawn(all).indexOf("Shared Landings");
+    expect(drawn(all).slice(at, at + 4)).toEqual(["Shared Landings", "  Agua Lomas", "  Parque Guasú", "  Yetapá"]);
+    expect(drawn(all).filter((name) => name.includes("Yetapá"))).toHaveLength(1);
+  });
+
+  it("one lately talked about stands in Lately with its workspace beside it, and only there", () => {
+    const groups = rowsOf("", ["wksl/yetapa", "k2"]);
+    expect(drawn(groups.find((g) => g.title === "Lately")!.rows)).toEqual(["Yetapá · Shared Landings", "Fastermenu"]);
+    const rest = drawn(groups.find((g) => g.title === "Everything else")!.rows);
+    const at = rest.indexOf("Shared Landings");
+    expect(rest.slice(at, at + 3)).toEqual(["Shared Landings", "  Agua Lomas", "  Parque Guasú"]);
+  });
+
+  it("are found by any of their names, accents aside", () => {
+    expect(drawn(rowsOf("yeta")[0]!.rows)).toEqual(["Yetapá · Shared Landings"]);
+    expect(drawn(rowsOf("guasu")[0]!.rows)).toEqual(["Parque Guasú · Shared Landings"]);
+    expect(drawn(rowsOf("o&d")[0]!.rows)).toEqual(["Agua Lomas · Shared Landings"]);
+  });
+
+  it("a workspace found brings its projects", () => {
+    expect(drawn(rowsOf("shared")[0]!.rows)).toEqual(["Shared Landings", "  Agua Lomas", "  Parque Guasú", "  Yetapá"]);
+  });
+
+  it("a picked workspace covers its projects, which press on their own", () => {
+    const yetapa = rowsOf("yeta")[0]!.rows[0]!;
+    expect(rowCovered({ spaces: ["wksl"], nodes: [] }, yetapa)).toBe(true);
+    expect(rowOn({ spaces: ["wksl"], nodes: [] }, yetapa)).toBe(false);
+    expect(pressRow({ spaces: [], nodes: [] }, yetapa)).toEqual({ spaces: ["wksl/yetapa"], nodes: [] });
   });
 });

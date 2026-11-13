@@ -149,6 +149,7 @@ export function makeDashboard(id: string, key: string, layout: LayoutNode): Work
     machine: null,
     root: null,
     mobile: false,
+    subprojects: { found: [], edits: [] },
   };
 }
 

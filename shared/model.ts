@@ -25,6 +25,7 @@
  * profile here is a namespace, not a process. The visible behaviour is the same
  * — and the agents in the profile you are not looking at are still running.
  */
+import type { Subprojects } from "./subprojects";
 import type { RemoteView } from "./remote";
 import type { AutomationView } from "./automation";
 import type { KeyOverrides } from "./keys";
@@ -689,6 +690,14 @@ export interface Workspace {
    * A preference, set in Settings → Workspaces; false until somebody ticks it.
    */
   mobile: boolean;
+  /**
+   * The projects inside it — a monorepo's sites, each its own thing — which
+   * Kuru's conversation is tagged and filtered by beside the workspace
+   * (`shared/subprojects.ts`). `found` is the server's look under the root,
+   * done again rather than stored; `edits` is the owner's, from Settings →
+   * Workspaces, and the only part written down.
+   */
+  subprojects: Subprojects;
 }
 
 /** Long enough for a client's name and a word; a group heading is one line of a narrow column. */
