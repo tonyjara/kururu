@@ -399,14 +399,19 @@ not come, and costs a round trip where the line costs a dozen tokens.
 
 ## A line folded to one row
 
-Beside the reply arrow, on the arrow's terms — on hover, and quietly always
-on a touch screen — every message of yours and every reply of Kuru's has a
-fold. Folded, the line is one row: who said it, when, and its first line,
-cut where the bubble ends, with an ellipsis of its own when more lines
-follow one that fits. The ground and the side stay, so a column of folded
-lines still reads as two people; the speaker, the state word, the arrows
-and any card or file in that first line keep working, and a click anywhere
-else on the row opens it again. There is no fold for every line at once: the
+A line's header is its fold. Every message of yours and every reply of
+Kuru's has a minus at the head of its header, always shown, where Kuru's
+replies had a speaker until 2026-11-13; it and a click anywhere else on the
+header — the time, the empty space — fold the line, and the plus it turns
+into, or a click anywhere on the folded row, opens it again. The arrows, the
+pin, a tag chip, a card and a file in the header stay doors of their own. The
+fold was a hover button beside the reply arrow until then (the owner,
+2026-11-13: "clicking anywhere in that section should do it"). Folded, the
+line is one row: who said it, when, and its first line, cut where the bubble
+ends, with an ellipsis of its own when more lines follow one that fits. The
+ground and the side stay, so a column of folded lines still reads as two
+people. A search's results have no fold: they stand open, and a click on one
+is the door to where it was said. There is no fold for every line at once: the
 header's went on 2026-11-06, asked for by the user. kururu's notices are left alone: they are one line
 already, with the message behind a tap.
 

@@ -1745,15 +1745,6 @@ export function kuruTag(profileId: string, id: string, workspaceKey: string, kep
 }
 
 /**
- * Say one reply again, from the drawer's speaker. `text` is the reply as the
- * drawer already shows it, for when the one being replayed is already heard
- * and so the server has no copy of its words left to say again.
- */
-export function kuruReplay(profileId: string, utterance: string, text?: string): void {
-  send({ type: "kuru-replay", profileId, utterance, text });
-}
-
-/**
  * A line for Kuru from the drawer's composer. Minted an id here, as a clip
  * is, so that the server can tell a retry from a second message; what comes
  * back is the outbox's record of it, on the socket, merged into the

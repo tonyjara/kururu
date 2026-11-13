@@ -213,8 +213,11 @@ reply in flight leaves that reply missed rather than forgotten. Each profile
 keeps its newest thirty (`MISSED_MAX`).
 
 **Getting them back.** The drawer marks each unheard reply where it sits
-in the conversation, with a **Play** of its own; Kuru's chip
-carried the count until 2026-10-12 and no longer does. Saying (or typing) "what did I miss?" to Kuru
+in the conversation; Kuru's chip
+carried the count until 2026-10-12 and no longer does. Each reply had a
+speaker of its own to hear it again (`kuru-replay`, `Voice.replayOne`) until
+2026-11-13, when it had stopped working and was taken out rather than mended:
+its place in the line's header is the fold's now. Saying (or typing) "what did I miss?" to Kuru
 plays all of them, oldest first, each starting "Earlier.": the role tells it
 to call `play_missed`, which queues them and hands their words back to it so
 it ends its turn with a line rather than a retelling. The menu bar's **Play**
@@ -369,7 +372,7 @@ them stays unheard.
 Another node's lines are searched only as far as this drawer holds them, its last
 `PEER_RECENT`: its history is on its own disk and `peerItems` is all that crosses.
 
-**A pin** sits after the reply arrow and the fold, shown the way they are, and on
+**A pin** sits after the reply arrow, shown the way it is, and on
 a pinned line it stays shown, in the accent; pressed again it comes off. Once
 anything is pinned the header has a pin with the count, which opens the list
 under the header: who, when, and the opening words, newest said first, each with

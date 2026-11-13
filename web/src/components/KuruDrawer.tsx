@@ -15,11 +15,10 @@
  * carry a mic for a clip or nothing for a typed line, the time, the clip's
  * length, and one word in the status inks for where they are — Saving,
  * Hearing, Waiting for Kuru, Sent, Delivered, Failed — with Resend and
- * Discard inline on a failed one. Kuru's replies carry the speaker glyph and
- * the full text; the speaker is Play and Stop both, for any reply with words
- * to say again, and shows which it is — an unheard one also says so beside
- * it, the one audible right now says Speaking, and a line said mid-turn
- * through the `say` tool is drawn smaller. A live line over the composer
+ * Discard inline on a failed one. Kuru's replies carry the full text — an
+ * unheard one says so beside its time, the one audible right now says
+ * Speaking, and a line said mid-turn through the `say` tool is drawn
+ * smaller. A live line over the composer
  * says what Kuru is doing now — thinking, with Stop beside it — and the
  * composer under it types to Kuru through the same outbox a clip goes
  * through — so the phone talks to Kuru today, since playback works over
@@ -64,9 +63,8 @@
  * played to its end, or when it has been in view in the open drawer for
  * `KURU_SEEN_MS`. The count's job is to bring you here; once you are here it
  * has done it, and a count that survived reading would teach you to ignore
- * it. So nothing here clears the count by hand: a reply's own speaker says it
- * again, and asking Kuru what you missed has it call `play_missed` for all of
- * them. The header used to carry "Play unheard" and "Mark all heard" for
+ * it. So nothing here clears the count by hand: asking Kuru what you missed
+ * has it call `play_missed` for all of them. The header used to carry "Play unheard" and "Mark all heard" for
  * those two jobs, and they were two buttons nobody could say the use of.
  *
  * **The speaker in the box's foot is Settings → Voice's "Speak replies"** — the
@@ -96,8 +94,9 @@
  * reply draws it as a quote that scrolls back to the line. A peer's line is
  * answered the same way, and the message starts `@node` so it goes there.
  *
- * **Any line folds to one row.** Beside the arrow, a fold leaves a message
- * of yours or a reply of Kuru's as who said it, when, and its first line,
+ * **Any line folds to one row, by its header.** The minus at the head of a
+ * message of yours or a reply of Kuru's, or a click anywhere on that header
+ * line, leaves it as who said it, when, and its first line under a plus,
  * and a click anywhere on that row opens it again. What is folded is this device's, kept by
  * `kurufold.ts`, and so is the switch that starts long ones folded. A
  * quote's line and the reply the pill was showing open on the way to being
@@ -418,60 +417,6 @@ export function KuruDrawer({
   const working = kuruWorking(profile, agents);
   const list = useRef<HTMLOListElement>(null);
   const stuck = useRef(true);
-
-  /**
-   * The speaker icon's own replay: which row asked to hear its reply again.
-   * There is one player, so one id is enough. Set the moment it is asked
-   * for, so a click shows the stop state at once rather than waiting out the
-   * gap before the first sentence is ready; `started` keeps that optimism
-   * from reading as "done" the instant it is set, and is what tells a replay
-   * that reached the pill's phase from one that never did — the row clears
-   * only once the player has actually left `speaking`, not before it got
-   * there, whatever took it away: the reply ending, Escape, or another row's
-   * click stopping it first.
-   */
-  const [replayingId, setReplayingId] = useState<string | null>(null);
-  const replayStarted = useRef(false);
-  useEffect(() => {
-    if (!replayingId) return;
-    if (ui.phase === "speaking") {
-      replayStarted.current = true;
-      return;
-    }
-    if (replayStarted.current) {
-      replayStarted.current = false;
-      setReplayingId(null);
-    }
-  }, [ui.phase, replayingId]);
-
-  /**
-   * The speaker clicked, on any reply: stop whatever that row is doing if it
-   * is the one audible right now — this row's own replay, or Kuru genuinely
-   * saying it for the first time — through `dismissVoice`, the pill's ✕
-   * itself, so a reply cut off here lands unheard exactly as it would from
-   * there. Otherwise this reply was not playing, so anything else that was
-   * is stopped first — one player, one row at a time — and this one is asked
-   * for, with the words the drawer already has: a reply already heard has
-   * left the missed list and kept no other copy of them.
-   */
-  const onReplay = useCallback(
-    (item: KuruReply) => {
-      if (!item.utterance) return;
-      if (replayingId === item.id || item.fate === "speaking") {
-        dismissVoice();
-        if (replayingId === item.id) {
-          replayStarted.current = false;
-          setReplayingId(null);
-        }
-        return;
-      }
-      if (ui.phase === "speaking") dismissVoice();
-      replayStarted.current = false;
-      setReplayingId(item.id);
-      api.kuruReplay(profile.id, item.utterance, item.text);
-    },
-    [profile.id, replayingId, ui.phase],
-  );
 
   /**
    * Everything seen so far, by id, so items the socket's window has slid past
@@ -1334,7 +1279,7 @@ export function KuruDrawer({
                     quoteRef={quoteRefOf(item)}
                     flash={flash === item.id || (searching && walked === item.id)}
                     folded={foldedOf(item) === true}
-                    onFold={item.text ? () => toggleFold(item) : null}
+                    onFold={item.text && !searching ? () => toggleFold(item) : null}
                     pin={pinOf(item)}
                     tagging={taggingOf(item)}
                   />
@@ -1364,12 +1309,10 @@ export function KuruDrawer({
                 // wore the accent of the one just scrolled to, for good.
                 marked={marked !== null && marked === item.utterance}
                 flash={flash === item.id || (searching && walked === item.id)}
-                replaying={replayingId === item.id}
-                onReplay={onReplay}
                 onReplyTo={() => replyTo(item)}
                 quoteRef={quoteRefOf(item)}
                 folded={foldedOf(item) === true}
-                onFold={() => toggleFold(item)}
+                onFold={searching ? null : () => toggleFold(item)}
                 cardOf={item.node === null ? cardOf : noCards}
                 onCard={onCard}
                 onFile={onFile}
@@ -1761,7 +1704,7 @@ function You({
   quoteRef?: string | null;
   flash?: boolean;
   folded?: boolean;
-  /** Fold it to one row, or open it. Null for a message with no words to fold. */
+  /** Fold it to one row, or open it: its header's glyph, or a click anywhere on the header. Null for a message with no words to fold, and for a search's result. */
   onFold?: (() => void) | null;
   /** Its pin, or null for a line that cannot take one (`canPin`). */
   pin?: PinProps | null;
@@ -1778,9 +1721,10 @@ function You({
     <li
       className={`kuru-item kuru-you kuru-you-${state} ${line ? "kuru-folded" : ""} ${flash ? "kuru-flash" : ""} ${pin?.pinned ? "kuru-pinned" : ""}`}
       data-item={item.id}
-      onClick={line && onFold ? opensOnClick(onFold) : undefined}
+      onClick={onFold ? togglesOnClick(onFold, line !== null) : undefined}
     >
-      <span className="kuru-meta">
+      <span className={`kuru-meta ${onFold ? "kuru-meta-folds" : ""}`}>
+        {onFold && <FoldButton folded={line !== null} onFold={onFold} />}
         {line ? <span className="kuru-fold-who">{foldWho("you", node)}</span> : <NodeTag node={node} />}
         {to && <span className="kuru-node" title={`For the Kuru on ${to}`}>→ {to}</span>}
         {item.through && <span className="kuru-via" title={`Written or said at ${item.through}`}>from {item.through}</span>}
@@ -1804,7 +1748,6 @@ function You({
           </FoldLine>
         )}
         {onReplyTo && item.text && <ReplyButton onReply={onReplyTo} />}
-        {onFold && <FoldButton folded={line !== null} onFold={onFold} />}
         {pin && <PinButton {...pin} />}
         {tagging?.edit && <TagButton {...tagging.edit} />}
       </span>
@@ -1833,18 +1776,18 @@ function You({
 
 /**
  * One of Kuru's replies, with its fate beside it and a door onto every card
- * it names. The speaker is the one control for Play and Stop both: it plays
- * this reply again while idle, and stops whatever is audible — this replay,
- * or Kuru saying it for the first time — while `active`. Folded, the meta
- * line holds its first line, still with every door in it.
+ * it names. Its header is the fold, as a message of yours is: the glyph at
+ * its start, or a click anywhere on it that is not a door of its own.
+ * Folded, the meta line holds its first line, still with every door in it.
+ * There used to be a speaker where the glyph is, to hear the reply again,
+ * and it had stopped working; it was taken out on 2026-11-13 rather than
+ * mended, since `play_missed` is how a reply is heard again.
  */
 function Reply({
   item,
   node,
   marked,
   flash,
-  replaying,
-  onReplay,
   onReplyTo,
   quoteRef,
   folded,
@@ -1861,15 +1804,13 @@ function Reply({
   marked: boolean;
   /** A quote of it was just pressed. */
   flash: boolean;
-  replaying: boolean;
-  onReplay: (item: KuruReply) => void;
   /** Reply to this one: the composer quotes it — and starts `@node ` for another node's Kuru. */
   onReplyTo: () => void;
   /** The reference a quote of its words is written after (`quotable`); null for another node's, which this Kuru cannot find. */
   quoteRef: string | null;
   folded: boolean;
-  /** Fold it to one row, or open it. */
-  onFold: () => void;
+  /** Fold it to one row, or open it. Null for a search's result, which stands open and is a door to where it was said. */
+  onFold: (() => void) | null;
   cardOf: CardOf;
   onCard: (workspaceId: string | null, cardId: string) => void;
   /** A path in the reply was opened. */
@@ -1877,7 +1818,6 @@ function Reply({
   pin?: PinProps | null;
   tagging?: Tagging | null;
 }) {
-  const active = replaying || item.fate === "speaking";
   // Parsed once per reply, not per draw: the drawer draws again on every
   // message of the socket, and a long conversation is hundreds of replies.
   const tree = useMemo(() => (folded ? null : replyTree(item.text)), [folded, item.text]);
@@ -1897,26 +1837,13 @@ function Reply({
       className={`kuru-item kuru-reply ${item.aside ? "kuru-aside" : ""} ${item.fate ? `kuru-fate-${item.fate}` : ""} ${line ? "kuru-folded" : ""} ${marked ? "kuru-marked" : ""} ${flash ? "kuru-flash" : ""} ${pin?.pinned ? "kuru-pinned" : ""}`}
       data-utterance={item.utterance ?? undefined}
       data-item={item.id}
-      onClick={line ? opensOnClick(onFold) : undefined}
+      onClick={onFold ? togglesOnClick(onFold, line !== null) : undefined}
     >
-      <span className="kuru-meta">
-        {item.utterance ? (
-          <button
-            type="button"
-            className={`kuru-speaker ${active ? "kuru-speaker-playing" : ""}`}
-            onClick={() => onReplay(item)}
-            title={active ? "Stop (Esc)" : "Play again"}
-            aria-label={active ? "Stop" : "Play this reply again"}
-            aria-pressed={active}
-          >
-            {active ? <Icon name="stop" /> : <SpeakerIcon />}
-          </button>
-        ) : (
-          <SpeakerIcon />
-        )}
+      <span className={`kuru-meta ${onFold ? "kuru-meta-folds" : ""}`}>
+        {onFold && <FoldButton folded={line !== null} onFold={onFold} />}
         {line ? <span className="kuru-fold-who">{foldWho("kuru", node)}</span> : <NodeTag node={node} />}
         <time dateTime={new Date(item.at).toISOString()}>{saidAt(item.at)}</time>
-        {active ? (
+        {item.fate === "speaking" ? (
           <span className="kuru-state kuru-state-speaking">Speaking</span>
         ) : item.fate === "unheard" ? (
           <span className="kuru-state kuru-state-unheard">Unheard</span>
@@ -1928,7 +1855,6 @@ function Reply({
           </FoldLine>
         )}
         <ReplyButton onReply={onReplyTo} />
-        <FoldButton folded={line !== null} onFold={onFold} />
         {pin && <PinButton {...pin} />}
         {tagging?.edit && <TagButton {...tagging.edit} />}
       </span>
@@ -1993,24 +1919,32 @@ function FoldLine({ more, children }: { more: boolean; children: ReactNode }) {
 }
 
 /**
- * A folded line opens wherever it is clicked, except on what is a door of
- * its own — the speaker, the arrows, a card, a file — and except at the end
- * of a drag that was selecting some of its words.
+ * A line's header is its fold (the owner, 2026-11-13: "clicking anywhere in
+ * that section should do it"): a click on the meta line folds an open line
+ * and opens a folded one, and a folded line, which is nothing but its
+ * header, opens wherever it is clicked. Not on what is a door of its own —
+ * the arrows, the pin, a tag, a card, a file — and not at the end of a drag
+ * that was selecting some of its words. The glyph is a button of its own,
+ * which answers its own click, so a press on it is let by here.
  */
-function opensOnClick(open: () => void) {
+function togglesOnClick(toggle: () => void, folded: boolean) {
   return (event: React.MouseEvent) => {
-    if (event.target instanceof Element && event.target.closest("button, a")) return;
+    if (!(event.target instanceof Element)) return;
+    if (event.target.closest("button, a")) return;
+    if (!folded && !event.target.closest(".kuru-meta")) return;
     if (window.getSelection()?.toString()) return;
-    open();
+    toggle();
   };
 }
 
 /**
- * The fold, beside the reply arrow and on its terms: on hover where there is
- * a pointer, quietly always on a touch screen. The glyph is what a press
- * does — chevrons closing on a line that is open, opening on one that is
- * folded — and the name stays the same both ways, with `aria-pressed` saying
- * which, as the speaker switch's does.
+ * The fold, at the head of a line's header where the speaker used to be: a
+ * minus on a line that is open, a plus on one that is folded, always there
+ * in the header's ink. It is the header's keyboard door — the rest of the
+ * header takes a click but holds real buttons, which a `role="button"`
+ * wrapped round them would hide from a screen reader — and it says which
+ * way it is with `aria-expanded`. It was beside the reply arrow, on hover,
+ * until 2026-11-13. It keeps the keyboard where it was, as the arrow does.
  */
 function FoldButton({ folded, onFold }: { folded: boolean; onFold: () => void }) {
   return (
@@ -2019,9 +1953,9 @@ function FoldButton({ folded, onFold }: { folded: boolean; onFold: () => void })
       className="kuru-fold-btn"
       onMouseDown={(event) => event.preventDefault()}
       onClick={onFold}
-      title={folded ? "Unfold this message" : "Fold this message to one row"}
-      aria-label="Fold this message to one row"
-      aria-pressed={folded}
+      title={folded ? "Expand this message" : "Collapse this message to one row"}
+      aria-label={folded ? "Expand this message" : "Collapse this message"}
+      aria-expanded={!folded}
     >
       <FoldIcon folded={folded} />
     </button>
@@ -3038,11 +2972,11 @@ function KeysIcon() {
   );
 }
 
-/** Two chevrons opening away from a line, to unfold it, or closing on it, to fold it — drawn here for `KeysIcon`'s reason. */
+/** A minus on an open line, to collapse it, and a plus on a folded one, to expand it — drawn here for `KeysIcon`'s reason. */
 function FoldIcon({ folded }: { folded: boolean }) {
   return (
-    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={folded ? "m7 15 5 5 5-5M7 9l5-5 5 5" : "m7 20 5-5 5 5M7 4l5 5 5-5"} />
+    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+      <path d={folded ? "M5 12h14M12 5v14" : "M5 12h14"} />
     </svg>
   );
 }

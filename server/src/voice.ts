@@ -522,29 +522,6 @@ export class Voice {
     this.deps.changed();
   }
 
-  /**
-   * One reply said again, from the drawer's speaker on that reply. A reply
-   * still on the missed list says its own kept words, exactly as `replay`
-   * does for every one of them. A reply already heard has left the list and
-   * kept no words here, so `text` — the drawer's own copy — is said in its
-   * place; `replays` is still set, so the words that come of it settle
-   * nothing and never join the list themselves. Whether there was something
-   * to say.
-   */
-  replayOne(profileKey: string, utterance: string, text?: string): boolean {
-    const entry = this.missed.find((e) => e.id === utterance && e.profileKey === profileKey);
-    if (entry) {
-      if (entry.pending || entry.replaying) return false;
-      const id = this.speak(profileKey, entry.text, { lang: entry.lang, lead: "earlier", replays: entry.id, spoken: true });
-      if (!id) return false;
-      entry.replaying = id;
-      return true;
-    }
-    const fallback = text?.trim();
-    if (!fallback) return false;
-    return this.speak(profileKey, fallback, { lead: "earlier", replays: utterance }) !== null;
-  }
-
   /** A missed reply as the wire carries it: the profile's id for this session, and none of the server's bookkeeping. */
   private wire(entry: StoredMissed): MissedReply {
     return { id: entry.id, profileId: this.deps.profileIdOf(entry.profileKey) ?? "", text: entry.text, lang: entry.lang, at: entry.at };

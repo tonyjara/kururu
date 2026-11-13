@@ -158,6 +158,12 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **A message in Kuru's chat collapses by its header.** Each message's
+  header line starts with a minus: click it, or anywhere on the header (the
+  time, the empty space), and the message folds to one row under a plus;
+  click again to open it. Tag chips, Reply and Pin still do what they did.
+  The fold button that sat beside Reply is gone. In the drawer and the
+  floating chat alike.
 - **Kuru's chat: the top is for finding, the bottom is for talking.** The
   header now holds only what changes the list — Search, Filter, Pins — with
   their words beside them when the drawer is wide enough. The speaker (read
@@ -244,6 +250,10 @@ shows, so it is written once and read in three places — see
 
 ### Removed
 
+- **The speaker on each of Kuru's replies**, which was meant to say the
+  reply again and no longer worked. Asking Kuru "what did I miss?" still
+  plays the replies you missed, and the speaker in the box's foot (read
+  replies aloud) is unchanged.
 - **Settings → Agents → Where they open**, and the same choice per
   workspace. There is one rule now (see Changed), so bottom, top and off
   have nothing left to choose between.

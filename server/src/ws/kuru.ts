@@ -1,5 +1,5 @@
 /**
- * Kuru: its terminal, its restart and Auto Swap, and the drawer — what was seen, replayed, said and stopped, and the voice messages still on the disk.
+ * Kuru: its terminal, its restart and Auto Swap, and the drawer — what was seen, said and stopped, and the voice messages still on the disk.
  *
  * One area of what a client can ask over its socket, cut out of the switch
  * that was `index.ts`'s; `dispatch.ts` asks each area in turn and stops at
@@ -71,13 +71,6 @@ export function kuruVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
     case "kuru-tag": {
       const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
       if (key) kuru.tag(key, msg.id, msg.workspaceKey, msg.kept === true);
-      return true;
-    }
-
-    case "kuru-replay": {
-      const key = typeof msg.profileId === "string" ? workspaces.keyOf(msg.profileId) : null;
-      const node = typeof msg.utterance === "string" ? nodeOfUtterance(msg.utterance) : null;
-      if (key && typeof msg.utterance === "string") voice.replayOne(node ? peerKey(node) : key, msg.utterance, typeof msg.text === "string" ? msg.text.slice(0, KURU_SAY_MAX) : undefined);
       return true;
     }
 

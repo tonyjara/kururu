@@ -5830,10 +5830,9 @@ html.pill-page #root {
    screen, where nothing hovers. Hidden by opacity rather than taken out, so a
    row does not change width as the pointer crosses it. On a phone it is a
    thumb's size and borrows the line's height rather than adding to it. The
-   fold beside it is drawn on the same terms, after it, since the arrow has
-   already taken the free space. */
+   pin and the tag button beside it are drawn on the same terms, after it,
+   since the arrow has already taken the free space. */
 .kuru-reply-btn,
-.kuru-fold-btn,
 .kuru-pin-btn,
 .kuru-tag-btn {
   display: inline-flex;
@@ -5849,21 +5848,18 @@ html.pill-page #root {
   opacity: 0;
 }
 .kuru-item:hover .kuru-reply-btn,
-.kuru-item:hover .kuru-fold-btn,
 .kuru-item:hover .kuru-pin-btn,
 .kuru-item:hover .kuru-tag-btn,
 .kuru-notice:hover .kuru-reply-btn,
 .kuru-notice:hover .kuru-pin-btn,
 .kuru-notice:hover .kuru-tag-btn,
 .kuru-reply-btn:focus-visible,
-.kuru-fold-btn:focus-visible,
 .kuru-pin-btn:focus-visible,
 .kuru-tag-btn:focus-visible,
 .kuru-tag-btn.kuru-tag-btn-open {
   opacity: 1;
 }
 .kuru-reply-btn:hover,
-.kuru-fold-btn:hover,
 .kuru-pin-btn:hover,
 .kuru-tag-btn:hover {
   color: var(--text);
@@ -5871,21 +5867,18 @@ html.pill-page #root {
 }
 @media (hover: none) {
   .kuru-reply-btn,
-  .kuru-fold-btn,
   .kuru-pin-btn,
   .kuru-tag-btn {
     opacity: 0.7;
   }
 }
 :root[data-narrow] .kuru-reply-btn,
-:root[data-narrow] .kuru-fold-btn,
 :root[data-narrow] .kuru-pin-btn,
 :root[data-narrow] .kuru-tag-btn {
   width: 28px;
   height: 28px;
   margin-block: -6px;
 }
-.kuru-fold-btn,
 .kuru-pin-btn,
 .kuru-tag-btn {
   margin-left: 0;
@@ -6137,10 +6130,6 @@ html.pill-page #root {
 .kuru-searching .kuru-item {
   cursor: pointer;
 }
-/* It stands open while it is a result, so there is nothing to fold. */
-.kuru-searching .kuru-fold-btn {
-  display: none;
-}
 /* The words a search found. The line keeps its own ink and only its ground
    changes, so whoever spoke it, it reads as it did. A word
    found by a typo is underlined instead: lit, but not claiming to be what you
@@ -6273,11 +6262,15 @@ html.pill-page #root {
 .kuru-meta {
   --icon-size: var(--icon-sm);
 }
-/* The speaker doubles as Play and Stop, once a reply has an utterance to
-   replay: a button rather than the bare glyph, tinted the same ink the
-   "Speaking" word wears while it is audible — this reply's own replay, or
-   Kuru saying it for the first time. */
-.kuru-speaker {
+/* The header is the fold (the owner, 2026-11-13), so it wears the pointer,
+   and its glyph — a minus open, a plus folded — stands at its head where the
+   speaker stood, always shown in the header's ink. Hovering the header lights
+   the glyph, which is what says what a click there will do. On a phone it is
+   a thumb's size and borrows the line's height rather than adding to it. */
+.kuru-meta-folds {
+  cursor: pointer;
+}
+.kuru-fold-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6285,20 +6278,21 @@ html.pill-page #root {
   width: 18px;
   height: 18px;
   padding: 0;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-sm);
   color: inherit;
 }
-.kuru-speaker:hover {
+.kuru-meta-folds:hover .kuru-fold-btn,
+.kuru-fold-btn:focus-visible {
+  color: var(--text);
+}
+.kuru-fold-btn:hover {
   color: var(--text);
   background: var(--chrome-high);
 }
-.kuru-speaker-playing,
-.kuru-speaker-playing:hover {
-  color: var(--working);
-}
-:root[data-narrow] .kuru-speaker {
+:root[data-narrow] .kuru-fold-btn {
   width: 28px;
   height: 28px;
+  margin-block: -6px;
 }
 /* What became of a line, in the status inks the agents' badges use: the same
    word means the same colour everywhere. */

@@ -1789,13 +1789,6 @@ export type ClientMessage =
   /** Add a workspace to a line of Kuru's conversation, or take one off (`shared/kurutags.ts`). */
   | { type: "kuru-tag"; profileId: string; id: string; workspaceKey: string; kept: boolean }
   /**
-   * Say one reply again, from the drawer's speaker on that reply. `text` is
-   * the reply as the drawer already shows it, for a reply the missed list no
-   * longer remembers — one already heard — which has no other copy of its
-   * words left on the server to say again.
-   */
-  | { type: "kuru-replay"; profileId: string; utterance: string; text?: string }
-  /**
    * A message typed in the drawer's composer, for Kuru: the voice's road
    * without the clip. Through the outbox, so it gets the same queued, sent,
    * delivered and failed states and the same retries a spoken one does, and
