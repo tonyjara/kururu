@@ -79,7 +79,7 @@ export interface KururuState {
    * — and which the preview pane, PLAN.md item 5, will want as well.
    */
   devServers: DevServer[];
-  /** The ngrok and cloudflared tunnels on this machine, and whether each answers. See `server/src/tunnels.ts`. */
+  /** The Cloudflare tunnels on this machine, and whether each answers. See `server/src/tunnels.ts`. */
   tunnels: Tunnel[];
   /**
    * The branch each workspace is on, for the workspaces that are in a repo.

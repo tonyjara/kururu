@@ -1,35 +1,34 @@
 /**
- * Which tunnels are putting this machine on the internet, and whether the
- * address each one gave out still answers.
+ * Which Cloudflare tunnels are putting this machine on the internet, and
+ * whether the address each one gave out still answers.
  *
- * A tunnel fails quietly. ngrok loses its session, cloudflared's quick tunnel
- * is ended with the shell it was typed into, the dev server behind one is
+ * A tunnel fails quietly. cloudflared is ended with the shell it was typed
+ * into, loses its connection to the edge, or the dev server behind it is
  * restarted onto another port — and nothing on the Mac says so, while
  * WhatsApp's webhooks and a TestFlight build pointed at the address go on
  * failing somewhere nobody is looking (the owner, 2026-11-13: "it'd be nice
  * to see our tunnels from the dev server as well to know that they are up").
  *
- * Found, not configured: the process table names the ngroks and cloudflareds
- * (`see`, on the dev scan's beat and off its `ps`), and each one is asked
- * what it is serving the way it answers best — ngrok's agent API
- * (`/api/tunnels`, on whatever port this agent bound, 4040 for the first),
- * cloudflared's metrics server (`/quicktunnel` and `/config`, on a port of
- * its own choosing), its config file for a named tunnel, and as a last
- * resort the URL it printed in the kururu terminal it runs in. The ports are
- * asked of `lsof` by pid, never guessed: a second ngrok is on 4041, and an
- * old cloudflared binds its metrics anywhere.
+ * Cloudflare only, and named tunnels on the owner's own domain above all:
+ * ngrok was supported and taken out the same day
+ * ("use cloudflare, don't even support ngrok"), and with it the half-hour beat
+ * its free plan's 20,000 requests a month forced on the check. Quick tunnels
+ * (`cloudflared tunnel --url`, a `trycloudflare.com` address) are still seen,
+ * since they are the same program and cost nothing to watch.
  *
- * Checked on two beats, because the obvious one would break what it watches.
- * ngrok's free plan is 20,000 requests a month, and a request a minute is
- * 43,200: the check alone would use up Holapy's webhooks' allowance by the
- * middle of the month. So every minute each tunnel is looked at locally —
- * its process, its agent still listing it, something listening on the port
- * it forwards to — and its public address is asked with a HEAD of `/` only
- * every `NGROK_PUBLIC_MS` for ngrok (four or five per cent of the plan), every
- * minute for Cloudflare, which counts nothing, and sooner than that for an
- * ngrok address that last said it was down. Any HTTP answer is up except the
- * tunnel's own error: ngrok's `ngrok-error-code` header, Cloudflare's 530, and
- * Cloudflare's 502–504, which is cloudflared reaching a port nobody answered.
+ * Found, not configured: the process table names the cloudflareds (`see`, on
+ * the dev scan's beat and off its `ps`), and each one is asked what it is
+ * serving the way it answers best — its metrics server (`/quicktunnel` and
+ * `/config`, on a port of its own choosing, asked of `lsof` by pid and never
+ * guessed), then the config file a named tunnel runs from (`--config`, else
+ * `~/.cloudflared/config.yml`), and as a last resort the address a quick
+ * tunnel printed in the kururu terminal it runs in.
+ *
+ * Every minute each tunnel is looked at locally — its process, something
+ * listening on the port it forwards to — and its public address is asked
+ * with a HEAD of `/`; Cloudflare counts none of it. Any HTTP answer is up
+ * except Cloudflare's own word that it is not: 530, and 502–504 from
+ * Cloudflare, which is cloudflared reaching a port nobody answered.
  *
  * Kuru is told when a tunnel that was up goes down and stays down a second
  * look later, and when it comes back — through `harness.announce`, as
@@ -39,14 +38,10 @@
  * Read-only towards every tunnel: nothing here starts, stops or signals one.
  */
 import { homedir } from "node:os";
-import type { DevServer, Tunnel, TunnelHealth, TunnelKind } from "../../shared/wire";
+import type { DevServer, Tunnel, TunnelHealth } from "../../shared/wire";
 import { TUNNEL_CHECK_MS } from "../../shared/wire";
 import type { ProcRows } from "./proctable";
 
-/** How often an ngrok address is asked from outside while it is answering. See the module's comment. */
-export const NGROK_PUBLIC_MS = 30 * 60_000;
-/** …and while it last said it was down, so that its coming back is seen. */
-export const NGROK_DOWN_PUBLIC_MS = 5 * 60_000;
 /** How long a tunnel whose process ended stays listed, as stopped. */
 export const GONE_KEEP_MS = 30 * 60_000;
 /** A tunnel just started may not have its address yet (a quick tunnel takes seconds): looked at again this soon. */
@@ -61,19 +56,13 @@ const TELL_AFTER = 2;
 
 /** What a command line says about the tunnel it starts, before anything is asked. */
 export interface TunnelCommand {
-  kind: TunnelKind;
-  /** What it was told to forward to: `3006`, `localhost:3006`, `http://localhost:8080`. */
+  /** A quick tunnel's `--url`: `http://localhost:8080`. */
   target: string | null;
-  /** The address it was told to take (`--url`, `--domain`), for ngrok. */
-  url: string | null;
-  /** cloudflared's `--config`, for a named tunnel's ingress. */
+  /** `--config`, for a named tunnel's ingress. */
   config: string | null;
-  /** A named cloudflared tunnel (`tunnel run`), whose addresses are in its config. */
+  /** A named tunnel, whose addresses are in its config (or, run by token, only in its metrics). */
   named: boolean;
 }
-
-/** Subcommands of ngrok that start a tunnel; anything else (`config`, `version`, `update`…) does not. */
-const NGROK_TUNNELS = new Set(["http", "tls", "tcp", "start", "service"]);
 
 function base(token: string): string {
   const cut = token.lastIndexOf("/");
@@ -92,13 +81,15 @@ function flag(tokens: readonly string[], ...names: string[]): string | null {
   return null;
 }
 
-/** ngrok's and cloudflared's flags that take a value, so the value is not read as a positional. */
+/** cloudflared's flags that take a value, so the value is not read as a positional. */
 const VALUE_FLAGS = new Set([
-  "--url", "--domain", "--hostname", "--subdomain", "--config", "--authtoken", "--region", "--log", "--log-level",
-  "--log-format", "--host-header", "--basic-auth", "--oauth", "--traffic-policy-file", "--metrics", "--token",
-  "--loglevel", "--logfile", "--protocol", "--origincert", "--credentials-file", "--cred-file", "--name",
-  "--edge-ip-version", "--pidfile", "--ha-connections",
+  "--url", "--hostname", "--config", "--metrics", "--token", "--loglevel", "--logfile", "--log-directory",
+  "--protocol", "--origincert", "--credentials-file", "--cred-file", "--name", "--edge-ip-version", "--pidfile",
+  "--ha-connections", "--region", "--transport-loglevel", "--grace-period", "--tag", "--label",
 ]);
+
+/** Flags that make cloudflared print something and leave, rather than run. */
+const ONLY_SAYS = new Set(["--version", "-v", "-V", "--help", "-h"]);
 
 function positionals(tokens: readonly string[]): string[] {
   const out: string[] = [];
@@ -115,9 +106,14 @@ function positionals(tokens: readonly string[]): string[] {
 
 /**
  * Whether a command line starts a tunnel, and what it says about it. Only the
- * program itself, never something that mentions it: `ngrok` must be the
- * command (after `KEY=value` prefixes), so `grep ngrok` and an editor open on
- * `ngrok.yml` are nobody's tunnel. Pure, for the test.
+ * program itself, never something that mentions it: `cloudflared` must be
+ * the command (after `KEY=value` prefixes), so `grep cloudflared` and an
+ * editor open on its config are nobody's tunnel.
+ *
+ * A named tunnel is `cloudflared tunnel … run [name]`, and also cloudflared
+ * with no subcommand at all, or `tunnel` alone: both run the tunnel the
+ * config file names, and the first is how `cloudflared service install`
+ * starts one at login. Pure, for the test.
  */
 export function matchTunnel(args: string): TunnelCommand | null {
   const tokens = args.split(/\s+/).filter(Boolean);
@@ -126,22 +122,12 @@ export function matchTunnel(args: string): TunnelCommand | null {
   const program = tokens[i] ? base(tokens[i]!) : "";
   const rest = tokens.slice(i + 1);
   const words = positionals(rest);
-  if (program === "ngrok") {
-    const sub = words[0];
-    if (!sub || !NGROK_TUNNELS.has(sub)) return null;
-    if (sub === "service" && words[1] !== "run") return null;
-    const target = sub === "http" || sub === "tls" || sub === "tcp" ? (words[1] ?? null) : null;
-    const asked = flag(rest, "--url", "--domain", "--hostname");
-    const url = asked ? (/^[a-z]+:\/\//i.test(asked) ? asked : `https://${asked}`) : null;
-    return { kind: "ngrok", target, url, config: null, named: false };
-  }
-  if (program === "cloudflared") {
-    const target = flag(rest, "--url");
-    const named = words[0] === "tunnel" && words.includes("run");
-    if (!target && !named) return null;
-    return { kind: "cloudflared", target, url: null, config: flag(rest, "--config"), named };
-  }
-  return null;
+  if (program !== "cloudflared" || rest.some((t) => ONLY_SAYS.has(t))) return null;
+  const target = flag(rest, "--url");
+  const bare = !words.length || (words.length === 1 && words[0] === "tunnel");
+  const named = !target && ((words[0] === "tunnel" && words.includes("run")) || bare);
+  if (!target && !named) return null;
+  return { target, config: flag(rest, "--config"), named };
 }
 
 /**
@@ -206,21 +192,6 @@ export interface Found {
   target: string | null;
 }
 
-/** ngrok's `/api/tunnels`. Null when the answer is not ngrok's. */
-export function parseNgrokApi(body: unknown): Found[] | null {
-  if (!body || typeof body !== "object" || !Array.isArray((body as { tunnels?: unknown }).tunnels)) return null;
-  const out: Found[] = [];
-  for (const item of (body as { tunnels: unknown[] }).tunnels) {
-    if (!item || typeof item !== "object") continue;
-    const url = (item as { public_url?: unknown }).public_url;
-    const addr = (item as { config?: { addr?: unknown } }).config?.addr;
-    if (typeof url !== "string" || !url) continue;
-    out.push({ url, target: typeof addr === "string" ? addr : null });
-  }
-  // ngrok v2 listed an http and an https twin of every tunnel; the https is the one handed out.
-  return out.filter((f) => !f.url.startsWith("http://") || !out.some((g) => g.url === f.url.replace(/^http:/, "https:")));
-}
-
 /** cloudflared's `/quicktunnel`: `{"hostname":"x.trycloudflare.com"}`, empty for a named tunnel. */
 export function parseQuickTunnel(body: unknown): string | null {
   const host = body && typeof body === "object" ? (body as { hostname?: unknown }).hostname : null;
@@ -282,21 +253,36 @@ export function parseIngressYaml(text: string): Ingress[] {
 }
 
 /**
- * Addresses a tunnel printed in its terminal: cloudflared's boxed
- * `https://….trycloudflare.com`, and ngrok's `Forwarding  https://… ->
- * http://localhost:3006`. The last of each, since a restarted tunnel prints a
- * new one below the old.
+ * One address per hostname, from ingress rules. A config routes paths of one
+ * hostname to different places — 404 for an admin's paths, the rest to a dev
+ * server's port — and that is still one address, the one whose
+ * service is a port on this machine when one is. A rule that answers by
+ * itself (`http_status:404`, `hello_world`) is no tunnel to anything, and the
+ * catch-all has no hostname to point at.
  */
-export function urlsOnScreen(text: string, kind: TunnelKind): Found[] {
-  if (kind === "cloudflared") {
-    const all = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi);
-    return all?.length ? [{ url: all[all.length - 1]!, target: null }] : [];
+export function addressesOfIngress(rules: readonly Ingress[]): Found[] {
+  const out = new Map<string, Found>();
+  for (const rule of rules) {
+    if (!rule.hostname || !isOrigin(rule.service)) continue;
+    const have = out.get(rule.hostname);
+    if (have && (localPort(have.target) !== null || localPort(rule.service) === null)) continue;
+    out.set(rule.hostname, { url: `https://${rule.hostname}`, target: rule.service });
   }
-  const found = new Map<string, Found>();
-  for (const m of text.matchAll(/Forwarding\s+(https?:\/\/\S+)\s+->\s+(\S+)/g)) {
-    found.set(m[1]!, { url: m[1]!, target: m[2]! });
-  }
-  return [...found.values()];
+  return [...out.values()];
+}
+
+function isOrigin(service: string): boolean {
+  return !/^(http_status:|hello[_-]world|bastion|socks5?(-proxy)?\b)/i.test(service.trim());
+}
+
+/**
+ * The address a quick tunnel printed in its terminal, in cloudflared's box:
+ * `https://….trycloudflare.com`. The last one, since a restarted tunnel
+ * prints a new one below the old.
+ */
+export function urlOnScreen(text: string): string | null {
+  const all = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi);
+  return all?.length ? all[all.length - 1]! : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,15 +291,6 @@ export function urlsOnScreen(text: string, kind: TunnelKind): Found[] {
 
 export type Probe = { status: number; headers: Record<string, string> } | { error: string };
 
-/** What ngrok's error codes mean, for the ones a tunnel's owner meets. */
-const NGROK_ERRORS: Record<string, string> = {
-  ERR_NGROK_3200: "ngrok says the endpoint is offline",
-  ERR_NGROK_8012: "ngrok got through, but nothing answered on the port behind it",
-  ERR_NGROK_3004: "ngrok got a broken answer from the port behind it",
-  ERR_NGROK_727: "ngrok's monthly request limit is used up",
-  ERR_NGROK_725: "ngrok's monthly data limit is used up",
-};
-
 /**
  * Whether the answer from a public address says the tunnel is up: any HTTP
  * response at all, except the tunnel's own word that it is not. Headers are
@@ -321,8 +298,6 @@ const NGROK_ERRORS: Record<string, string> = {
  */
 export function classifyProbe(probe: Probe): { up: boolean; why: string } {
   if ("error" in probe) return { up: false, why: `no answer from the address (${probe.error})` };
-  const code = probe.headers["ngrok-error-code"];
-  if (code) return { up: false, why: NGROK_ERRORS[code] ?? `ngrok error ${code}` };
   const cloudflare = (probe.headers.server ?? "").toLowerCase() === "cloudflare";
   if (probe.status === 530) return { up: false, why: "Cloudflare cannot reach the tunnel (530)" };
   if (cloudflare && probe.status >= 502 && probe.status <= 504) {
@@ -331,17 +306,11 @@ export function classifyProbe(probe: Probe): { up: boolean; why: string } {
   return { up: true, why: `HTTP ${probe.status}` };
 }
 
-/** When a tunnel's public address is next due a look, given the last one. */
-export function publicDue(kind: TunnelKind, last: { at: number; up: boolean } | null, now: number): boolean {
-  if (!last) return true;
-  if (kind === "cloudflared") return now - last.at >= TUNNEL_CHECK_MS - 5_000;
-  return now - last.at >= (last.up ? NGROK_PUBLIC_MS : NGROK_DOWN_PUBLIC_MS);
-}
-
 /**
  * The going-down and coming-back that Kuru is told of, one line of tunnels
- * (a kind and the port, or the address when there is no port) at a time:
- * a restarted ngrok is a new process and the same tunnel. Down is said only
+ * (the port, or the address when there is no port) at a time: a restarted
+ * cloudflared is a new process, and a quick tunnel a new address, for the
+ * same tunnel. Down is said only
  * of a line that was up since it was last said, and only once it has been
  * down `TELL_AFTER` looks in a row; back up only after a down was said.
  */
@@ -363,8 +332,8 @@ export function watchStep(watch: Watch, health: TunnelHealth): { watch: Watch; e
   return { watch: { ...watch, downLooks }, event: null };
 }
 
-export function lineOf(t: Pick<Tunnel, "kind" | "port" | "url">): string {
-  return `${t.kind}:${t.port ?? t.url ?? "?"}`;
+export function lineOf(t: Pick<Tunnel, "port" | "url">): string {
+  return `${t.port ?? t.url ?? "?"}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,33 +356,14 @@ export interface TunnelDeps {
   changed: (tunnels: Tunnel[]) => void;
   /** A tunnel went down, or came back: tell Kuru. */
   tell: (tunnel: Tunnel, event: "down" | "up") => void;
-  /**
-   * When each address was last asked from outside, kept across a restart.
-   * The server is restarted many times a day under `bun run dev`, and one
-   * that forgot would ask every ngrok address again on each start — a
-   * restart a minute for an afternoon of edits is the very request a minute
-   * the half-hour beat is there to avoid.
-   */
-  asked?: { load: () => Promise<Record<string, unknown>>; save: (asked: Record<string, PublicLook>) => void };
   now?: () => number;
   home?: string;
 }
 
-export interface PublicLook {
+interface PublicLook {
   at: number;
   up: boolean;
   why: string;
-}
-
-/** A kept look, checked: anything else in the file is ignored. */
-export function adoptLooks(raw: Record<string, unknown>): Map<string, PublicLook> {
-  const out = new Map<string, PublicLook>();
-  for (const [url, look] of Object.entries(raw)) {
-    if (!look || typeof look !== "object") continue;
-    const { at, up, why } = look as Record<string, unknown>;
-    if (typeof at === "number" && Number.isFinite(at) && typeof up === "boolean" && typeof why === "string") out.set(url, { at, up, why });
-  }
-  return out;
 }
 
 interface Proc {
@@ -427,8 +377,8 @@ interface Proc {
 export class Tunnels {
   private procs = new Map<number, Proc>();
   private tunnels: Tunnel[] = [];
+  /** The last answer from each address, so that one found down locally still says when it was last asked. */
   private lastPublic = new Map<string, PublicLook>();
-  private loaded: Promise<void> | null = null;
   private watches = new Map<string, Watch>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
@@ -513,13 +463,6 @@ export class Tunnels {
 
   /** Returns whether a tunnel just started is still without its address, to be looked at again soon. */
   private async look(): Promise<boolean> {
-    this.loaded ??= (this.deps.asked?.load() ?? Promise.resolve({})).then(
-      (raw) => {
-        for (const [url, look] of adoptLooks(raw)) if (!this.lastPublic.has(url)) this.lastPublic.set(url, look);
-      },
-      () => undefined,
-    );
-    await this.loaded;
     const now = this.now();
     const procs = [...this.procs.values()];
     const ports = await this.deps.listening(procs.map((p) => p.pid)).catch(() => new Map<number, number[]>());
@@ -551,7 +494,7 @@ export class Tunnels {
           : {
               ...old,
               health: "gone",
-              why: alive ? `${old.kind} no longer serves this address` : `${old.kind} is no longer running`,
+              why: alive ? "cloudflared no longer serves this address" : "cloudflared is no longer running",
               checkedAt: now,
               since: now,
             },
@@ -585,36 +528,27 @@ export class Tunnels {
   /** Every address a tunnel process serves, from the best source that answers. */
   private async addressesOf(proc: Proc, ports: readonly number[]): Promise<Found[]> {
     const { command } = proc;
-    if (command.kind === "ngrok") {
-      for (const port of ports) {
-        const found = parseNgrokApi(await this.deps.localJson(port, "/api/tunnels").catch(() => null));
-        if (found) return found.map((f) => ({ url: f.url, target: f.target ?? command.target }));
-      }
-      if (command.url) return [{ url: command.url, target: command.target }];
-    } else {
-      for (const port of ports) {
-        const quick = parseQuickTunnel(await this.deps.localJson(port, "/quicktunnel").catch(() => null));
-        const ingress = parseConfigIngress(await this.deps.localJson(port, "/config").catch(() => null));
-        if (quick) return [{ url: `https://${quick}`, target: command.target ?? ingress[0]?.service ?? null }];
-        const named = ingress.filter((r) => r.hostname);
-        if (named.length) return named.map((r) => ({ url: `https://${r.hostname}`, target: r.service }));
-      }
-      if (command.named) {
-        const home = this.deps.home ?? homedir();
-        const paths = command.config ? [command.config.replace(/^~(?=\/)/, home)] : [`${home}/.cloudflared/config.yml`, `${home}/.cloudflared/config.yaml`];
-        for (const path of paths) {
-          const text = await this.deps.readText(path).catch(() => null);
-          const rules = text ? parseIngressYaml(text) : [];
-          if (rules.length) return rules.map((r) => ({ url: `https://${r.hostname}`, target: r.service }));
-        }
-      }
+    for (const port of ports) {
+      const quick = parseQuickTunnel(await this.deps.localJson(port, "/quicktunnel").catch(() => null));
+      const ingress = parseConfigIngress(await this.deps.localJson(port, "/config").catch(() => null));
+      if (quick) return [{ url: `https://${quick}`, target: command.target ?? ingress[0]?.service ?? null }];
+      const named = addressesOfIngress(ingress);
+      if (named.length) return named;
     }
-    if (proc.agentId) {
-      const text = await this.deps.screen(proc.agentId).catch(() => null);
-      if (text) {
-        const found = urlsOnScreen(text, command.kind);
-        if (found.length) return found.map((f) => ({ url: f.url, target: f.target ?? command.target }));
+    if (command.named) {
+      const home = this.deps.home ?? homedir();
+      const paths = command.config
+        ? [command.config.replace(/^~(?=\/)/, home)]
+        : [`${home}/.cloudflared/config.yml`, `${home}/.cloudflared/config.yaml`, "/etc/cloudflared/config.yml", "/usr/local/etc/cloudflared/config.yml"];
+      for (const path of paths) {
+        const text = await this.deps.readText(path).catch(() => null);
+        const found = text ? addressesOfIngress(parseIngressYaml(text)) : [];
+        if (found.length) return found;
       }
+    } else if (proc.agentId) {
+      const text = await this.deps.screen(proc.agentId).catch(() => null);
+      const url = text ? urlOnScreen(text) : null;
+      if (url) return [{ url, target: command.target }];
     }
     return [];
   }
@@ -622,8 +556,7 @@ export class Tunnels {
   private base(proc: Proc, url: string | null, target: string | null): Omit<Tunnel, "health" | "why" | "checkedAt" | "publicAt" | "since"> {
     const port = localPort(target);
     return {
-      id: `${proc.command.kind}:${proc.pid}:${url ?? port ?? "?"}`,
-      kind: proc.command.kind,
+      id: `${proc.pid}:${url ?? port ?? "?"}`,
       pid: proc.pid,
       url,
       port,
@@ -639,24 +572,16 @@ export class Tunnels {
     return this.settle(shown, "unknown", "its public address has not been found yet", now, null);
   }
 
-  /** One look at one address: locally every time, publicly when it is due. */
+  /** One look at one address: locally, and then from outside when the port answers. */
   private async check(proc: Proc, found: Found, now: number): Promise<Tunnel> {
     const shown = this.base(proc, found.url, found.target);
     if (shown.port !== null && !(await this.deps.reachable(shown.port).catch(() => false))) {
       return this.settle(shown, "down", `nothing is listening on :${shown.port}`, now, this.lastPublic.get(found.url)?.at ?? null);
     }
-    // A tcp:// or tls:// address has no HTTP to ask; its agent listing it and the port answering is all there is.
-    if (!/^https?:/i.test(found.url)) return this.settle(shown, "up", `${proc.command.kind} lists it, and its port answers`, now, null);
-    let last = this.lastPublic.get(found.url) ?? null;
-    if (publicDue(proc.command.kind, last, now)) {
-      const probe = await this.deps.probe(found.url).catch((err: unknown) => ({ error: err instanceof Error ? err.message : String(err) }));
-      const said = classifyProbe(probe);
-      last = { at: now, up: said.up, why: said.why };
-      this.lastPublic.set(found.url, last);
-      this.deps.asked?.save(Object.fromEntries(this.lastPublic));
-    }
-    if (!last) return this.settle(shown, "unknown", "not asked from outside yet", now, null);
-    return this.settle(shown, last.up ? "up" : "down", last.why, now, last.at);
+    const probe = await this.deps.probe(found.url).catch((err: unknown) => ({ error: err instanceof Error ? err.message : String(err) }));
+    const said = classifyProbe(probe);
+    this.lastPublic.set(found.url, { at: now, up: said.up, why: said.why });
+    return this.settle(shown, said.up ? "up" : "down", said.why, now, now);
   }
 
   private settle(shown: ReturnType<Tunnels["base"]>, health: TunnelHealth, why: string, now: number, publicAt: number | null): Tunnel {
@@ -693,7 +618,7 @@ export function ago(at: number | null, now: number): string {
   return m < 90 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 }
 
-/** The dev server a tunnel serves, as a phrase: "pnpm dev in holapy". */
+/** The dev server a tunnel serves, as a phrase: "pnpm dev in pasapy". */
 function serving(t: Tunnel, servers: readonly DevServer[]): string {
   if (t.port === null) return t.target ? `forwards to ${t.target}` : "forwards to an address not yet known";
   const dev = servers.find((s) => s.port === t.port);
@@ -714,14 +639,14 @@ export function tunnelLine(t: Tunnel, servers: readonly DevServer[], nameOf: (ag
           : `DOWN (${t.why})`;
   const asked = t.publicAt !== null ? `, address last asked ${ago(t.publicAt, now)}` : "";
   const where = t.agentId ? ` · runs in ${nameOf(t.agentId)}` : " · started outside kururu";
-  return `${t.kind} ${t.url ?? "(no address yet)"} · ${state} · looked at ${ago(t.checkedAt, now)}${asked} · ${serving(t, servers)}${where}`;
+  return `${t.url ?? "(no address yet)"} · ${state} · looked at ${ago(t.checkedAt, now)}${asked} · ${serving(t, servers)}${where}`;
 }
 
 /** The `tunnels:` part of `kururu_status`, or null when there are none. */
 export function tunnelsText(tunnels: readonly Tunnel[], servers: readonly DevServer[], nameOf: (agentId: string) => string, now: number): string | null {
   if (!tunnels.length) return null;
   return [
-    "tunnels (ngrok/cloudflared on this Mac; looked at every minute, an ngrok address asked from outside every 30 min to spare its free plan's 20k requests/month):",
+    "tunnels (Cloudflare tunnels on this Mac; each looked at, and its address asked from outside, every minute):",
     ...tunnels.map((t) => `  - ${tunnelLine(t, servers, nameOf, now)}`),
   ].join("\n");
 }
@@ -729,7 +654,7 @@ export function tunnelsText(tunnels: readonly Tunnel[], servers: readonly DevSer
 /** What Kuru is told when a tunnel goes down or comes back. */
 export function tunnelNotice(t: Tunnel, event: "down" | "up", servers: readonly DevServer[], nameOf: (agentId: string) => string, now = Date.now()): string {
   const where = t.agentId ? `, in ${nameOf(t.agentId)}` : "";
-  const what = `${t.kind} ${t.url ?? (t.port !== null ? `→ :${t.port}` : "")}`.trim();
+  const what = t.url ?? (t.port !== null ? `cloudflared → :${t.port}` : "cloudflared");
   if (event === "up") return `[kururu] Tunnel back up: ${what} (${t.why}); it ${serving(t, servers)}${where}.`;
   return `[kururu] Tunnel ${t.health === "gone" ? "stopped" : "down"}: ${what} — ${t.why}, since ${ago(t.since, now)}. It ${serving(t, servers)}${where}. Anything pointed at that address (webhooks, a phone build) is failing until it is back.`;
 }

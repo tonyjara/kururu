@@ -1,13 +1,13 @@
 /**
- * A tunnel as one line: whether its address answers, when that was last
- * looked at, and the address itself — pressed, it is copied, and the arrow
+ * A Cloudflare tunnel as one line: whether its address answers, when that
+ * was last looked at, and the address itself — pressed, it is copied, and the arrow
  * beside it opens it.
  *
  * The same line in two places, because a tunnel belongs to two things: the
  * dev server it serves (paired by port, `shared/tunnels.ts`), under that
  * server's row in the sidebar's Dev servers; and the terminal it was typed
  * into, under that terminal's row. The first is where you look to ask "is
- * Holapy reachable from outside", the second where you look to ask "what is
+ * this app reachable from outside", the second where you look to ask "what is
  * that shell doing". Copy rather than open on the address, since what a
  * tunnel's address is usually wanted for is pasting somewhere — a webhook's
  * settings, an app's config — and opening it is the arrow's.
@@ -26,12 +26,11 @@ function clock(at: number | null): string {
 /** What the hover says: the whole of what is known, for the one who wants it. */
 function hover(t: Tunnel): string {
   return [
-    `${t.kind} — ${healthWord(t)}: ${t.why}`,
+    `Cloudflare tunnel — ${healthWord(t)}: ${t.why}`,
     t.url ? `Address: ${t.url}` : null,
     t.target ? `Forwards to ${t.target}` : null,
     `Looked at ${clock(t.checkedAt)}`,
     t.publicAt !== null ? `Address last asked from outside at ${clock(t.publicAt)}` : null,
-    t.kind === "ngrok" ? "ngrok's address is asked from outside every 30 minutes, to spare its free plan's requests; the rest every minute." : null,
     t.command,
   ]
     .filter(Boolean)
@@ -49,7 +48,7 @@ export function TunnelLine({ tunnel, showPort = false }: { tunnel: Tunnel; showP
   return (
     <span className={`tun-line tun-${tunnel.health}`} title={hover(tunnel)}>
       <span className={`tun-dot tun-dot-${tunnel.health}`} aria-hidden />
-      <span className="tun-kind">{tunnel.kind}</span>
+      <span className="tun-label">tunnel</span>
       {host ? (
         <button
           className="tun-url"
@@ -68,7 +67,7 @@ export function TunnelLine({ tunnel, showPort = false }: { tunnel: Tunnel; showP
       <span className="tun-state">
         {healthWord(tunnel)} · {clock(tunnel.checkedAt)}
       </span>
-      {tunnel.url && /^https?:/.test(tunnel.url) && (
+      {tunnel.url && (
         <a
           className="tun-open"
           href={tunnel.url}

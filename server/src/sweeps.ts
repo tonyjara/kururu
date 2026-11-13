@@ -40,7 +40,7 @@ import { dueForReading, readSpecs, specsSnapshot } from "./specs";
 import { sweep } from "./sweep";
 import { screenRows } from "./onscreen";
 import { ownedGrid } from "./terminals";
-import { askedFile, localJson, probeUrl, readTextFile, reachablePort } from "./tunnelio";
+import { localJson, probeUrl, readTextFile, reachablePort } from "./tunnelio";
 import { tunnelNotice, Tunnels } from "./tunnels";
 import { refreshClaudeReady } from "./thisnode";
 import { pollUsage, usageSnapshot } from "./usage";
@@ -152,7 +152,7 @@ export async function stopListedDevServer(port: unknown, pid: unknown): Promise<
 // ---------------------------------------------------------------------------
 
 /**
- * The ngroks and cloudflareds, and whether their addresses answer — see
+ * The cloudflareds, and whether their addresses answer — see
  * `tunnels.ts`. Seen off the process sweep's table, looked at on a minute's
  * beat of their own; a change goes to every page, and a tunnel that went down
  * or came back to the Kuru of the profile whose terminal it runs in (the one
@@ -165,7 +165,6 @@ export const tunnels = new Tunnels({
   reachable: reachablePort,
   screen: (agentId) => screenRows(host, agentId, { ...ownedGrid(agentId), rows: 200 }),
   readText: readTextFile,
-  asked: askedFile,
   changed: (list) => {
     state.tunnels = list;
     broadcast({ type: "tunnels", tunnels: list });

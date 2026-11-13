@@ -283,10 +283,10 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **An agent's reload is asked for, and the page picks the moment** (`reloadHolds`
   in `shared/reload.ts`); the pty host never hears of it. →
   [more](docs/invariants.md#reloading-the-window)
-- **A tunnel is watched, never touched, and its plan is spared** — ngrok and
-  cloudflared found off the process table, paired with a dev server by port;
-  an ngrok address is asked from outside every 30 minutes, never every minute
-  (its free plan's 20k requests/month) (`server/src/tunnels.ts`). →
+- **A tunnel is watched, never touched, and it is Cloudflare's** — cloudflared
+  found off the process table, a named tunnel's hostnames read from its
+  metrics or config, paired with a dev server by port, its address asked
+  every minute; ngrok is not supported (`server/src/tunnels.ts`). →
   [architecture](docs/architecture.md#the-servers-shape)
 - **A slot lease ends with the terminal it was taken in, and only the server holds
   the line** (`server/src/slots.ts`); `xcrun` only once a simulator is asked

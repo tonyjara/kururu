@@ -400,8 +400,7 @@ async function listeners(pid?: number): Promise<Map<number, number[]>> {
 
 /**
  * The listening TCP ports of a few processes, by pid — the tunnels' question
- * (`tunnels.ts`): which port is this ngrok's API on, which is cloudflared's
- * metrics. One `lsof -p a,b,c` rather than one per process; `ss` has no such
+ * (`tunnels.ts`): which port is each cloudflared's metrics on. One `lsof -p a,b,c` rather than one per process; `ss` has no such
  * narrowing and is filtered after.
  */
 export async function listenersOf(pids: readonly number[]): Promise<Map<number, number[]>> {

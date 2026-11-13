@@ -215,17 +215,16 @@ export interface DevServer {
 }
 
 /**
- * A tunnel — ngrok or cloudflared — putting a port on this machine on a
+ * A Cloudflare tunnel — cloudflared — putting a port on this machine on a
  * public address, and whether that address answered when it was last asked.
  * See `server/src/tunnels.ts` for how each is found and checked, and
  * `shared/tunnels.ts` for how one is paired with the dev server it serves.
  */
 export interface Tunnel {
-  /** Stable while the process and its address are: `<kind>:<pid>:<url or port>`. */
+  /** Stable while the process and its address are: `<pid>:<url or port>`. */
   id: string;
-  kind: TunnelKind;
   pid: number;
-  /** The public address, `https://….ngrok-free.dev`; null until one has been found. */
+  /** The public address, `https://dev.example.com`; null until one has been found. */
   url: string | null;
   /** The port on this machine it forwards to, when it forwards to this machine at all. */
   port: number | null;
@@ -246,11 +245,10 @@ export interface Tunnel {
   since: number;
 }
 
-export type TunnelKind = "ngrok" | "cloudflared";
 /** `gone` is a tunnel whose process has ended, kept a while so its going is seen. */
 export type TunnelHealth = "up" | "down" | "unknown" | "gone";
 
-/** How often each tunnel is looked at, locally; the public address is asked on its own beat (`tunnels.ts`). */
+/** How often each tunnel is looked at, locally and at its public address (`tunnels.ts`). */
 export const TUNNEL_CHECK_MS = 60_000;
 
 /**

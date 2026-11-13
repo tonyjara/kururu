@@ -2237,7 +2237,8 @@ a.machine-name:hover {
 
 /* A tunnel (`Tunnels.tsx`): two lines under the dev server it serves, or
    under the terminal it runs in. The first says whether its address
-   answers — a dot, the kind, the word and the time it was looked at, and the
+   answers — a dot, the word "tunnel", the port when it is not under that
+   port's dev server, its state and the time it was looked at, and the
    arrow that opens it — and the second is the address, pressed to copy it.
    Two lines because a sidebar is narrow and an address is long: on one line
    it was the address that gave way, and the address is the thing to read.
@@ -2279,9 +2280,8 @@ a.machine-name:hover {
 .tun-dot-gone {
   background: var(--danger);
 }
-.tun-kind {
+.tun-label {
   flex: none;
-  font-family: var(--mono);
 }
 .tun-url {
   order: 9;

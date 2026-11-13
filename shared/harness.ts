@@ -236,7 +236,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "kururu_status",
     description:
-      "Everything in this profile: its workspaces, every agent (id, program, status, what it is doing, context used, which card and workspace it belongs to), the tunnels on this Mac (ngrok/cloudflared: address, up or down, the dev server and terminal each serves), and which agent you are. Call this first, and again whenever you are unsure what is running. Statuses: working, done (its turn ended), blocked (it is asking a question or waiting on a permission prompt), idle.",
+      "Everything in this profile: its workspaces, every agent (id, program, status, what it is doing, context used, which card and workspace it belongs to), the Cloudflare tunnels on this Mac (address, up or down, the dev server and terminal each serves), and which agent you are. Call this first, and again whenever you are unsure what is running. Statuses: working, done (its turn ended), blocked (it is asking a question or waiting on a permission prompt), idle.",
     inputSchema: obj({}),
   },
   {

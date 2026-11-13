@@ -2,8 +2,8 @@
  * Which dev server a tunnel is for, decided the one way both ends need it.
  *
  * A tunnel says what it forwards to (`http://localhost:3006`) and a dev server
- * says what it listens on (`:3006`), and nothing else ties the two: ngrok was
- * typed into one shell and `pnpm dev` into another, often in different
+ * says what it listens on (`:3006`), and nothing else ties the two: cloudflared
+ * was typed into one shell and `pnpm dev` into another, often in different
  * workspaces' tabs, and neither process is the other's parent. The port is
  * the whole of the pairing, so a tunnel to a port nothing listens on is a
  * tunnel of its own, drawn and listed apart — which is also the one worth

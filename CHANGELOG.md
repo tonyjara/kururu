@@ -15,17 +15,17 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
-- **Tunnels beside the dev servers they expose.** An ngrok or cloudflared
-  tunnel (quick or named) is found by itself, and drawn under the dev server
-  on the port it forwards to: a green or red dot, up / down / stopped with the
-  time it was last looked at, and its public address — click to copy, the
-  arrow opens it. A tunnel to a port with no dev server gets a row of its own,
-  and one is shown under the terminal it runs in too. The Dev servers heading
-  wears a red dot when one is down, so it shows even folded. Kuru sees them in
-  its status and is told when one that was up goes down, and when it comes
-  back. ngrok's address is asked from outside only every 30 minutes, so the
-  checks don't eat its free plan's 20,000 requests a month; between those it
-  is checked on the Mac every minute.
+- **Tunnels beside the dev servers they expose.** A Cloudflare tunnel is
+  found by itself — a named one (`cloudflared tunnel run`, or the service
+  running `~/.cloudflared/config.yml`) by the hostnames it serves, a quick one
+  by its trycloudflare address — and drawn under the dev server on the port it
+  forwards to: a green or red dot, up / down / stopped with the time it was
+  last looked at, and its public address — click to copy, the arrow opens it.
+  A tunnel to a port with no dev server gets a row of its own, and one is
+  shown under the terminal it runs in too. The Dev servers heading wears a red
+  dot when one is down, so it shows even folded. Kuru sees them in its status
+  and is told when one that was up goes down, and when it comes back. Each
+  address is asked from outside every minute. ngrok is not supported.
 
 - **The pencil in Kuru's box finishes a drawing.** Pressing it again while the
   pen is down is the same as Done on the pill: the marks go into the box. It

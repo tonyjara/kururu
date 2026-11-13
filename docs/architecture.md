@@ -507,21 +507,22 @@ argument that keeps `tailscale` commands out of kururu.
   process, never by port**: this pid (the server and its preview proxies) and
   any listener whose cwd is kururu's own `web/` (the window's vite). Another
   project's vite on 5173 still shows.
-- **`tunnels.ts`: a tunnel is watched, never touched, and its plan is
-  spared.** ngrok and cloudflared are found off the same `ps` the dev scan
-  reads, each asked what it serves where it answers best (ngrok's agent API on
-  the port `lsof` says that pid holds, cloudflared's metrics `/quicktunnel`
-  and `/config`, a named tunnel's `config.yml`, then the URL it printed in its
-  terminal), and paired with a dev server by port alone (`shared/tunnels.ts`).
-  Every minute each is looked at locally — its process, its agent listing it,
-  something answering on the port — and its public address is asked with a
-  HEAD of `/`: every minute for Cloudflare, but only every 30 minutes for
-  ngrok (5 when it last said down), because ngrok's free plan is 20,000
-  requests a month and a check a minute is 43,200 — the watcher would itself
-  break the webhooks it watches. When each address was last asked is kept in
-  `tunnels.json` in the state directory, so the many restarts of a day under
-  `bun run dev` do not each ask again. Any HTTP answer is up but the tunnel's own
-  error (`ngrok-error-code`, Cloudflare's 530 and 502–504). Kuru hears of one
+- **`tunnels.ts`: a tunnel is watched, never touched, and it is
+  Cloudflare's.** cloudflared is found off the same `ps` the dev scan reads —
+  `tunnel … run`, a quick tunnel's `--url`, and cloudflared alone, which is
+  how `service install` runs `~/.cloudflared/config.yml` — and asked what it
+  serves where it answers best (its metrics `/quicktunnel` and `/config` on
+  the port `lsof` says that pid holds, then a named tunnel's config file, then
+  the trycloudflare URL a quick one printed in its terminal). A named
+  tunnel's ingress is one address per hostname, the rule to a port here
+  winning over a path's `http_status:404`. It is paired with a dev server by
+  port alone (`shared/tunnels.ts`). Every minute each is looked at — its
+  process, something answering on the port — and its public address asked
+  with a HEAD of `/`. ngrok was supported and taken out on 2026-11-13 (the
+  owner: "use cloudflare, don't even support ngrok"), and with it the
+  half-hour beat its free plan forced and the `tunnels.json` that kept it
+  across restarts. Any HTTP answer is up but Cloudflare's own error (530,
+  and 502–504 with `server: cloudflare`). Kuru hears of one
   that was up and is down two looks running, and of its coming back, as
   `harness.announce`; a tunnel whose process ended stays listed as stopped for
   30 minutes. A command line is shown with anything named like a token cut

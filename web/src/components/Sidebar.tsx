@@ -1760,7 +1760,7 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
 
   if (devServers.length === 0 && tunnels.length === 0) return null;
   /* Tunnels to a port no dev server is on: rows of their own, at the foot,
-     because "nothing is serving what ngrok forwards to" is the one to see. */
+     because "nothing is serving what the tunnel forwards to" is the one to see. */
   const loose = unpairedTunnels(tunnels, devServers);
   /* The heading's dot, so a shut section still says when a tunnel is down:
      red for one down or stopped, green when every one answers. */
