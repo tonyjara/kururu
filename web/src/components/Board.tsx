@@ -1,6 +1,10 @@
 /**
  * A workspace's board, drawn: four columns of cards, and a robot on each that
- * hands the card to an agent.
+ * hands the card to an agent — and beside the four any columns a person made,
+ * a Backlog say, which hold cards and do nothing else. Their header, grip,
+ * fold and menu are the profile's board's (`Lanes.tsx`); the four take a
+ * move and a fold but keep their names and stay, because the run automation
+ * moves cards through them.
  *
  * It decides nothing, like `Panes`. The board arrives on the workspace in the
  * snapshot and every change is a verb; the only state held here is what is
@@ -33,14 +37,16 @@
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  BOARD_COLUMNS,
+  boardLanes,
   canResume,
   cardCode,
   columnCards,
-  COLUMN_LABELS,
+  laneFixed,
+  laneInto,
+  LANES_MAX,
   runLive,
   type Board,
-  type BoardColumn,
+  type BoardLane,
   type Card,
   type CardDates,
   type CardDev,
@@ -66,6 +72,7 @@ import { datesLabel, datesTense } from "../when";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
+import { AddLane, FoldButton, FoldedLane, isLaneDrag, laneMenuItems, LaneName, NEW_LANE, useLaneDrag } from "./Lanes";
 import { MadeLinks } from "./MadeLinks";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { quotable, selectNotDrag } from "./Quote";
@@ -111,8 +118,8 @@ interface Draft {
 const drafts = new Map<string, Draft>();
 /** Put a composer's draft away, for a board that keeps its own keys — the profile's. */
 export const dropDraft = (key: string) => void drafts.delete(key);
-const openComposers = new Map<string, { adding: BoardColumn | null; editing: string | null }>();
-const newDraft = (workspaceId: string, column: BoardColumn) => `${workspaceId}\0new\0${column}`;
+const openComposers = new Map<string, { adding: string | null; editing: string | null }>();
+const newDraft = (workspaceId: string, column: string) => `${workspaceId}\0new\0${column}`;
 const editDraft = (workspaceId: string, cardId: string) => `${workspaceId}\0card\0${cardId}`;
 
 /**
@@ -189,7 +196,7 @@ export function BoardView({
   focusedAgentId: string | null;
 }) {
   /** The column a new card is being written in, or null. One composer at a time. */
-  const [adding, setAddingState] = useState<BoardColumn | null>(() => openComposers.get(workspaceId)?.adding ?? null);
+  const [adding, setAddingState] = useState<string | null>(() => openComposers.get(workspaceId)?.adding ?? null);
   const [editing, setEditingState] = useState<string | null>(() => openComposers.get(workspaceId)?.editing ?? null);
   /**
    * A card asked for by name — see `showCardNext` — scrolled to and lit.
@@ -228,7 +235,7 @@ export function BoardView({
   }, [shown]);
   // A composer put away on purpose takes its draft with it; one the board was
   // unmounted from underneath keeps it, which is the whole point of `drafts`.
-  const setAdding = (column: BoardColumn | null) => {
+  const setAdding = (column: string | null) => {
     if (adding && adding !== column) drafts.delete(newDraft(workspaceId, adding));
     setAddingState(column);
   };
@@ -270,7 +277,18 @@ export function BoardView({
   const { devServers } = api.useKururu();
   const reveal = (agentId: string) => api.revealAgent(agentId);
   /** Where a dragged card would land: a column and a place among its cards. */
-  const [dropAt, setDropAt] = useState<{ column: BoardColumn; index: number } | null>(null);
+  const [dropAt, setDropAt] = useState<{ column: string; index: number } | null>(null);
+  /**
+   * The columns, in the board's order: the four, and any a person made beside
+   * them, which are inert — a place to keep cards, which nothing runs from and
+   * the automation never moves a card into or out of (`noteRun` moves only
+   * between In progress and Review; a run moves its card to In progress from
+   * wherever it was). Arranged with the profile's board's parts (`Lanes.tsx`).
+   */
+  const lanes = boardLanes(board);
+  const { overLane, dropLane, laneClasses, grip } = useLaneDrag(lanes, (laneId, index) => api.moveColumn(workspaceId, laneId, index));
+  /** The column whose name is an input, for a rename; `NEW_LANE` for the one being made. */
+  const [naming, setNaming] = useState<string | null>(null);
 
   const run = (card: Card, launcher: Launcher, fresh = false) => {
     setErrors(({ [card.id]: _, ...rest }) => rest);
@@ -374,7 +392,7 @@ export function BoardView({
    * menu, and the two must never drift into two different dialogs for one
    * move.
    */
-  const move = (card: Card, column: BoardColumn, index?: number) => {
+  const move = (card: Card, column: string, index?: number) => {
     if (column === "done" && card.column !== "done") {
       moveToDone(workspaceId, card, index);
       return;
@@ -457,10 +475,12 @@ export function BoardView({
 
   const cardMenu = (card: Card, at: MenuAt) => {
     const items = (status: WorktreeStatus | null): MenuItem[] => [
-      ...BOARD_COLUMNS.filter((column) => column !== card.column).map((column) => ({
-        label: `Move to ${COLUMN_LABELS[column]}`,
-        run: () => move(card, column),
-      })),
+      ...lanes
+        .filter((lane) => lane.id !== card.column)
+        .map((lane) => ({
+          label: `Move to ${lane.name}`,
+          run: () => move(card, lane.id),
+        })),
       ...(card.worktree ? gitItems(card, card.worktree, status) : []),
       referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }),
       // Not on another node's board: a note is drawn from this node's
@@ -495,7 +515,32 @@ export function BoardView({
     }
   };
 
-  const dropOn = (event: React.DragEvent, column: BoardColumn) => {
+  /**
+   * A column's menu — `laneMenuItems`, as on the profile's board, without the
+   * colour, which a workspace board has no timeline to wear. The four take a
+   * move and a fold, and no rename or delete: the automation reads them.
+   */
+  const laneMenu = (lane: BoardLane, at: MenuAt) =>
+    setMenu({
+      at,
+      items: laneMenuItems({
+        lanes,
+        lane,
+        count: columnCards(board, lane.id).length,
+        into: laneInto(board, lane.id, "workspace"),
+        fixed: laneFixed(lane.id, "workspace"),
+        rename: () => setNaming(lane.id),
+        collapse: () => api.collapseColumn(workspaceId, lane.id, true),
+        move: (index) => api.moveColumn(workspaceId, lane.id, index),
+        remove: () => api.deleteColumn(workspaceId, lane.id),
+      }),
+    });
+
+  const dropOn = (event: React.DragEvent, column: string) => {
+    if (isLaneDrag(event)) {
+      event.preventDefault();
+      return dropLane();
+    }
     const cardId = event.dataTransfer.getData(CARD_MIME);
     const index = dropAt?.column === column ? dropAt.index : undefined;
     setDropAt(null);
@@ -535,34 +580,89 @@ export function BoardView({
 
   return (
     <div className="board" ref={root}>
-      {BOARD_COLUMNS.map((column) => {
+      {lanes.map((lane, laneIndex) => {
+        const column = lane.id;
         const cards = columnCards(board, column);
+        const fixed = laneFixed(column, "workspace");
+        const shut = lane.collapsed === true;
+        const width = board.widths?.[column];
+        // The same drop target folded or open, so that a folded column takes
+        // a card and a column exactly as it would standing up.
+        const target = {
+          className: ["board-col", shut ? "board-col-shut" : "", dropAt?.column === column ? "board-col-over" : "", laneClasses(column, laneIndex)].join(" "),
+          style: width !== undefined ? ({ "--col-w": `${width}px` } as React.CSSProperties) : undefined,
+          onDragOver: (event: React.DragEvent<HTMLElement>) => {
+            overLane(laneIndex)(event);
+            if (!event.dataTransfer.types.includes(CARD_MIME)) return;
+            event.preventDefault();
+            // Over the column but past its cards: the foot. A folded one has
+            // no cards to point between, so anywhere on it is its foot.
+            if (shut || event.target === event.currentTarget) setDropAt({ column, index: cards.length });
+          },
+          onDragLeave: (event: React.DragEvent<HTMLElement>) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null);
+          },
+          onDrop: (event: React.DragEvent<HTMLElement>) => dropOn(event, column),
+        };
+        if (shut)
+          return (
+            <section key={column} {...target}>
+              {grip(column)}
+              <FoldedLane lane={lane} count={cards.length} dot={false} onOpen={() => api.collapseColumn(workspaceId, column, false)} />
+            </section>
+          );
         return (
-          <section
-            key={column}
-            className={`board-col ${dropAt?.column === column ? "board-col-over" : ""}`}
-            style={board.widths?.[column] !== undefined ? ({ "--col-w": `${board.widths[column]}px` } as React.CSSProperties) : undefined}
-            onDragOver={(event) => {
-              if (!event.dataTransfer.types.includes(CARD_MIME)) return;
-              event.preventDefault();
-              // Over the column but past its cards: the foot.
-              if (event.target === event.currentTarget) setDropAt({ column, index: cards.length });
-            }}
-            onDragLeave={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null);
-            }}
-            onDrop={(event) => dropOn(event, column)}
-          >
-            <header className="board-col-head">
-              <span className="board-col-name">{COLUMN_LABELS[column]}</span>
-              <span className="board-col-count">{cards.length}</span>
+          <section key={column} {...target}>
+            {/* The column's menu off a right-click on its head too, as on the
+                profile's board — the caret at its end opens the same list. */}
+            <header
+              className="board-col-head"
+              onContextMenu={(event) => {
+                event.preventDefault();
+                laneMenu(lane, { x: event.clientX, y: event.clientY });
+              }}
+            >
+              {grip(column)}
+              {naming === column ? (
+                <LaneName
+                  name={lane.name}
+                  onDone={(name) => {
+                    if (name && name !== lane.name) api.renameColumn(workspaceId, column, name);
+                    setNaming(null);
+                  }}
+                />
+              ) : (
+                <>
+                  <span
+                    className="board-col-name"
+                    onDoubleClick={fixed ? undefined : () => setNaming(column)}
+                    title={fixed ? "Runs move cards through this column, so it keeps its name and stays" : "Double-click to rename — nothing runs from this column"}
+                  >
+                    {lane.name}
+                  </span>
+                  <span className="board-col-count">{cards.length}</span>
+                </>
+              )}
+              <FoldButton onFold={() => api.collapseColumn(workspaceId, column, true)} />
               <button
                 className="pane-btn"
-                title={`Add a card to ${COLUMN_LABELS[column]}`}
+                title={`Add a card to ${lane.name}`}
                 aria-label="Add a card"
                 onClick={() => setAdding(column)}
               >
                 <Icon name="add" />
+              </button>
+              <button
+                className="pane-btn"
+                title={fixed ? "Collapse or move this column" : "Rename, move or delete this column"}
+                aria-label="Column menu"
+                aria-haspopup="menu"
+                onClick={(event) => {
+                  const box = event.currentTarget.getBoundingClientRect();
+                  laneMenu(lane, { x: box.left, y: box.bottom + 4 });
+                }}
+              >
+                <Icon name="caret" />
               </button>
             </header>
 
@@ -676,6 +776,9 @@ export function BoardView({
           </section>
         );
       })}
+      {lanes.length < LANES_MAX && (
+        <AddLane naming={naming === NEW_LANE} onNaming={(on) => setNaming(on ? NEW_LANE : null)} onAdd={(name) => api.addColumn(workspaceId, name)} />
+      )}
 
       {menu && <Menu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
       {ask && board.cards.some((c) => c.id === ask.cardId) && (
@@ -705,7 +808,7 @@ interface CardVerbs {
   menu: (card: Card, at: MenuAt) => void;
   edit: (cardId: string) => void;
   /** A card dragged over this one, which sits at `index` in `column`. */
-  over: (event: React.DragEvent, column: BoardColumn, index: number) => void;
+  over: (event: React.DragEvent, column: string, index: number) => void;
   /** Take the person to a terminal: the run's agent, or the dev server's log. */
   reveal: (agentId: string) => void;
   resume: (card: Card) => void;
@@ -788,7 +891,7 @@ const CardView = memo(function CardView({
   /** It was just asked for by name and is lit for a moment — see `showCardNext`. */
   shown: boolean;
   /** Where the card sits, for a drag over it to say which side it would land. */
-  column: BoardColumn;
+  column: string;
   index: number;
   /** The board's workspace, which a link to what the card's agent made opens in. */
   workspaceId: string;

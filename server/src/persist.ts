@@ -26,7 +26,7 @@ import { dirname, join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
 import { groupName, isLoginKey, mintLoginKey } from "../../shared/model";
 import { BOARD_TAB, docTab, isDocTab, parseDocTab, type LayoutNode, type ReaderDoc } from "../../shared/layout";
-import { adoptBoard, adoptProfileBoard, type Board } from "../../shared/board";
+import { adoptProfileBoard, adoptWorkspaceBoard, type Board } from "../../shared/board";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
 import { adoptRoot } from "../../shared/workspaceroot";
@@ -433,7 +433,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         group: groupName(w.group),
         // Only from an old file, and only for `Store.attach` to adopt; what
         // the database holds replaces it before anything is drawn.
-        board: adoptBoard(w.board),
+        board: adoptWorkspaceBoard(w.board),
         machine: adoptPin(w.machine),
         root: adoptRoot(w.root, homedir()),
         mobile: w.mobile === true,

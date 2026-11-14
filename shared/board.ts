@@ -48,12 +48,18 @@ export const COLUMN_LABELS: Record<BoardColumn, string> = {
 
 
 /**
- * A column a person made, on a board that takes them — which is the profile's
- * alone. A workspace's four are fixed because the run automation reads them:
- * a finished run goes to Review, a card sent to Done ends its dev server. The
- * profile's board runs nothing, so nothing reads its columns but a person, and
- * a person's inbox is shaped however they think: Someday, Bugs, Waiting on
- * design.
+ * A column of a board, and on either kind a person may make more. The
+ * profile's board runs nothing, so nothing reads its columns but a person,
+ * and a person's inbox is shaped however they think: Someday, Bugs, Waiting
+ * on design. A workspace's board keeps its four whatever else is added,
+ * because the run automation reads them — a run moves its card to In
+ * progress, a finished one goes to Review, a card sent to Done ends its dev
+ * server — and a column a person makes beside them is inert: nothing runs
+ * from it and the automation never moves a card into it or out of it, so a
+ * Backlog is a place to keep cards and nothing more. A workspace board with
+ * none of its own has no list written down at all and draws the four; the
+ * first column made writes the four into the list with it, so that the new
+ * one has a place among them (`withLanes`).
  *
  * `id` is what a card's `column` names, so that a rename is one field and not
  * a walk over every card. The profile's first three keep the fixed ids they
@@ -98,9 +104,23 @@ export interface BoardLane {
 export const NEEDS_COLUMN = "needs";
 export const NEEDS_LABEL = "Needs you";
 
-/** Whether a column is one a person may delete or rename: every one but Needs you. */
-export function laneFixed(laneId: string): boolean {
-  return laneId === NEEDS_COLUMN;
+/**
+ * Which board a column verb is applied to, since the two keep different
+ * columns: the profile's Needs you, a workspace's four. Said by the caller,
+ * which always knows — the server applies a workspace's verbs and the
+ * profile's apart, as the window draws them apart — rather than guessed off
+ * which ids a board happens to hold.
+ */
+export type BoardKind = "profile" | "workspace";
+
+/**
+ * Whether a column is one a person may not delete or rename: on the profile's
+ * board Needs you, which the drawer and Kuru find by its id; on a
+ * workspace's, the four the run automation reads. Either may still be
+ * moved, folded and widened, as any column is.
+ */
+export function laneFixed(laneId: string, kind: BoardKind): boolean {
+  return kind === "profile" ? laneId === NEEDS_COLUMN : (BOARD_COLUMNS as readonly string[]).includes(laneId);
 }
 
 /**
@@ -178,7 +198,49 @@ function needsLane(): BoardLane {
 
 /** The columns a board draws, in order: its own if it has any, else the fixed four. */
 export function boardLanes(board: Board): BoardLane[] {
-  return board.columns ?? BOARD_COLUMNS.map((id) => ({ id, name: COLUMN_LABELS[id], color: null }));
+  return board.columns ?? actionLanes();
+}
+
+/** A workspace's four as a list of columns: no colour, since a workspace board draws none. */
+function actionLanes(): BoardLane[] {
+  return BOARD_COLUMNS.map((id) => ({ id, name: COLUMN_LABELS[id], color: null }));
+}
+
+/**
+ * A workspace board with its columns written down, so that a column verb has
+ * a list to work on: the same board when it has one, and otherwise the four
+ * it was drawing. Only for a verb about to change the list — a board nobody
+ * has added a column to stays without one, the shape it always had.
+ */
+export function withLanes(board: Board): Board {
+  return board.columns ? board : { ...board, columns: actionLanes() };
+}
+
+/**
+ * A workspace board's columns with its four among them, whatever a blob, a
+ * file or another node handed over: each of the four put back where it is
+ * missing — after the one before it in the usual order, or before the one
+ * after it, or at the end — and named as the automation's columns are
+ * everywhere else. Needs you is the profile's and is taken out. `withNeedsLane`
+ * for the other board.
+ */
+export function withActionLanes(lanes: readonly BoardLane[]): BoardLane[] {
+  const out = lanes
+    .filter((lane) => lane.id !== NEEDS_COLUMN)
+    .map((lane) => {
+      const label = (COLUMN_LABELS as Record<string, string>)[lane.id];
+      return label !== undefined && lane.name !== label ? { ...lane, name: label } : lane;
+    });
+  BOARD_COLUMNS.forEach((id, order) => {
+    if (out.some((lane) => lane.id === id)) return;
+    const lane: BoardLane = { id, name: COLUMN_LABELS[id], color: null };
+    const before = BOARD_COLUMNS.slice(0, order).reverse().map((prev) => out.findIndex((l) => l.id === prev)).find((at) => at >= 0);
+    if (before !== undefined) return void out.splice(before + 1, 0, lane);
+    const after = BOARD_COLUMNS.slice(order + 1).map((next) => out.findIndex((l) => l.id === next)).find((at) => at >= 0);
+    if (after !== undefined) return void out.splice(after, 0, lane);
+    out.push(lane);
+  });
+  return out;
 }
 
 function hasLane(board: Board, column: unknown): column is string {
@@ -399,8 +461,9 @@ export interface Board {
    */
   next: number;
   /**
-   * The board's own columns, on the one board that has them — the profile's.
-   * Absent on a workspace's, which draws the fixed four; see `BoardLane`.
+   * The board's own columns, in order. Always on the profile's; on a
+   * workspace's only once a person has made one, with the four among them,
+   * and absent before that, when it draws the four — see `BoardLane`.
    */
   columns?: BoardLane[];
   /**
@@ -725,7 +788,7 @@ export function cardPrompt(card: Pick<Card, "title" | "body">): string {
 export function transferCard(from: Board, to: Board, cardId: string): { from: Board; to: Board } {
   const card = from.cards.find((c) => c.id === cardId);
   if (!card) return { from, to };
-  const column = hasLane(to, card.column) ? card.column : firstLane(to);
+  const column = hasLane(to, card.column) ? card.column : "todo";
   const { needsBy: _mark, needsSince: _since, ...rest } = card;
   const moved: Card = { ...rest, number: to.next, column, run: null, isolate: false, worktree: null, dev: null };
   return {
@@ -742,7 +805,9 @@ export function transferCard(from: Board, to: Board, cardId: string): { from: Bo
  * hand-edited file or an older server can put anything in here, and a card that
  * is not a card is dropped rather than carried as something the window cannot
  * draw. A run that claims to be going but names no process is one a cold start
- * brought back, and it is `ended` — nothing is running it.
+ * brought back, and it is `ended` — nothing is running it. A card whose column
+ * the board does not have goes to `home` when it names one the board has, and
+ * otherwise to the first.
  */
 /** `Card.made` read back: absent rather than empty, as a card from before it existed is. */
 function madeOf(value: unknown): Pick<Card, "made"> {
@@ -750,7 +815,7 @@ function madeOf(value: unknown): Pick<Card, "made"> {
   return made.length ? { made } : {};
 }
 
-export function adoptBoard(value: unknown): Board | null {
+export function adoptBoard(value: unknown, home?: string): Board | null {
   if (!value || typeof value !== "object") return null;
   const columns = adoptLanes((value as { columns?: unknown }).columns);
   const withColumns: Board = columns ? { cards: [], next: 1, columns } : emptyBoard();
@@ -771,7 +836,7 @@ export function adoptBoard(value: unknown): Board | null {
       number,
       title,
       body: text(item.body, BODY_MAX) ?? "",
-      column: hasLane(shape, item.column) ? item.column : firstLane(shape),
+      column: hasLane(shape, item.column) ? item.column : home !== undefined && hasLane(shape, home) ? home : firstLane(shape),
       createdAt: Number.isFinite(item.createdAt) ? (item.createdAt as number) : 0,
       run: adoptRun(item.run),
       // A card from before the choice was per card ran in a worktree if it has one.
@@ -793,6 +858,27 @@ export function adoptBoard(value: unknown): Board | null {
   if (Number.isInteger(stored) && (stored as number) > next) next = stored as number;
   for (const card of [...cards].filter((c) => c.number === 0).sort((a, b) => a.createdAt - b.createdAt)) card.number = next++;
   return { ...shape, cards, next };
+}
+
+/**
+ * A workspace's board off the blob, the disk or another node: `adoptBoard`,
+ * with the columns it writes down held to `withActionLanes`, so that no road
+ * in brings back a board without one of the four the automation moves cards
+ * through. A card whose column has gone is in To do, never in whatever
+ * column a person dragged to the front — a Backlog is not where a lost card
+ * is found.
+ */
+export function adoptWorkspaceBoard(value: unknown): Board | null {
+  if (!value || typeof value !== "object") return null;
+  const { columns: raw, ...rest } = value as { columns?: unknown };
+  const lanes = adoptWorkspaceLanes(raw);
+  return adoptBoard(lanes ? { ...rest, columns: lanes } : rest, "todo");
+}
+
+/** A workspace board's own columns off the wire or the disk, the four among them, or null for none written. */
+export function adoptWorkspaceLanes(value: unknown): BoardLane[] | null {
+  const lanes = adoptLanes(value);
+  return lanes ? withActionLanes(lanes) : null;
 }
 
 /**
@@ -958,10 +1044,10 @@ export function resizeLane(board: Board, laneId: string, width: unknown): Board 
   return { ...board, widths: { ...board.widths, [laneId]: clampLaneWidth(width) } };
 }
 
-/** Needs you keeps its name — see `NEEDS_COLUMN`. */
-export function renameLane(board: Board, laneId: string, name: unknown): Board {
+/** Needs you keeps its name, and so do a workspace's four — see `laneFixed`. */
+export function renameLane(board: Board, laneId: string, name: unknown, kind: BoardKind): Board {
   const clean = text(name, LANE_NAME_MAX);
-  if (!board.columns || !clean || !hasLane(board, laneId) || laneFixed(laneId)) return board;
+  if (!board.columns || !clean || !hasLane(board, laneId) || laneFixed(laneId, kind)) return board;
   return { ...board, columns: board.columns.map((lane) => (lane.id === laneId ? { ...lane, name: clean } : lane)) };
 }
 
@@ -977,16 +1063,24 @@ export function moveLane(board: Board, laneId: string, index: unknown): Board {
 
 /**
  * Where a deleted column's cards go: the nearest column to its left, or to
- * its right for the first — never Needs you, where a card is only ever put
- * by somebody, and whose mark would then say a person did what a delete
- * did. Null when there is nowhere else, or the column cannot be deleted.
- * The column's menu says the answer before the delete, so it is here once.
+ * its right for the first — never one whose cards say something about who
+ * put them there or why. On the profile's board that is Needs you, where a
+ * card is only ever put by somebody, and whose mark would then say a person
+ * did what a delete did. On a workspace's it is In progress, Review and
+ * Done, the columns the run automation moves cards through: a card that
+ * arrived in Review would read as a run waiting on somebody, and one in Done
+ * as finished, when all that happened is a heading went. To do and a
+ * person's own columns say nothing of the kind, and To do is always there,
+ * so a workspace board always has somewhere. Null when there is nowhere
+ * else, or the column cannot be deleted. The column's menu says the answer
+ * before the delete, so it is here once.
  */
-export function laneInto(board: Board, laneId: string): BoardLane | null {
+export function laneInto(board: Board, laneId: string, kind: BoardKind): BoardLane | null {
   const lanes = board.columns ?? [];
   const at = lanes.findIndex((l) => l.id === laneId);
-  if (at < 0 || laneFixed(laneId)) return null;
-  const open = (lane: BoardLane) => lane.id !== laneId && lane.id !== NEEDS_COLUMN;
+  if (at < 0 || laneFixed(laneId, kind)) return null;
+  const says = kind === "profile" ? [NEEDS_COLUMN] : ["doing", "review", "done"];
+  const open = (lane: BoardLane) => lane.id !== laneId && !says.includes(lane.id);
   return [...lanes.slice(0, at)].reverse().find(open) ?? lanes.slice(at + 1).find(open) ?? null;
 }
 
@@ -996,9 +1090,9 @@ export function laneInto(board: Board, laneId: string): BoardLane | null {
  * heading is not deleting the work under it. The last column a card could go
  * to stays, for `adoptLanes`'s reason, and so does Needs you.
  */
-export function removeLane(board: Board, laneId: string): Board {
+export function removeLane(board: Board, laneId: string, kind: BoardKind): Board {
   if (!board.columns) return board;
-  const target = laneInto(board, laneId);
+  const target = laneInto(board, laneId, kind);
   if (!target) return board;
   const into = target.id;
   const columns = board.columns.filter((l) => l.id !== laneId);

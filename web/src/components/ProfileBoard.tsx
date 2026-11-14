@@ -52,7 +52,6 @@ import {
   boardLanes,
   cardCode,
   columnCards,
-  LANE_NAME_MAX,
   laneFixed,
   laneInto,
   LANES_MAX,
@@ -74,6 +73,7 @@ import { ago, CARD_KEEP, CardBody, CardFoot, CardWhen, Composer, dropDraft, show
 import { ColorPicker } from "./ColorPicker";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Icon } from "./Icon";
+import { AddLane, FoldButton, FoldedLane, isLaneDrag, laneMenuItems, LaneName, NEW_LANE, useLaneDrag } from "./Lanes";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { quotable, selectNotDrag } from "./Quote";
 import { PROFILE_CARD_MIME as CARD_MIME, Timeline } from "./Timeline";
@@ -87,15 +87,6 @@ import { BoardSearch } from "./Search";
  */
 type View = "board" | "timeline";
 let lastView: View = "board";
-/** Not an id a column can have: those are the fixed three and `mintLaneId`'s `k…`. */
-const NEW_LANE = "\0new";
-
-/**
- * A column in flight, as against a card: its own type so a column dropped on a
- * column's cards is not read as a card, and a card over a column's header is
- * not read as a column. Lower case because `dataTransfer.types` is.
- */
-const LANE_MIME = "application/x-kururu-lane";
 
 /**
  * A card of this board somebody asked to see — a reply of Kuru's that named
@@ -160,12 +151,8 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
   const [editing, setEditingState] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ at: MenuAt; items: MenuItem[] } | null>(null);
   const [dropAt, setDropAt] = useState<{ column: string; index: number } | null>(null);
-  /**
-   * The column being dragged by its grip, and the gap it would land in, counted
-   * among all the columns including itself. Held here rather than read off the
-   * drag, because a `dragover` may see a drag's types but never its data.
-   */
-  const [laneDrag, setLaneDrag] = useState<{ id: string; gap: number | null } | null>(null);
+  /** A column dragged by its grip — see `useLaneDrag`. */
+  const { overLane, dropLane, laneClasses, grip } = useLaneDrag(lanes, (laneId, index) => api.moveProfileColumn(profile.id, laneId, index));
   /** The column whose colour is being picked, and where its swatches open. */
   const [picking, setPicking] = useState<{ column: string; at: MenuAt } | null>(null);
   /** The column whose name is an input, for a rename; `NEW_LANE` for the one being made. */
@@ -213,63 +200,25 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
     });
 
   /**
-   * A column's menu. Deleting one says where its cards will go, which is the
-   * whole of what could surprise anybody about it — see `removeLane`.
+   * A column's menu — `laneMenuItems`, with the colour this board's columns
+   * wear on its timeline. Deleting one says where its cards will go.
    */
-  const laneMenu = (lane: BoardLane, at: MenuAt) => {
-    const index = lanes.indexOf(lane);
-    const count = columnCards(board, lane.id).length;
-    const into = laneInto(board, lane.id);
-    const fixed = laneFixed(lane.id);
+  const laneMenu = (lane: BoardLane, at: MenuAt) =>
     setMenu({
       at,
-      items: [
-        ...(fixed ? [] : [{ label: "Rename", run: () => setNaming(lane.id) }]),
-        { label: "Colour", hint: lane.color ?? "none", run: () => setPicking({ column: lane.id, at }) },
-        { label: "Collapse", run: () => api.collapseProfileColumn(profile.id, lane.id, true) },
-        ...(index > 0
-          ? [{ label: "Move left", run: () => api.moveProfileColumn(profile.id, lane.id, index - 1) }]
-          : []),
-        ...(index < lanes.length - 1
-          ? [{ label: "Move right", run: () => api.moveProfileColumn(profile.id, lane.id, index + 1) }]
-          : []),
-        ...(into
-          ? [
-              {
-                label: "Delete column",
-                sep: true,
-                danger: true,
-                hint: count ? `${count} card${count === 1 ? "" : "s"} → ${into.name}` : undefined,
-                run: () => api.deleteProfileColumn(profile.id, lane.id),
-              },
-            ]
-          : []),
-      ],
+      items: laneMenuItems({
+        lanes,
+        lane,
+        count: columnCards(board, lane.id).length,
+        into: laneInto(board, lane.id, "profile"),
+        fixed: laneFixed(lane.id, "profile"),
+        extra: [{ label: "Colour", hint: lane.color ?? "none", run: () => setPicking({ column: lane.id, at }) }],
+        rename: () => setNaming(lane.id),
+        collapse: () => api.collapseProfileColumn(profile.id, lane.id, true),
+        move: (index) => api.moveProfileColumn(profile.id, lane.id, index),
+        remove: () => api.deleteProfileColumn(profile.id, lane.id),
+      }),
     });
-  };
-
-  /** Which side of this column the pointer is on picks the gap: its left edge or its right. */
-  const overLane = (index: number) => (event: React.DragEvent<HTMLElement>) => {
-    if (!laneDrag || !event.dataTransfer.types.includes(LANE_MIME)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    const box = event.currentTarget.getBoundingClientRect();
-    const gap = event.clientX > box.left + box.width / 2 ? index + 1 : index;
-    if (gap !== laneDrag.gap) setLaneDrag({ ...laneDrag, gap });
-  };
-
-  /**
-   * The gap becomes `moveLane`'s index, which counts the columns without the
-   * moved one — so a gap to its right is one fewer. The gaps either side of it
-   * are where it already is, and send nothing.
-   */
-  const dropLane = () => {
-    if (!laneDrag || laneDrag.gap === null) return setLaneDrag(null);
-    const from = lanes.findIndex((lane) => lane.id === laneDrag.id);
-    const to = laneDrag.gap > from ? laneDrag.gap - 1 : laneDrag.gap;
-    if (from >= 0 && to !== from) api.moveProfileColumn(profile.id, laneDrag.id, to);
-    setLaneDrag(null);
-  };
 
   /**
    * A card over a column's own background goes to its foot; over a card, the
@@ -281,33 +230,6 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
     event.preventDefault();
     if (anywhere || event.target === event.currentTarget) setDropAt({ column, index: foot });
   };
-
-  /**
-   * The handle a column is dragged by, open or folded. Only the grip is
-   * draggable, so the header's buttons and a rename's input keep their clicks
-   * and their text selection.
-   */
-  const grip = (column: string) => (
-    <span
-      className="board-col-grip"
-      draggable
-      title="Drag to move this column"
-      aria-hidden="true"
-      onDragStart={(event) => {
-        event.dataTransfer.setData(LANE_MIME, column);
-        event.dataTransfer.effectAllowed = "move";
-        const col = event.currentTarget.closest(".board-col");
-        if (col) {
-          const box = col.getBoundingClientRect();
-          event.dataTransfer.setDragImage(col, event.clientX - box.left, event.clientY - box.top);
-        }
-        setLaneDrag({ id: column, gap: null });
-      }}
-      onDragEnd={() => setLaneDrag(null)}
-    >
-      <Icon name="grip" />
-    </span>
-  );
 
   const addingList = useComposerInView(adding, adding ? columnCards(board, adding).length : 0);
 
@@ -369,14 +291,11 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
             const column = lane.id;
             const cards = columnCards(board, column);
             const shut = lane.collapsed === true;
-            const gap = laneDrag?.gap;
             const laneClass = [
               "board-col",
               shut ? "board-col-shut" : "",
               dropAt?.column === column ? "board-col-over" : "",
-              laneDrag?.id === column ? "board-col-lifted" : "",
-              gap === laneIndex ? "board-col-before" : "",
-              gap === laneIndex + 1 && laneIndex === lanes.length - 1 ? "board-col-after" : "",
+              laneClasses(column, laneIndex),
             ].join(" ");
             // The same drop target folded or open, so that a folded column
             // takes a card and a column exactly as it would standing up.
@@ -397,7 +316,7 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null);
               },
               onDrop: (event: React.DragEvent<HTMLElement>) => {
-                if (event.dataTransfer.types.includes(LANE_MIME)) {
+                if (isLaneDrag(event)) {
                   event.preventDefault();
                   return dropLane();
                 }
@@ -413,20 +332,7 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
               return (
                 <section key={column} {...target}>
                   {grip(column)}
-                  {/* The whole strip is the button that opens it again, as
-                      in Jira: the name on its side is the thing to press. */}
-                  <button
-                    className="board-col-open"
-                    title={`Expand ${lane.name}`}
-                    aria-label={`Expand ${lane.name}, ${cards.length} card${cards.length === 1 ? "" : "s"}`}
-                    aria-expanded={false}
-                    onClick={() => api.collapseProfileColumn(profile.id, column, false)}
-                  >
-                    <Icon name="caret" />
-                    <span className="board-col-dot" />
-                    <span className="board-col-count">{cards.length}</span>
-                    <span className="board-col-name">{lane.name}</span>
-                  </button>
+                  <FoldedLane lane={lane} count={cards.length} onOpen={() => api.collapseProfileColumn(profile.id, column, false)} />
                 </section>
               );
             return (
@@ -465,9 +371,9 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                       />
                       <span
                         className="board-col-name"
-                        onDoubleClick={laneFixed(column) ? undefined : () => setNaming(column)}
+                        onDoubleClick={laneFixed(column, "profile") ? undefined : () => setNaming(column)}
                         title={
-                          laneFixed(column)
+                          laneFixed(column, "profile")
                             ? "Yours to do, put here by you or by Kuru — these cards are in the Needs drawer too"
                             : "Double-click to rename"
                         }
@@ -477,15 +383,7 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                       <span className="board-col-count">{cards.length}</span>
                     </>
                   )}
-                  <button
-                    className="pane-btn board-col-fold"
-                    title="Collapse this column — it still takes a card dropped on it"
-                    aria-label="Collapse column"
-                    aria-expanded
-                    onClick={() => api.collapseProfileColumn(profile.id, column, true)}
-                  >
-                    <Icon name="caret" />
-                  </button>
+                  <FoldButton onFold={() => api.collapseProfileColumn(profile.id, column, true)} />
                   <button
                     className="pane-btn"
                     title={`Add a card to ${lane.name}`}
@@ -496,7 +394,7 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                   </button>
                   <button
                     className="pane-btn"
-                    title={laneFixed(column) ? "Colour, collapse or move this column" : "Rename, move or delete this column"}
+                    title={laneFixed(column, "profile") ? "Colour, collapse or move this column" : "Rename, move or delete this column"}
                     aria-label="Column menu"
                     aria-haspopup="menu"
                     onClick={(event) => {
@@ -582,24 +480,13 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
               </section>
             );
           })}
-          {lanes.length < LANES_MAX &&
-            (naming === NEW_LANE ? (
-              <section className="board-col board-col-new">
-                <header className="board-col-head">
-                  <LaneName
-                    name=""
-                    onDone={(name) => {
-                      if (name) api.addProfileColumn(profile.id, name);
-                      setNaming(null);
-                    }}
-                  />
-                </header>
-              </section>
-            ) : (
-              <button className="board-col-add" onClick={() => setNaming(NEW_LANE)}>
-                <Icon name="add" /> Add column
-              </button>
-            ))}
+          {lanes.length < LANES_MAX && (
+            <AddLane
+              naming={naming === NEW_LANE}
+              onNaming={(on) => setNaming(on ? NEW_LANE : null)}
+              onAdd={(name) => api.addProfileColumn(profile.id, name)}
+            />
+          )}
         </div>
       )}
 
@@ -774,45 +661,5 @@ export function NeedsByMark({ by }: { by: NeedsBy }) {
     <span className={`needs-by needs-by-${by}`} title={kuru ? "Kuru put this here for you" : "You put this here"}>
       {kuru ? "Kuru" : "You"}
     </span>
-  );
-}
-
-/**
- * A column's name as a field, for making one or renaming it. Enter or leaving
- * the field keeps what was typed, since a name half-typed and clicked away from
- * was still meant; Escape is the one way to change nothing — and is stopped
- * here so it means only that.
- */
-function LaneName({ name, onDone }: { name: string; onDone: (name: string) => void }) {
-  const [value, setValue] = useState(name);
-  const field = useRef<HTMLInputElement>(null);
-  const done = useRef(false);
-  const finish = (next: string) => {
-    if (done.current) return;
-    done.current = true;
-    onDone(next.trim());
-  };
-  useEffect(() => {
-    field.current?.focus();
-    field.current?.select();
-  }, []);
-  return (
-    <input
-      ref={field}
-      className="board-col-input"
-      value={value}
-      maxLength={LANE_NAME_MAX}
-      placeholder="Column name"
-      aria-label="Column name"
-      onChange={(event) => setValue(event.target.value)}
-      onBlur={() => finish(value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") finish(value);
-        if (event.key === "Escape") {
-          event.stopPropagation();
-          finish("");
-        }
-      }}
-    />
   );
 }

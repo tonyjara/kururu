@@ -29,7 +29,7 @@
  * text, and the harness's `move_workspace` says exactly what the dialog
  * says.
  */
-import { BOARD_COLUMNS, cardCode, COLUMN_LABELS, type Board, type BoardColumn, type Card, type CardWorktree } from "./board";
+import { adoptWorkspaceLanes, BOARD_COLUMNS, boardLanes, cardCode, COLUMN_LABELS, type Board, type BoardColumn, type BoardLane, type Card, type CardWorktree } from "./board";
 import type { DbTarget } from "./databases";
 import { panes, terminalsOf } from "./layout";
 import type { AgentSnapshot, Workspace } from "./model";
@@ -181,12 +181,17 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** "3 To do, 1 In progress, 80 Done", in the board's order, leaving out empty columns. */
-export function columnCounts(cards: readonly Card[]): string {
+/**
+ * "6 Backlog, 3 To do, 1 In progress, 80 Done", in the board's order —
+ * `lanes`, a column the user made among the four by its name — leaving out
+ * empty columns. A card in a column the list does not have is counted by
+ * the column's id after the rest.
+ */
+export function columnCounts(cards: readonly Card[], lanes: readonly BoardLane[] = BOARD_COLUMNS.map((id) => ({ id, name: COLUMN_LABELS[id as BoardColumn], color: null }))): string {
   const counts = new Map<string, number>();
   for (const card of cards) counts.set(card.column, (counts.get(card.column) ?? 0) + 1);
-  const known = BOARD_COLUMNS.filter((c) => counts.has(c)).map((c) => `${counts.get(c)} ${COLUMN_LABELS[c as BoardColumn]}`);
-  const other = [...counts.entries()].filter(([c]) => !(BOARD_COLUMNS as readonly string[]).includes(c)).map(([c, n]) => `${n} in ${c}`);
+  const known = lanes.filter((lane) => counts.has(lane.id)).map((lane) => `${counts.get(lane.id)} ${lane.name}`);
+  const other = [...counts.entries()].filter(([c]) => !lanes.some((lane) => lane.id === c)).map(([c, n]) => `${n} in ${c}`);
   return [...known, ...other].join(", ");
 }
 
@@ -209,7 +214,7 @@ export function movePlan(input: PlanInput): { refusal: string | null; moves: str
   const moves: string[] = [`The name, ${workspace.name}, into ${node}'s profile on screen.`];
   if (cards.length) {
     const deleted = input.deleted ? `, and its ${plural(input.deleted, "deleted card")}, still deleted` : "";
-    moves.push(`The board: ${plural(cards.length, "card")} (${columnCounts(cards)})${deleted}. Each keeps its number, dates and history, and its history says it moved.`);
+    moves.push(`The board: ${plural(cards.length, "card")} (${columnCounts(cards, board ? boardLanes(board) : undefined)})${deleted}. Each keeps its number, dates and history, and its history says it moved.`);
   } else {
     moves.push(input.deleted ? `The board: no cards, and its ${plural(input.deleted, "deleted card")}, still deleted.` : "The board, which has no cards.");
   }
@@ -366,9 +371,12 @@ const orNull = <T>(v: unknown, ok: (v: unknown) => v is T): v is T | null => v =
  * A move off the wire, checked down to every event, or null. The peer is a
  * member the roster lists, and this is still the shape a database row will
  * be written from: anything that is not what the export writes is refused
- * whole rather than half taken. A column a workspace's board does not have
- * becomes To do, and a worktree is dropped — a path on another machine is
- * nothing here — as `adoptBoard` would.
+ * whole rather than half taken. The columns the user made on the board come
+ * with it, held to `adoptWorkspaceLanes` — the four always among them — and
+ * a card in a column the board does not have becomes To do; a worktree is
+ * dropped — a path on another machine is nothing here — as `adoptBoard`
+ * would. A sender too old to send columns sends none, and its board lands
+ * with the four.
  */
 export function adoptOffer(raw: unknown): MoveOffer | null {
   if (!raw || typeof raw !== "object") return null;
@@ -383,6 +391,8 @@ export function adoptOffer(raw: unknown): MoveOffer | null {
   const b = o.board as Record<string, unknown>;
   const board = b.board as Record<string, unknown> | undefined;
   if (b.version !== 1 || !board || !isNum(board.next) || !isNum(board.createdAt) || !Array.isArray(b.cards) || b.cards.length > MOVE_CARDS_MAX) return null;
+  const columns = adoptWorkspaceLanes(board.columns);
+  const laneIds = new Set<string>(columns ? columns.map((lane) => lane.id) : BOARD_COLUMNS);
   const cards: BoardExport["cards"] = [];
   for (const raw of b.cards as unknown[]) {
     const c = raw as Record<string, unknown>;
@@ -410,7 +420,7 @@ export function adoptOffer(raw: unknown): MoveOffer | null {
       number: c.number as number,
       title: c.title,
       body: c.body,
-      column: (BOARD_COLUMNS as readonly string[]).includes(c.column) ? c.column : "todo",
+      column: laneIds.has(c.column) ? c.column : "todo",
       position: c.position,
       isolate: c.isolate,
       dates: d ? { start: d.start as string, end: d.end as string } : null,
@@ -427,7 +437,7 @@ export function adoptOffer(raw: unknown): MoveOffer | null {
     version: 1,
     profile: { key: typeof p.key === "string" ? p.key : "", name: typeof p.name === "string" ? p.name : "", loginKey: null },
     workspace: { key: ws.key, name },
-    board: { id: typeof board.id === "string" ? board.id : "", next: Math.max(1, Math.trunc(board.next)), columns: null, createdAt: board.createdAt },
+    board: { id: typeof board.id === "string" ? board.id : "", next: Math.max(1, Math.trunc(board.next)), columns, createdAt: board.createdAt },
     cards,
   };
   return offer;

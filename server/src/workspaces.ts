@@ -24,7 +24,7 @@
  * profile, it always has at least one workspace, that workspace always has at
  * least one pane, and the focused pane always exists.
  */
-import { adoptBoard, adoptProfileBoard, emptyBoard, emptyProfileBoard, markNeeds, noteRun, pruneMade, setMade, setRunSession, sleepRun, transferCard, type Board, type Card, type CardRun, type CardWorktree, type NeedsBy } from "../../shared/board";
+import { adoptProfileBoard, adoptWorkspaceBoard, emptyBoard, emptyProfileBoard, markNeeds, noteRun, pruneMade, setMade, setRunSession, sleepRun, transferCard, type Board, type Card, type CardRun, type CardWorktree, type NeedsBy } from "../../shared/board";
 import type { MadeFile } from "../../shared/made";
 import { adoptHarness } from "../../shared/harness";
 import { adoptPin, type MachinePin } from "../../shared/machines";
@@ -229,7 +229,7 @@ function adopt(stored: Profile): Profile {
       group: groupName(workspace.group),
       // The same, and read as defensively as the rest: cards are text somebody
       // typed and runs name processes, and an older blob has neither.
-      board: adoptBoard(workspace.board),
+      board: adoptWorkspaceBoard(workspace.board),
       layout: adoptBoardPanes(workspace.layout),
       // Absent before workspaces could run on a machine, which is here. It
       // becomes a command line, so it is read as `adoptPin` reads a file.

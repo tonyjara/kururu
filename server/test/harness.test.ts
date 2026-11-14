@@ -25,6 +25,7 @@ import {
   EVERY_FEATURE,
   HARNESS_COMPACT_HEADING,
   HARNESS_TOOLS,
+  laneCounts,
   NOTICE_BATCH_MS,
   NoticeBatch,
   REPLY_MAX,
@@ -74,7 +75,7 @@ import {
 import { countsAsAgent, type AgentSnapshot } from "../../shared/model";
 import { Harness, SAY_ANSWERS, promptBox, screenText, type HarnessDeps, type SayOutcome } from "../src/harness";
 import { Workspaces } from "../src/workspaces";
-import { NEEDS_COLUMN, addCard, moveCard, type Board } from "../../shared/board";
+import { NEEDS_COLUMN, addCard, addLane, emptyBoard, moveCard, moveLane, withLanes, type Board } from "../../shared/board";
 
 
 describe("the tool catalogue", () => {
@@ -1170,6 +1171,48 @@ describe("Needs you, from the harness", () => {
     expect(refused.text).toContain(NEEDS_COLUMN);
     expect(ws.active.board.cards[0]!.column).toBe(NEEDS_COLUMN);
     expect((await call("move_card", { card: "nope", column: "done" })).isError).toBe(true);
+  });
+});
+
+/**
+ * A workspace's own columns through Kuru's tools: `cards` lists a Backlog by
+ * name and id, `add_card` and `move_card` take the id and refuse what is not
+ * a column by naming the ones there are, a card with no column is To do's
+ * even with the Backlog in front, and `kururu_status` counts every column.
+ */
+describe("a workspace's own columns, from the harness", () => {
+  it("lists, takes and counts them", async () => {
+    const ws = new Workspaces();
+    const profileId = ws.active.id;
+    const harness = new Harness({
+      workspaces: ws,
+      host: { isLive: () => false, find: () => undefined },
+      activity: new Map<string, string>(),
+      launch: () => ({ bypassClis: [] }),
+      madeOf: () => [],
+    } as unknown as HarnessDeps);
+    const workspace = ws.active.workspaces[0]!.id;
+    ws.ensureBoardIn(profileId, workspace);
+    ws.editBoardIn(profileId, workspace, (b) => moveLane(addLane(withLanes(b), "Backlog", "kb"), "kb", 0));
+    const call = (name: string, args: Record<string, unknown>) => harness.call(profileId, null, name, { workspace, ...args });
+    const board = () => ws.workspaceIn(profileId, workspace)!.board!;
+
+    expect((await call("add_card", { title: "Someday", column: "kb" })).text).toContain("in Backlog");
+    await call("add_card", { title: "Now" });
+    expect(board().cards.map((c) => c.column)).toEqual(["kb", "todo"]);
+    const refused = await call("add_card", { title: "Where?", column: "backlog" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("Backlog (kb)");
+
+    const now = board().cards.find((c) => c.title === "Now")!.id;
+    expect((await call("move_card", { card: now, column: "kb" })).text).toContain("to Backlog");
+    expect(board().cards.find((c) => c.id === now)!.column).toBe("kb");
+    expect((await call("move_card", { card: now, column: "nope" })).isError).toBe(true);
+
+    expect((await call("cards", {})).text).toContain("Backlog (kb) — 2");
+    // What kururu_status says of the workspace's board.
+    expect(laneCounts(board())).toBe("Backlog (kb) 2, todo 0, doing 0, review 0, done 0");
+    expect(laneCounts(emptyBoard())).toBe("todo 0, doing 0, review 0, done 0");
   });
 });
 

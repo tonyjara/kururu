@@ -49,7 +49,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Profile, Workspace } from "../../shared/model";
-import { adoptBoard, adoptProfileBoard, emptyBoard, isNeedsBy, NEEDS_COLUMN, type Board, type BoardLane, type Card, type CardRun } from "../../shared/board";
+import { adoptProfileBoard, adoptWorkspaceBoard, emptyBoard, isNeedsBy, NEEDS_COLUMN, type Board, type BoardLane, type Card, type CardRun } from "../../shared/board";
 import { adoptMade } from "../../shared/made";
 import type { RunState } from "../../shared/automation";
 import type { MoveDone } from "../../shared/move";
@@ -1110,7 +1110,7 @@ export class Store {
     }
     if (workspaceKey === null) this.needsSinceOf(boardId, cards);
     const raw: Board = { cards, next: Number(boardRow.next) || 1, ...(columns ? { columns } : {}), ...widthsOf(boardRow.widths as string | null) };
-    if (workspaceKey !== null) return adoptBoard(raw) ?? emptyBoard();
+    if (workspaceKey !== null) return adoptWorkspaceBoard(raw) ?? emptyBoard();
     const board = adoptProfileBoard(raw);
     // A profile's board from before Needs you gets it on the way in; written
     // back here, once, so the rows and the backup say the board has it too.
@@ -1981,6 +1981,10 @@ export class Store {
           this.stmt("insert into boards(id, profile_key, workspace_key, next, created_at) values (?, ?, ?, ?, ?)").run(boardId, profileKey, workspaceKey, file.board.next, file.board.createdAt);
         }
         this.stmt("update boards set next = max(next, ?) where id = ?").run(file.board.next, boardId);
+        // The columns the user made on it go with it, the four among them
+        // (`adoptOffer` held them to that); a board from a node too old to
+        // send them keeps the four it draws without a list.
+        if (file.board.columns) this.writeLanes(boardId, file.board.columns);
         for (const card of file.cards) {
           const fields = [
             boardId,

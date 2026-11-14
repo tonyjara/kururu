@@ -10461,7 +10461,7 @@ a.st-btn {
 .profile-board-cols {
   min-height: 0;
 }
-.profile-board-cols > .board-col-shut {
+.board > .board-col-shut {
   flex: none;
   min-width: 0;
   padding-top: 6px;
@@ -10546,7 +10546,7 @@ a.st-btn {
   outline: none;
   box-shadow: 0 0 0 var(--border-thick) var(--chrome), 0 0 0 3px var(--dim);
 }
-/* The handle a profile board's column is dragged by. Dim until it is pointed
+/* The handle a board's column is dragged by. Dim until it is pointed
    at, because it is on every column and is only wanted now and then. */
 .board-col-grip {
   flex: none;

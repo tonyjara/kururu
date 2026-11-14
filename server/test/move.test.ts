@@ -178,6 +178,16 @@ describe("the offer, as the receiving node takes it", () => {
     expect(adoptOffer({ ...offer, board: { ...offer.board, cards: [{ ...card, runs: [{ ...card.runs[0], startedAt: Number.NaN }] }] } })).toBeNull();
     expect(adoptOffer({ ...offer, board: { ...offer.board, cards: [{ ...card, column: "nowhere" }] } })!.board!.cards[0]!.column).toBe("todo");
   });
+
+  it("brings the columns the user made, the four among them, and the cards in them", () => {
+    const columns = [{ id: "kb", name: "Backlog", color: null }, { id: "todo", name: "To do", color: null }];
+    const got = adoptOffer({ ...offer, board: { ...offer.board, board: { ...offer.board.board, columns }, cards: [{ ...card, column: "kb" }] } })!;
+    expect(got.board!.board.columns!.map((l) => l.id)).toEqual(["kb", "todo", "doing", "review", "done"]);
+    expect(got.board!.cards[0]!.column).toBe("kb");
+    // From a node that sends none, a card in one is To do's.
+    expect(adoptOffer({ ...offer, board: { ...offer.board, cards: [{ ...card, column: "kb" }] } })!.board!.cards[0]!.column).toBe("todo");
+    expect(columnCounts([{ column: "kb" }, { column: "todo" }, { column: "kb" }] as never, got.board!.board.columns!)).toBe("2 Backlog, 1 To do");
+  });
 });
 
 describe("the folder, judged on the disk it names", () => {

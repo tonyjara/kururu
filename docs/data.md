@@ -63,7 +63,7 @@ search still finds their cards.
 |---|---|
 | `profiles`, `workspaces` | key, name, when made, when gone |
 | `boards` | one per profile and per workspace that opened one; `next` is the card counter |
-| `lanes` | the profile board's own columns; a workspace board draws the fixed four |
+| `lanes` | a board's own columns, in order: always the profile's; a workspace's only once a person has made one, with its four among them, and none before that, when it draws the four |
 | `cards` | every column of a card, position in its board's order, `deleted_at`; `needs_by` — who put it in the profile board's Needs you, on the cards there (schema 5) |
 | `card_runs` | every run a card ever had, not only the last; the live agent id, checked against the host at start |
 | `card_events` | the history: `created`, `moved`, `edited`, `sent`, `run`, `deleted`, `restored`, `imported`, each with who — `user`, `harness`, `automation`, `import`; also where a Needs you card's arrival time (`Card.needsSince`) is read from |

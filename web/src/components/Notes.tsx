@@ -51,9 +51,7 @@ import {
   boardLanes,
   canResume,
   cardCode,
-  COLUMN_LABELS,
   NEEDS_COLUMN,
-  type BoardColumn,
   type BoardLane,
   type Card,
 } from "../../../shared/board";
@@ -536,7 +534,7 @@ export function NoteInside({
                   <span>{lane.name}</span>
                 </>
               ) : (
-                <span>{COLUMN_LABELS[card.column as BoardColumn] ?? card.column}</span>
+                <span>{(workspace?.board ? boardLanes(workspace.board).find((one) => one.id === card.column)?.name : undefined) ?? card.column}</span>
               )}
               <span className="note-where">· {workspace ? workspace.name : "your board"}</span>
               {card.column === NEEDS_COLUMN && card.needsBy && <NeedsByMark by={card.needsBy} />}

@@ -44,6 +44,10 @@ import {
   LANES_MAX,
   markNeeds,
   NEEDS_COLUMN,
+  adoptWorkspaceBoard,
+  laneFixed,
+  withActionLanes,
+  withLanes,
   type Board,
   type CardRun,
 } from "../../shared/board";
@@ -426,7 +430,7 @@ describe("the profile's columns", () => {
   it("adds, renames and moves a column, and cards can go in it", () => {
     let board = addLane(emptyProfileBoard(), "  Someday ", "k1");
     expect(boardLanes(board).map((l) => l.name)).toEqual(["To do", "In progress", "Needs you", "Done", "Someday"]);
-    board = renameLane(board, "k1", "Later");
+    board = renameLane(board, "k1", "Later", "profile");
     board = moveLane(board, "k1", 0);
     expect(boardLanes(board).map((l) => l.id)).toEqual(["k1", "todo", "doing", "needs", "done"]);
     board = addCard(board, { title: "x", column: "k1" }, "c1", 1);
@@ -438,22 +442,22 @@ describe("the profile's columns", () => {
     expect(addLane(board, "   ", "k1")).toBe(board);
     expect(addLane(board, "Again", "todo")).toBe(board);
     expect(moveLane(board, "todo", Number.NaN)).toBe(board);
-    expect(renameLane(board, "nope", "x")).toBe(board);
+    expect(renameLane(board, "nope", "x", "profile")).toBe(board);
     const workspace = emptyBoard();
     expect(addLane(workspace, "Someday", "k1")).toBe(workspace);
   });
 
   it("keeps a column's cards when it is deleted, moving them to its neighbour", () => {
-    const board = removeLane(withCards(), "doing");
+    const board = removeLane(withCards(), "doing", "profile");
     expect(boardLanes(board).map((l) => l.id)).toEqual(["todo", "needs", "done"]);
     expect(columnCards(board, "todo").map((c) => c.id)).toEqual(["c1", "c2", "c3"]);
-    expect(columnCards(removeLane(withCards(), "todo"), "doing").map((c) => c.id)).toEqual(["c2", "c3", "c1"]);
+    expect(columnCards(removeLane(withCards(), "todo", "profile"), "doing").map((c) => c.id)).toEqual(["c2", "c3", "c1"]);
   });
 
   it("never deletes the last column", () => {
     let board = emptyProfileBoard();
-    board = removeLane(removeLane(board, "todo"), "doing");
-    expect(removeLane(board, "done")).toBe(board);
+    board = removeLane(removeLane(board, "todo", "profile"), "doing", "profile");
+    expect(removeLane(board, "done", "profile")).toBe(board);
   });
 
   it("holds a card to the board's own columns", () => {
@@ -478,6 +482,90 @@ describe("the profile's columns", () => {
     expect(boardLanes(made).map((l) => l.id)).toEqual(["todo", "doing", "needs", "done", "k1"]);
     const orphan = adoptProfileBoard({ columns: [{ id: "k1", name: "Only" }], cards: [{ id: "c1", title: "a", column: "gone" }] });
     expect(orphan.cards[0]!.column).toBe("k1");
+  });
+});
+
+describe("a workspace's own columns", () => {
+  /** A workspace board with a Backlog at the front and a card in each of Backlog and To do. */
+  const backlog = () => {
+    let board = moveLane(addLane(withLanes(emptyBoard()), "Backlog", "kb"), "kb", 0);
+    board = addCard(board, { title: "later", column: "kb" }, "c1", 1);
+    board = addCard(board, { title: "now", column: "todo" }, "c2", 2);
+    return board;
+  };
+
+  it("writes the four down with the first column made, in their order, and draws the same four before", () => {
+    expect(emptyBoard().columns).toBeUndefined();
+    expect(boardLanes(withLanes(emptyBoard()))).toEqual(boardLanes(emptyBoard()));
+    expect(boardLanes(backlog()).map((l) => l.id)).toEqual(["kb", "todo", "doing", "review", "done"]);
+  });
+
+  it("keeps the four: no rename, no delete, but they move and fold", () => {
+    const board = backlog();
+    for (const id of ["todo", "doing", "review", "done"]) {
+      expect(laneFixed(id, "workspace")).toBe(true);
+      expect(renameLane(board, id, "Mine", "workspace")).toBe(board);
+      expect(removeLane(board, id, "workspace")).toBe(board);
+    }
+    expect(laneFixed("todo", "profile")).toBe(false);
+    expect(boardLanes(moveLane(board, "done", 0))[0]!.id).toBe("done");
+    expect(boardLanes(collapseLane(board, "review", true)).find((l) => l.id === "review")!.collapsed).toBe(true);
+    expect(boardLanes(renameLane(board, "kb", "Someday", "workspace"))[0]!.name).toBe("Someday");
+  });
+
+  it("deletes a person's column into its nearest neighbour that the automation does not move cards through", () => {
+    let board = addLane(backlog(), "Parked", "kp");
+    board = moveLane(board, "kp", 3); // kb, todo, doing, [kp], review, done
+    board = addCard(board, { title: "parked", column: "kp" }, "c3", 3);
+    expect(laneInto(board, "kp", "workspace")!.id).toBe("todo");
+    expect(columnCards(removeLane(board, "kp", "workspace"), "todo").map((c) => c.id)).toEqual(["c2", "c3"]);
+    // First on the board, its neighbour is to its right.
+    expect(laneInto(board, "kb", "workspace")!.id).toBe("todo");
+    // Beside another of the person's, that one.
+    const two = moveLane(board, "kp", 1);
+    expect(laneInto(two, "kp", "workspace")!.id).toBe("kb");
+  });
+
+  it("is inert: a run moves its card to In progress, and the automation never moves one in or out", () => {
+    const run = { agentId: "a1", launcher: "claude", label: "Claude", startedAt: 0 };
+    let board = startRun(backlog(), "c1", run);
+    expect(board.cards.find((c) => c.id === "c1")!.column).toBe("doing");
+    board = noteRun(board, "a1", "done", false, 1);
+    expect(board.cards.find((c) => c.id === "c1")!.column).toBe("review");
+    // Dragged back to the Backlog by a person, it stays there through the next turn.
+    board = moveCard(board, "c1", "kb");
+    board = noteRun(board, "a1", "working", false, 2);
+    board = noteRun(board, "a1", "done", false, 3);
+    expect(board.cards.find((c) => c.id === "c1")!.column).toBe("kb");
+  });
+
+  it("comes back from the blob or the disk with the four, whatever was written", () => {
+    const raw = {
+      next: 3,
+      columns: [
+        { id: "kb", name: "Backlog", color: null },
+        { id: "todo", name: "Renamed by hand", color: null },
+        { id: "needs", name: "Needs you", color: "coral" },
+        { id: "done", name: "Done", color: null },
+      ],
+      cards: [
+        { id: "c1", number: 1, title: "kept", column: "kb" },
+        { id: "c2", number: 2, title: "lost", column: "gone" },
+      ],
+    };
+    const board = adoptWorkspaceBoard(raw)!;
+    expect(boardLanes(board).map((l) => `${l.id}:${l.name}`)).toEqual(["kb:Backlog", "todo:To do", "doing:In progress", "review:Review", "done:Done"]);
+    expect(board.cards.map((c) => c.column)).toEqual(["kb", "todo"]);
+    // A board with none written down keeps none.
+    expect(adoptWorkspaceBoard({ cards: [], next: 1 })!.columns).toBeUndefined();
+    expect(withActionLanes([]).map((l) => l.id)).toEqual(["todo", "doing", "review", "done"]);
+  });
+
+  it("sends a profile card to To do, never to a Backlog at the front", () => {
+    let from = emptyProfileBoard();
+    from = addCard(from, { title: "x", column: "needs" }, "p1", 1);
+    const out = transferCard(from, backlog(), "p1");
+    expect(out.to.cards.find((c) => c.id === "p1")!.column).toBe("todo");
   });
 });
 
@@ -678,19 +766,19 @@ describe("Needs you", () => {
 
   it("cannot be renamed or deleted, and a deleted neighbour's cards never fall into it", () => {
     const b = emptyProfileBoard();
-    expect(renameLane(b, NEEDS_COLUMN, "Later")).toBe(b);
-    expect(removeLane(b, NEEDS_COLUMN)).toBe(b);
-    expect(laneInto(b, NEEDS_COLUMN)).toBeNull();
+    expect(renameLane(b, NEEDS_COLUMN, "Later", "profile")).toBe(b);
+    expect(removeLane(b, NEEDS_COLUMN, "profile")).toBe(b);
+    expect(laneInto(b, NEEDS_COLUMN, "profile")).toBeNull();
     // Done's left neighbour is Needs you; its cards go past it, to In progress.
     const withDone = addCard(b, { title: "finished", column: "done" }, "c1", 1);
-    expect(laneInto(withDone, "done")!.id).toBe("doing");
-    const gone = removeLane(withDone, "done");
+    expect(laneInto(withDone, "done", "profile")!.id).toBe("doing");
+    const gone = removeLane(withDone, "done", "profile");
     expect(ids(gone)).toEqual(["todo", "doing", NEEDS_COLUMN]);
     expect(gone.cards[0]!.column).toBe("doing");
     // And the last column a card could go to stays.
-    const last = removeLane(gone, "todo");
+    const last = removeLane(gone, "todo", "profile");
     expect(ids(last)).toEqual(["doing", NEEDS_COLUMN]);
-    expect(removeLane(last, "doing")).toBe(last);
+    expect(removeLane(last, "doing", "profile")).toBe(last);
   });
 
   it("is never where a card lands when nobody named a column", () => {

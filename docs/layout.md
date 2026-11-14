@@ -221,6 +221,32 @@ server's ↻ too: off screen the terminal goes into that workspace's layout
 (`openTerminalAt`) and nothing is focused. The worktree's shell goes to the
 lower half too: it is a terminal.
 
+**A person may give a workspace's board columns of their own, and they are
+inert.** A Backlog, a Parked, a Waiting on design: made with **Add column**
+after the last column, renamed, moved, folded and deleted from the column's
+header, with the profile's board's parts (`web/src/components/Lanes.tsx`) and
+its pure functions (`addLane`, `renameLane`, `moveLane`, `collapseLane`,
+`removeLane`), sent as `add-column` and its siblings, which name a workspace
+and are forwarded to another node like the card verbs. A board with none has
+no list written down and draws the four; the first one made writes the four
+into `Board.columns` with it (`withLanes`), so it has a place among them, and
+every road a board comes back by — the blob, the database, a moved
+workspace's offer — puts back whichever of the four is missing
+(`adoptWorkspaceBoard`, `withActionLanes`). The four keep their names and
+cannot be deleted (`laneFixed` under the `"workspace"` kind; the profile's
+fixed column is Needs you), but move and fold like any. Nothing runs from a
+person's column and the automation never moves a card into or out of one:
+`noteRun` moves only between In progress and Review, and a run moves its card
+to In progress from wherever it sat, so a card dragged from Backlog to To do
+is an ordinary To do card and one run from Backlog goes to In progress.
+Deleting one moves its cards to the nearest column beside it that is not In
+progress, Review or Done (`laneInto`) — a card arriving in Review would read
+as a run waiting on somebody, and in Done as finished — which is To do when
+nothing nearer is a person's. A card added with no column, sent from the
+profile's board, or read back from a column that has gone is To do's, never
+whichever column was dragged to the front. No colour: a workspace board has
+no timeline to wear one on.
+
 **The automation moves a card on an edge, and only out of the column it put it
 in.** `noteRun` runs for every agent on every host snapshot and compares
 against the state it recorded on the card, not against the last status — so a
@@ -287,11 +313,11 @@ was on screen; the host's blob carries it as it carries the rest.
 `Board` like a workspace's, drawn by `ProfileBoard.tsx` as the first fixed tab
 of the profile's **Dashboard** (below), opened from the icon beside the profile
 name. Its columns are its own (`Board.columns`, a `BoardLane` list
-that only this board has): it starts with To do, In progress and Done — no
+that it always has): it starts with To do, In progress and Done — no
 Review, since nothing on it runs — and a person can add, rename, reorder and
-delete them from the column header. A workspace's four stay fixed because the
-run automation reads them; nothing reads the profile's but a person — except
-**Needs you**, below. Deleting a column moves its cards to its neighbour
+delete them from the column header. A workspace's four stay, whatever else is
+added beside them ([above](#the-board)), because the run automation reads
+them; nothing reads the profile's but a person — except **Needs you**, below. Deleting a column moves its cards to its neighbour
 (`removeLane`, the neighbour `laneInto` names, which is never Needs you), and
 the last column cannot go.
 

@@ -16,7 +16,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { CHANNEL_NAMES, isChannelKind } from "../../../shared/channels";
-import { COLUMN_LABELS } from "../../../shared/board";
+import { COLUMN_LABELS, NEEDS_COLUMN, NEEDS_LABEL } from "../../../shared/board";
+import type { Profile } from "../../../shared/model";
 import type { SearchHit } from "../../../shared/store";
 import * as api from "../session";
 
@@ -30,6 +31,9 @@ export function BoardSearch({
   /** A card hit, clicked: its workspace, or null for the profile's own board, and the card. */
   onPickCard: (workspaceId: string | null, cardId: string) => void;
 }) {
+  const { snapshot } = api.useKururu();
+  const names = laneNames(snapshot?.profile.id === profileId ? snapshot.profile : null);
+  const laneName = (column: string) => laneNameIn(column, names);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [open, setOpen] = useState<number | null>(null);
@@ -163,8 +167,24 @@ export function BoardSearch({
   );
 }
 
-function laneName(column: string): string {
-  return (COLUMN_LABELS as Record<string, string>)[column] ?? column;
+/**
+ * A column by the name a person sees: the fixed ones by theirs, and one a
+ * person made, on any of the profile's boards, by the name it has now — a hit
+ * keeps only the column's id. One made and since deleted is left as its id,
+ * which is all there is of it.
+ */
+function laneNameIn(column: string, names: ReadonlyMap<string, string>): string {
+  if (column === NEEDS_COLUMN) return NEEDS_LABEL;
+  return (COLUMN_LABELS as Record<string, string>)[column] ?? names.get(column) ?? column;
+}
+
+/** The columns people made on a profile's boards, by id — minted once each, so one map serves them all. */
+function laneNames(profile: Profile | null): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const board of profile ? [profile.board, ...profile.workspaces.map((w) => w.board)] : []) {
+    for (const lane of board?.columns ?? []) if (!(lane.id in COLUMN_LABELS)) names.set(lane.id, lane.name);
+  }
+  return names;
 }
 
 function when(at: number): string {

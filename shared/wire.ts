@@ -33,7 +33,7 @@
  * the answer, and it is complete. Only `new-tab` can fail in a way nothing else
  * would explain, so it alone carries an `id` and is answered with `reply`.
  */
-import type { BoardColumn, CardDates } from "./board";
+import type { CardDates } from "./board";
 import type { Direction } from "./layout";
 import type { Action } from "./keys";
 import type { MascotConfig, PtyKind, SessionSnapshot } from "./model";
@@ -1336,9 +1336,11 @@ export type ClientMessage =
    * than meaning "the one on screen", because a phone and a desktop can be
    * looking at the same board through a switch the other has not drawn yet.
    * The text is checked and capped on the server (`shared/board.ts`), and a
-   * move's index is a place among the destination column's cards.
+   * move's index is a place among the destination column's cards. A column is
+   * one of the four or one a person made on that board, by id; the server
+   * holds it to the board's own list.
    */
-  | { type: "add-card"; workspaceId: string; title: string; body?: string; column?: BoardColumn; isolate?: boolean }
+  | { type: "add-card"; workspaceId: string; title: string; body?: string; column?: string; isolate?: boolean }
   /**
    * A card written and handed to an agent in one go — the composer's robot.
    * Add and run are one verb because the card's id is minted by the server:
@@ -1351,7 +1353,7 @@ export type ClientMessage =
       workspaceId: string;
       title: string;
       body?: string;
-      column?: BoardColumn;
+      column?: string;
       isolate?: boolean;
       launcher: string;
     }
@@ -1370,10 +1372,23 @@ export type ClientMessage =
       isolate?: boolean;
       dates?: CardDates | null;
     }
-  | { type: "move-card"; workspaceId: string; cardId: string; column: BoardColumn; index?: number }
+  | { type: "move-card"; workspaceId: string; cardId: string; column: string; index?: number }
   | { type: "delete-card"; workspaceId: string; cardId: string }
   /** A column dragged to a width in pixels, or `null` back to the default — see `resizeLane`. */
-  | { type: "resize-column"; workspaceId: string; column: BoardColumn; width: number | null }
+  | { type: "resize-column"; workspaceId: string; column: string; width: number | null }
+  /**
+   * A workspace board's own columns beside its four — see `BoardLane`. The
+   * profile's column verbs, naming a workspace: the server mints the id, a
+   * move's index is a place among the other columns, and deleting one moves
+   * its cards beside it (`laneInto`). The four take a move and a fold and
+   * refuse a rename and a delete. No colour: a workspace board has no
+   * timeline for one to be worn on.
+   */
+  | { type: "add-column"; workspaceId: string; name: string }
+  | { type: "rename-column"; workspaceId: string; columnId: string; name: string }
+  | { type: "set-column-collapsed"; workspaceId: string; columnId: string; collapsed: boolean }
+  | { type: "move-column"; workspaceId: string; columnId: string; index: number }
+  | { type: "delete-column"; workspaceId: string; columnId: string }
 
   /**
    * The profile's board — see `Profile.board`. The same four verbs, naming a

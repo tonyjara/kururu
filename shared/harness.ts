@@ -27,7 +27,7 @@
  * orchestrator is told to look before trusting it.
  */
 import { withoutBidi } from "./bidi";
-import { boardLanes, type Board, type Card } from "./board";
+import { boardLanes, COLUMN_LABELS, NEEDS_COLUMN, type Board, type BoardLane, type Card } from "./board";
 import type { HarnessCli } from "./launchers";
 import type { AgentSnapshot, AgentStatus, HarnessState } from "./model";
 import type { ClientMessage } from "./wire";
@@ -363,11 +363,11 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "cards",
     description:
-      "The board of a workspace: its cards by column (todo, doing, review, done), each with its id, number, title, the start of its body, and the run on it if an agent has been handed it. Done is summarised — its count and five most recent — unless column=done asks for it; column lists one column, card reads one card whole. Without a workspace, the profile's own board — the inbox of cards not yet sent to a workspace, and its Needs you column (needs) of things for the user to do, each saying whether the user or Kuru put it there. With node, another node's board, read over the link.",
+      "The board of a workspace: its cards by column — todo, doing, review, done, and any column the user made on it, such as a Backlog, each listed as its name and id (\"Backlog (k1a2b3c4d)\"); those are the ids add_card and move_card take — each with its id, number, title, the start of its body, and the run on it if an agent has been handed it. Done is summarised — its count and five most recent — unless column=done asks for it; column lists one column, card reads one card whole. Without a workspace, the profile's own board — the inbox of cards not yet sent to a workspace, and its Needs you column (needs) of things for the user to do, each saying whether the user or Kuru put it there. With node, another node's board, read over the link.",
     inputSchema: obj({
       workspace: str("A workspace id; on another node, the workspace's name. Omit for the profile's board."),
       node: NODE,
-      column: str("One column's id — todo, doing, review, done, or a profile board's own — to list that column alone and whole. Without it, every live column is listed whole and Done as its count and five most recent."),
+      column: str("One column's id — todo, doing, review, done, or one the user made, as cards lists it — to list that column alone and whole. Without it, every live column is listed whole and Done as its count and five most recent."),
       card: str("One card, by id or code (KUR-12, #12), to read alone with its whole body. Wins over column."),
     }),
   },
@@ -381,7 +381,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
         node: NODE,
         title: str("One sentence, at most 200 characters."),
         body: str("Detail, markdown, at most 20,000 characters."),
-        column: str("todo (default), doing, review or done; on the profile's board, one of its column ids from cards — needs is Needs you, for the user to do."),
+        column: str("todo (default), doing, review or done, or the id of a column the user made on that board, as cards lists it (a Backlog's is like k1a2b3c4d); on the profile's board, one of its column ids from cards — needs is Needs you, for the user to do. A card in a column the user made is only kept there: nothing runs from it."),
         isolate: bool("Run in a worktree of its own. Default false."),
         run: bool("Hand it to an agent now. Default false."),
         launcher: str("With run: which agent and model, a launcher id. Default: Claude on its default model."),
@@ -400,7 +400,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "move_card",
     description:
-      "Move a card to a column. On a workspace's board: todo, doing, review, done — moving a card to done retires its worktree, which asks the user in place if there is uncommitted work. Without a workspace: a column id of the profile's board, needs being Needs you — a card you move there is marked as put there by Kuru and shows in the user's Needs drawer. With node, on that node's boards.",
+      "Move a card to a column. On a workspace's board: todo, doing, review, done, or the id of a column the user made there, which cards lists beside its name (\"Backlog (k1a2b3c4d)\") — moving a card to done retires its worktree, which asks the user in place if there is uncommitted work, and a column the user made is a place to keep cards, which nothing runs from or moves out of. Without a workspace: a column id of the profile's board, needs being Needs you — a card you move there is marked as put there by Kuru and shows in the user's Needs drawer. With node, on that node's boards.",
     inputSchema: obj(
       { workspace: str("A workspace id (on another node, its name), or omit for the profile's board."), card: str("The card id."), column: str("The column."), node: NODE },
       ["card", "column"],
@@ -1290,6 +1290,34 @@ export function clip(text: string, max = READ_MAX): string {
  */
 export function clipHead(text: string, max = READ_MAX, hint = ""): string {
   return text.length > max ? `${text.slice(0, max)}\n…[${text.length - max} characters after this were cut${hint ? `; ${hint}` : ""}]` : text;
+}
+
+/**
+ * A board's columns as the tools name them: the four by id alone, as they
+ * always were, and one a person made by its name with its id after it,
+ * since the id is what \`move_card\` takes and the name is what the user
+ * calls it.
+ */
+export function laneLabel(lane: BoardLane): string {
+  return lane.id in COLUMN_LABELS || lane.id === NEEDS_COLUMN ? lane.id : `${lane.name} (${lane.id})`;
+}
+
+/** Every column of a board, for a refusal that names the ones there are. */
+export function laneList(lanes: readonly BoardLane[]): string {
+  return lanes.map(laneLabel).join(", ");
+}
+
+/**
+ * A workspace's board counted for \`kururu_status\`: every column in the
+ * board's order, the four by id as they always were, and a column the user
+ * made by its name and id — "Backlog (k1a2b3c4d) 6, todo 2, doing 1, review
+ * 0, done 30" — so a Backlog's cards are counted where they are and never
+ * read as To do's.
+ */
+export function laneCounts(board: Board): string {
+  return boardLanes(board)
+    .map((lane) => `${laneLabel(lane)} ${board.cards.filter((card) => card.column === lane.id).length}`)
+    .join(", ");
 }
 
 /** How many of Done's cards `cards` lists by default: the most recent, which Done keeps on top. */

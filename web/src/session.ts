@@ -40,7 +40,7 @@ import type {
   WorkspaceBranch,
   WorkspaceProject,
 } from "../../shared/wire";
-import type { BoardColumn, CardDates } from "../../shared/board";
+import type { CardDates } from "../../shared/board";
 import type { DbCatalog, DbResult, DbRows, WorkspaceDatabase } from "../../shared/databases";
 import type { NvimCloseReport } from "../../shared/footprint";
 import type { LaunchSettings } from "../../shared/launchers";
@@ -972,7 +972,7 @@ export function openBoard(paneId?: string, here?: boolean, workspaceId?: string)
   send({ type: "open-board", paneId, here, workspaceId });
 }
 
-export function addCard(workspaceId: string, title: string, body: string, column?: BoardColumn, isolate?: boolean): void {
+export function addCard(workspaceId: string, title: string, body: string, column?: string, isolate?: boolean): void {
   send({ type: "add-card", workspaceId, title, body, column, isolate });
 }
 
@@ -980,7 +980,7 @@ export function addRunCard(
   workspaceId: string,
   title: string,
   body: string,
-  column: BoardColumn | undefined,
+  column: string | undefined,
   isolate: boolean,
   launcher: string,
 ): Promise<string> {
@@ -998,7 +998,7 @@ export function editCard(
 }
 
 /** `index` is a place among the destination column's cards, the moved one left out. */
-export function moveCard(workspaceId: string, cardId: string, column: BoardColumn, index?: number): void {
+export function moveCard(workspaceId: string, cardId: string, column: string, index?: number): void {
   send({ type: "move-card", workspaceId, cardId, column, index });
 }
 
@@ -1008,8 +1008,30 @@ export function deleteCard(workspaceId: string, cardId: string): void {
 }
 
 /** `width` in pixels, clamped on arrival; `null` takes the column back to the default. */
-export function resizeColumn(workspaceId: string, column: BoardColumn, width: number | null): void {
+export function resizeColumn(workspaceId: string, column: string, width: number | null): void {
   send({ type: "resize-column", workspaceId, column, width });
+}
+
+// A workspace board's own columns beside its four — see `add-column`.
+export function addColumn(workspaceId: string, name: string): void {
+  send({ type: "add-column", workspaceId, name });
+}
+
+export function renameColumn(workspaceId: string, columnId: string, name: string): void {
+  send({ type: "rename-column", workspaceId, columnId, name });
+}
+
+export function collapseColumn(workspaceId: string, columnId: string, collapsed: boolean): void {
+  send({ type: "set-column-collapsed", workspaceId, columnId, collapsed });
+}
+
+export function moveColumn(workspaceId: string, columnId: string, index: number): void {
+  send({ type: "move-column", workspaceId, columnId, index });
+}
+
+/** Its cards go to the column beside it that is not one of the automation's — see `laneInto`. */
+export function deleteColumn(workspaceId: string, columnId: string): void {
+  send({ type: "delete-column", workspaceId, columnId });
 }
 
 // The profile's board: the same verbs, by profile — see `send-profile-card`.

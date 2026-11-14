@@ -21,6 +21,8 @@ import {
   removeLane,
   renameLane,
   resizeLane,
+  withLanes,
+  type Board,
 } from "../../../shared/board";
 import { findLauncher } from "../../../shared/launchers";
 import { type ClientMessage, COMMIT_MESSAGE_MAX, GIT_ACTIONS } from "../../../shared/wire";
@@ -120,6 +122,29 @@ export function boardVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): 
       workspaces.editBoard(msg.workspaceId, (board) => resizeLane(board, msg.column, msg.width));
       return true;
 
+    // A workspace board's own columns. Each is the profile's pure function on
+    // the board with its four written down (`ownLanes`); the four are held
+    // fixed by `laneFixed` under the "workspace" kind, and nothing here runs.
+    case "add-column":
+      workspaces.editBoard(msg.workspaceId, (board) => ownLanes(board, (own) => addLane(own, msg.name, mintLaneId())));
+      return true;
+
+    case "rename-column":
+      workspaces.editBoard(msg.workspaceId, (board) => ownLanes(board, (own) => renameLane(own, msg.columnId, msg.name, "workspace")));
+      return true;
+
+    case "set-column-collapsed":
+      workspaces.editBoard(msg.workspaceId, (board) => ownLanes(board, (own) => collapseLane(own, msg.columnId, msg.collapsed)));
+      return true;
+
+    case "move-column":
+      workspaces.editBoard(msg.workspaceId, (board) => ownLanes(board, (own) => moveLane(own, msg.columnId, msg.index)));
+      return true;
+
+    case "delete-column":
+      workspaces.editBoard(msg.workspaceId, (board) => ownLanes(board, (own) => removeLane(own, msg.columnId, "workspace")));
+      return true;
+
     // The profile's board. Nothing on it runs, so these are the pure functions
     // and nothing else — no agent to end on Done and no worktree to ask about.
     // The column is held to the ones the board has by the pure functions
@@ -149,7 +174,7 @@ export function boardVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): 
       return true;
 
     case "rename-profile-column":
-      workspaces.editProfileBoard(msg.profileId, (board) => renameLane(board, msg.columnId, msg.name));
+      workspaces.editProfileBoard(msg.profileId, (board) => renameLane(board, msg.columnId, msg.name, "profile"));
       return true;
 
     case "set-profile-column-color":
@@ -165,7 +190,7 @@ export function boardVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): 
       return true;
 
     case "delete-profile-column":
-      workspaces.editProfileBoard(msg.profileId, (board) => removeLane(board, msg.columnId));
+      workspaces.editProfileBoard(msg.profileId, (board) => removeLane(board, msg.columnId, "profile"));
       return true;
 
     case "resize-profile-column":
@@ -227,4 +252,16 @@ export function boardVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): 
     }
   }
   return false;
+}
+
+/**
+ * A column verb on a workspace's board, applied to the board with its columns
+ * written down (`withLanes`) — and the board as it was when the verb changed
+ * nothing, so that a refused rename does not write the four into a board
+ * that had no list, which is a store write and a snapshot for nothing.
+ */
+function ownLanes(board: Board, edit: (own: Board) => Board): Board {
+  const own = withLanes(board);
+  const next = edit(own);
+  return next === own ? board : next;
 }

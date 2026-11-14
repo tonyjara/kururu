@@ -15,6 +15,19 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Columns of your own on a workspace's board.** "Add column" after the last
+  column makes one — a Backlog, say — and its header's menu renames, moves,
+  folds or deletes it, as on your own board. Drag a column by its grip to put
+  it anywhere, Backlog first included. To do, In progress, Review and Done
+  stay, keep their names and cannot be deleted, since runs move cards through
+  them; they can still be moved and folded. A column you make only keeps
+  cards: nothing runs from it and a run never moves a card into it or out of
+  it. Drag a card from Backlog to To do and it is an ordinary To do card;
+  run one where it sits and it goes to In progress. Deleting a column moves
+  its cards to the column beside it — never into In progress, Review or Done,
+  so usually To do. Kuru sees the new columns in `cards` and its status, and
+  can add and move cards to them by the id `cards` shows.
+
 - **Tunnels beside the dev servers they expose.** A Cloudflare tunnel is
   found by itself — a named one (`cloudflared tunnel run`, or the service
   running `~/.cloudflared/config.yml`) by the hostnames it serves, a quick one

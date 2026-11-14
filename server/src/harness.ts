@@ -49,7 +49,7 @@ import { join } from "node:path";
 
 import { Terminal } from "@xterm/headless";
 
-import { addCard, boardLanes, cardCode, editCard, mintCardId, moveCard, NEEDS_COLUMN, runLive, type Board, type Card } from "../../shared/board";
+import { addCard, boardLanes, cardCode, editCard, emptyBoard, mintCardId, moveCard, NEEDS_COLUMN, NEEDS_LABEL, runLive, type Board, type Card } from "../../shared/board";
 import { CHANNEL_NAMES, isChannelKind } from "../../shared/channels";
 import { adoptAskRequest, itemLine, outcomeLines, type AskRequest, type FieldOutcome, type VaultItemView } from "../../shared/vaultitems";
 import {
@@ -79,6 +79,8 @@ import {
   inboxFrames,
   isCommand,
   keyBytes,
+  laneCounts,
+  laneList,
   mcpConfig,
   quotedReply,
   rolePrompt,
@@ -1379,18 +1381,26 @@ export class Harness {
         // The column said back, since one that is not one lands in the first.
         return ok(`Added card ${id} "${title}" to the profile's board, in ${lane.name}${lane.id === NEEDS_COLUMN ? ", where the user sees it in their Needs drawer" : ""}.`);
       }
+      // A workspace's board is held to its own columns by name, and To do when
+      // none is named — never whichever column the user dragged to the front,
+      // which `addCard` would pick for a column that is not one.
+      const has = ws.workspaceIn(profileId, workspaceId)?.board;
+      const lanes = has ? boardLanes(has) : boardLanes(emptyBoard());
+      const column = fields.column ?? "todo";
+      const lane = lanes.find((l) => l.id === column);
+      if (!lane) return fail(`That board has no column ${column}. Its columns: ${laneList(lanes)}.`);
       ws.as(actor, () => {
         ws.ensureBoardIn(profileId, workspaceId);
-        ws.editBoardIn(profileId, workspaceId, (board) => addCard(board, fields, id, Date.now()));
+        ws.editBoardIn(profileId, workspaceId, (board) => addCard(board, { ...fields, column }, id, Date.now()));
       });
-      if (!ws.findCardIn(profileId, workspaceId, id)) return fail("The card was refused — an empty title, or a column that is not one.");
+      if (!ws.findCardIn(profileId, workspaceId, id)) return fail("The card was refused — an empty title.");
       if (args.run === true) {
         const launcher = this.launcher(str(args.launcher));
         const { agentId } = await this.deps.runCard(profileId, workspaceId, id, launcher.id, false);
         follow(agentId);
         return ok(`Added card ${id} "${title}" and handed it to ${launcher.label}: ${this.nameOf(agentId)}.`);
       }
-      return ok(`Added card ${id} "${title}".`);
+      return ok(`Added card ${id} "${title}"${lane.id === "todo" ? "" : `, in ${lane.name}`}.`);
     },
 
     edit_card: ({ profileId, args, actor, ws, workspaceArg }) => {
@@ -1411,8 +1421,13 @@ export class Harness {
       if (!cardId || !column) return fail("A card id and a column are needed.");
       const workspaceId = workspaceArg(false);
       if (workspaceId) {
-        ws.as(actor, () => ws.editBoardIn(profileId, workspaceId, (board) => moveCard(board, cardId, column)));
+        const board = ws.workspaceIn(profileId, workspaceId)?.board;
+        if (!board?.cards.some((c) => c.id === cardId)) return fail(`No card ${cardId} on that workspace's board.`);
+        const lane = boardLanes(board).find((l) => l.id === column);
+        if (!lane) return fail(`That board has no column ${column}. Its columns: ${laneList(boardLanes(board))}.`);
+        ws.as(actor, () => ws.editBoardIn(profileId, workspaceId, (b) => moveCard(b, cardId, column)));
         if (column === "done") this.deps.stopDev(workspaceId, cardId);
+        return ok(`Moved card ${cardId} to ${lane.name}.`);
       } else {
         const board = profile.board;
         if (!board.cards.some((c) => c.id === cardId)) return fail(`No card ${cardId} on the profile's board.`);
@@ -1421,7 +1436,6 @@ export class Harness {
         ws.as(actor, () => ws.editProfileBoard(profileId, (b) => moveCard(b, cardId, column)));
         return ok(`Moved card ${cardId} to ${lane.name}${lane.id === NEEDS_COLUMN ? ", where the user sees it in their Needs drawer" : ""}.`);
       }
-      return ok(`Moved card ${cardId} to ${column}.`);
     },
 
     run_card: async ({ profileId, args, ws, follow, workspaceArg }) => {
@@ -1597,23 +1611,24 @@ export class Harness {
         const words = query.toLowerCase().split(/\s+/).filter(Boolean);
         const hits = (this.deps.pinned?.(profileId) ?? []).filter((hit) => hit.kind === "turn" && words.every((word) => hit.text.toLowerCase().includes(word)));
         if (!hits.length) return ok(query ? `No pinned line has "${query}".` : "Nothing is pinned in the drawer.");
-        return ok(hits.slice(0, Math.min(50, int(args.limit) ?? 50)).map((hit) => this.hitLine(hit)).join("\n"));
+        return ok(hits.slice(0, Math.min(50, int(args.limit) ?? 50)).map((hit) => this.hitLine(hit, this.laneNames(profileId))).join("\n"));
       }
       if (!query) return fail("Words to look for are needed.");
       const scope = args.scope === "cards" || args.scope === "turns" ? args.scope : "all";
       const hits = this.deps.search(profileId, query, scope, Math.min(50, int(args.limit) ?? 20));
       if (!hits.length) return ok(`Nothing matches "${query}".`);
-      return ok(hits.map((hit) => this.hitLine(hit)).join("\n"));
+      return ok(hits.map((hit) => this.hitLine(hit, this.laneNames(profileId))).join("\n"));
     },
 
-    card_history: ({ args }) => {
+    card_history: ({ profileId, args }) => {
       const cardId = str(args.card);
       if (!cardId) return fail("A card id is needed.");
       const found = this.deps.cardHistory(cardId);
       if (!found) return fail(`No card ${cardId} in the database.`);
       const where = found.workspaceName ? `${found.workspaceName}'s board` : "the profile's board";
-      const head = `${found.workspaceName ? cardCode(found.workspaceName, found.card.number) : `#${found.card.number}`} "${found.card.title}" on ${where}, now in ${laneName(found.card.column)}${found.deleted ? " (deleted)" : ""}:`;
-      const lines = found.events.map((event) => `- ${stamp(event.at)} ${eventLine(event)}`);
+      const head = `${found.workspaceName ? cardCode(found.workspaceName, found.card.number) : `#${found.card.number}`} "${found.card.title}" on ${where}, now in ${laneName(found.card.column, this.laneNames(profileId))}${found.deleted ? " (deleted)" : ""}:`;
+      const names = this.laneNames(profileId);
+      const lines = found.events.map((event) => `- ${stamp(event.at)} ${eventLine(event, names)}`);
       return ok([head, ...lines].join("\n"));
     },
 
@@ -2181,7 +2196,7 @@ export class Harness {
     for (const workspace of profile.workspaces) {
       const ids = ws.agentsInWorkspace(profileId, workspace.id).filter((id) => this.deps.host.isLive(id));
       const board = workspace.board;
-      const counts = board ? ["todo", "doing", "review", "done"].map((c) => `${c} ${board.cards.filter((k) => k.column === c).length}`).join(", ") : "no board";
+      const counts = board ? laneCounts(board) : "no board";
       const pin = workspace.machine;
       const machine = pin ? this.deps.machines().find((m) => m.id === pin.machineId) : undefined;
       const runsOn = pin && machine ? ` · runs on ${machine.name} in ${pin.dir} (its shells, agents and card runs open there; that folder is its root)` : "";
@@ -2289,11 +2304,29 @@ export class Harness {
    * and the nearest thing to a name an unnamed agent has, then what it was
    * last told. Never the id alone, which is the habit this replaced.
    */
+  /**
+   * The names of the columns people made, on every board of a profile, by
+   * id: what a card's history and a search hit name a column by, where the
+   * column's id is all they kept. A made column's id is minted once and
+   * never given to another (`mintLaneId`), so one map serves every board.
+   * The fixed ids are left to `laneName`: a profile's To do may have been
+   * renamed, and a workspace's To do on the same id has not.
+   */
+  private laneNames(profileId: string): Map<string, string> {
+    const names = new Map<string, string>();
+    const profile = this.deps.workspaces.profile(profileId);
+    if (!profile) return names;
+    for (const board of [profile.board, ...profile.workspaces.map((w) => w.board)]) {
+      for (const lane of board?.columns ?? []) if (!(lane.id in COLUMN_LABELS)) names.set(lane.id, lane.name);
+    }
+    return names;
+  }
+
   /** One search hit as a line the harness can repeat: what it is, where, when, and the words that matched. */
-  private hitLine(hit: SearchHit): string {
+  private hitLine(hit: SearchHit, names?: ReadonlyMap<string, string>): string {
     if (hit.kind === "card") {
       const code = hit.workspaceName ? cardCode(hit.workspaceName, hit.number) : `#${hit.number}`;
-      const where = hit.workspaceName ? `${hit.workspaceName}, ${laneName(hit.column)}` : `profile board, ${laneName(hit.column)}`;
+      const where = hit.workspaceName ? `${hit.workspaceName}, ${laneName(hit.column, names)}` : `profile board, ${laneName(hit.column, names)}`;
       const moved = hit.movedAt ? `, moved ${stamp(hit.movedAt)}` : "";
       return `card ${code} "${hit.title}" (${where}${moved}${hit.deleted ? ", deleted" : ""}; id ${hit.id}) — ${hit.snippet}`;
     }
@@ -2446,9 +2479,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** A column by the name a person sees, for the fixed four; a profile board's own columns are named by their id, which is all a tool has. */
-function laneName(column: string): string {
-  return (COLUMN_LABELS as Record<string, string>)[column] ?? column;
+/**
+ * A column by the name a person sees: the fixed four by theirs, Needs you by
+ * its own, and one a person made by the name `names` has for it — or by its
+ * id, for one since deleted, which is all that is left of it.
+ */
+function laneName(column: string, names?: ReadonlyMap<string, string>): string {
+  if (column === NEEDS_COLUMN) return NEEDS_LABEL;
+  return (COLUMN_LABELS as Record<string, string>)[column] ?? names?.get(column) ?? column;
 }
 
 function stamp(at: number): string {
@@ -2456,7 +2494,7 @@ function stamp(at: number): string {
 }
 
 /** One event of a card's history as a sentence. */
-function eventLine(event: CardEvent): string {
+function eventLine(event: CardEvent, names?: ReadonlyMap<string, string>): string {
   const by =
     event.actor === "user"
       ? "the user"
@@ -2470,15 +2508,15 @@ function eventLine(event: CardEvent): string {
   const detail = event.detail ?? {};
   switch (event.kind) {
     case "created":
-      return `made by ${by} in ${laneName(event.toColumn ?? "")}`;
+      return `made by ${by} in ${laneName(event.toColumn ?? "", names)}`;
     case "imported":
-      if (typeof detail.from === "string") return `arrived on ${typeof detail.to === "string" ? detail.to : "this node"} from ${detail.from} with its workspace, in ${laneName(event.toColumn ?? "")}`;
-      return `imported from the layout file, in ${laneName(event.toColumn ?? "")}`;
+      if (typeof detail.from === "string") return `arrived on ${typeof detail.to === "string" ? detail.to : "this node"} from ${detail.from} with its workspace, in ${laneName(event.toColumn ?? "", names)}`;
+      return `imported from the layout file, in ${laneName(event.toColumn ?? "", names)}`;
     case "moved":
       if (typeof detail.node === "string") return `went with its workspace to ${detail.node}, moved by ${by}${detail.carried === false ? " (made during the move, so not carried)" : ""}`;
-      return `moved by ${by} from ${laneName(event.fromColumn ?? "")} to ${laneName(event.toColumn ?? "")}`;
+      return `moved by ${by} from ${laneName(event.fromColumn ?? "", names)} to ${laneName(event.toColumn ?? "", names)}`;
     case "sent":
-      return `sent by ${by} to another board, into ${laneName(event.toColumn ?? "")}`;
+      return `sent by ${by} to another board, into ${laneName(event.toColumn ?? "", names)}`;
     case "edited": {
       const fields = Array.isArray(detail.fields) ? (detail.fields as string[]).join(", ") : "fields";
       const title = detail.title as { from?: string; to?: string } | undefined;
@@ -2491,9 +2529,9 @@ function eventLine(event: CardEvent): string {
       return state === "started" ? `handed to an agent by ${by}${launcher}` : `run ${state}${launcher}`;
     }
     case "deleted":
-      return `deleted by ${by} from ${laneName(event.fromColumn ?? "")}`;
+      return `deleted by ${by} from ${laneName(event.fromColumn ?? "", names)}`;
     case "restored":
-      return `restored by ${by} into ${laneName(event.toColumn ?? "")}`;
+      return `restored by ${by} into ${laneName(event.toColumn ?? "", names)}`;
     default:
       return event.kind;
   }
