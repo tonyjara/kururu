@@ -60,10 +60,26 @@ function storedKey(): string | null {
   return validOpenRouterKey(key) ? key : null;
 }
 
-let hint: string | null = (() => {
-  const key = storedKey();
-  return key && keyHint(key);
-})();
+/**
+ * The stored key's hint, or null with no key; `undefined` until it is first
+ * asked for. Not read when the module is imported, which is how the chip
+ * vanished on 2026-11-14: `boot.ts` imports this module before `attach`
+ * turns the Keychain on (`sealConfigSecrets`), so a read at import saw the
+ * file's `kururu-keychain:` marker, took it for no key, and the server
+ * polled the balance every few minutes and never drew it. Every server
+ * started after the key moved to the Keychain on 2026-11-10 had no chip.
+ * `pollOpenRouter` checks it against the key it used as well, so a read
+ * that is early anyway is put right by the next poll.
+ */
+let hint: string | null | undefined;
+
+function currentHint(): string | null {
+  if (hint === undefined) {
+    const key = storedKey();
+    hint = key && keyHint(key);
+  }
+  return hint;
+}
 
 let known: Omit<OpenRouterStatus, "hint"> = { reading: null, stale: false, error: null };
 
@@ -77,7 +93,8 @@ let inflight = false;
 
 /** What the clients should be holding: null when no key has been given. */
 export function openRouterSnapshot(): OpenRouterStatus | null {
-  return hint ? { hint, ...known } : null;
+  const shown = currentHint();
+  return shown ? { hint: shown, ...known } : null;
 }
 
 type Asked = { ok: true; body: unknown } | { ok: false; status: number | null; error: string };
@@ -145,16 +162,26 @@ async function read(key: string): Promise<{ ok: true; reading: OpenRouterReading
 export async function pollOpenRouter(): Promise<boolean> {
   const key = storedKey();
   if (!key || inflight) return false;
+  // The key this poll reads with is the one the chip names: a hint read
+  // before the Keychain was on, or one that missed a change on the disk, is
+  // put right here rather than hiding the balance until a restart.
+  const keyed = keyHint(key);
+  const renamed = keyed !== currentHint();
+  if (renamed) {
+    generation++;
+    hint = keyed;
+    known = { reading: null, stale: false, error: null };
+  }
   inflight = true;
   const started = generation;
   try {
     const result = await read(key);
-    if (generation !== started) return false;
+    if (generation !== started) return renamed;
     const before = known;
     known = result.ok
       ? { reading: result.reading, stale: false, error: null }
       : { reading: known.reading, stale: Boolean(known.reading), error: result.error };
-    return !same(before, known);
+    return renamed || !same(before, known);
   } finally {
     inflight = false;
   }
@@ -188,7 +215,7 @@ export async function setOpenRouterKey(raw: unknown): Promise<OpenRouterStatus> 
 export function rereadOpenRouterKey(): boolean {
   const key = storedKey();
   const next = key && keyHint(key);
-  if (next === hint) return false;
+  if (next === currentHint()) return false;
   generation++;
   hint = next;
   known = { reading: null, stale: false, error: null };

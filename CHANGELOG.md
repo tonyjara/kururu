@@ -293,6 +293,13 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **The OpenRouter balance is back on the bottom bar.** Since the key moved
+  to the Keychain, every server start after the first looked for it before
+  the Keychain was open, took the placeholder in the file for no key, and
+  left the chip off while it went on fetching the balance in the background.
+  The key is now looked up when it is first needed, and each fetch puts the
+  chip right if it was looked up too early.
+
 - **Clicking the floating Kuru no longer takes you to kururu's workspace.**
   A click on the logo or in its chat could now and then bring kururu to the
   front, and a workspace switcher that follows the app in front (Tile
