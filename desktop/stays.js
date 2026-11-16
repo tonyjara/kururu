@@ -22,6 +22,26 @@
  * without it, or a Mac it will not load on, has these windows hide with the
  * app as they always did, said once on the console.
  *
+ * **Electron writes the same property behind our back,** for every window at
+ * once, and that is what left the window up through every workspace switch
+ * (Tile Bandit's audit, 2026-11-16: macOS called kururu hidden and the window
+ * was still drawn, on all forty switches of a day). `app.dock.hide()` sets
+ * every open window's `canHide` to NO and `app.dock.show()` sets every one to
+ * YES (`Browser::DockHide`/`DockShow` in Electron's `browser_mac.mm`), and
+ * `setVisibleOnAllWorkspaces(…, { visibleOnFullScreen: true })` calls the
+ * first unless it is passed `skipTransformProcessType`. The pill and the
+ * pen's overlays did not pass it, so the first recording of the day made the
+ * window unhideable; the Dock puts the icon back by itself on a click, and
+ * nothing ran `dock.show()` to undo it. Every such call passes the skip now —
+ * a `panel` already floats over full-screen apps, which is all the transform
+ * was for — and the dock is moved only through `dockShow`/`dockHide` here,
+ * which put every window's `canHide` back to what it should be the moment
+ * Electron has finished writing it wrong: the windows `staysUp` was told of
+ * stay, and every other window hides with the app. `dock.show()` writing YES
+ * over the floating Kuru was the same fault the other way round, and is
+ * mended by the same pass. `desktop/test/stays.test.js` fails on a call that
+ * goes around either.
+ *
  * The same addon holds the one other window property Electron reaches only
  * for a whole window: the first click, given to the room the page draws the
  * window's three buttons in and nowhere else (`firstClick`; `stay.m` says
@@ -35,8 +55,15 @@
  * one with kururu's window. Every panel kururu makes is told as it is made,
  * before it is first shown, which is the only time the telling takes.
  */
-const { app } = require("electron");
+const { app, BrowserWindow } = require("electron");
 const path = require("node:path");
+
+/**
+ * The windows that stay up, so a pass over every window knows which they
+ * are; weak, since a window that is gone is no longer anybody's business.
+ * @type {WeakSet<import("electron").BrowserWindow>}
+ */
+const stayers = new WeakSet();
 
 /** @type {{ stays: (handle: Buffer, stays: boolean) => boolean, firstClick?: (handle: Buffer, x: number, y: number, width: number, height: number) => boolean, neverActivates?: (handle: Buffer) => boolean, read: (handle: Buffer) => Record<string, unknown> | undefined } | null | undefined} */
 let addon;
@@ -60,13 +87,51 @@ function load() {
  * @param {import("electron").BrowserWindow} win
  */
 function staysUp(win) {
+  stayers.add(win);
+  return setStays(win, true);
+}
+
+/**
+ * @param {import("electron").BrowserWindow} win
+ * @param {boolean} stays
+ */
+function setStays(win, stays) {
   const native = load();
   if (!native || win.isDestroyed()) return false;
   try {
-    return native.stays(win.getNativeWindowHandle(), true);
+    return native.stays(win.getNativeWindowHandle(), stays);
   } catch {
     return false;
   }
+}
+
+/**
+ * Every window's `canHide` as kururu means it, over whatever Electron last
+ * wrote: the ones `staysUp` was told of stay up, and every other one — the
+ * window, the notes, the picker — hides with the app. Run after anything
+ * that moves the dock; cheap enough to run whenever there is doubt.
+ */
+function settle() {
+  if (!load() || !BrowserWindow) return;
+  for (const win of BrowserWindow.getAllWindows()) setStays(win, stayers.has(win));
+}
+
+/**
+ * `app.dock.show()`, then every window put back (`settle`). Electron writes
+ * `canHide` before it starts the asynchronous half of the transform, so
+ * settling straight after is settling after the write. The promise is
+ * Electron's.
+ */
+function dockShow() {
+  const shown = app?.dock?.show();
+  settle();
+  return shown;
+}
+
+/** `app.dock.hide()`, then every window put back (`settle`). */
+function dockHide() {
+  app?.dock?.hide();
+  settle();
 }
 
 /**
@@ -137,4 +202,4 @@ function nativeState(win) {
   return native.read(win.getNativeWindowHandle());
 }
 
-module.exports = { staysUp, neverActivates, nativeState, firstClick, firstClickRoom };
+module.exports = { staysUp, settle, dockShow, dockHide, neverActivates, nativeState, firstClick, firstClickRoom };

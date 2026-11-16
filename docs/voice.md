@@ -1118,7 +1118,15 @@ Edges, said plainly:
   the notes go with the app. Electron has no option for it, so a Node-API
   addon sets it (`desktop/stay/stay.m`, built to `dist/stay.node` by
   `bun run build:stay`, part of `build`); an app without the addon has them
-  hide with the app as before, and says so on its console. Pressing the logo
+  hide with the app as before, and says so on its console. Electron writes
+  the same property for every window whenever the dock moves — NO on
+  `app.dock.hide()`, YES on `app.dock.show()` — and
+  `setVisibleOnAllWorkspaces` hides the dock unless it is passed
+  `skipTransformProcessType`; the pill and the ink once did not pass it, and
+  the window stopped hiding with the app for the rest of the day (Tile
+  Bandit's audit, 2026-11-16). So every such call passes the skip, and the
+  dock moves only through `dockShow`/`dockHide` in `stays.js`, which put
+  every window back afterwards. Pressing the logo
   while kururu is hidden opens the chat and leaves kururu hidden: the chat
   takes the keys as a non-activating panel, the app in front keeps the menu
   bar, and the window comes back only when something in the chat asks for it

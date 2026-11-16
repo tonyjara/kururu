@@ -50,7 +50,7 @@ const { windowNumberOf } = require("./inkshape");
 const { createTray } = require("./tray");
 const { editMenuTemplate } = require("./editmenu");
 const { QuitGate, listenForSignals } = require("./quit");
-const { firstClick, firstClickRoom } = require("./stays");
+const { dockHide, dockShow, firstClick, firstClickRoom } = require("./stays");
 
 const DEV = process.env.KURURU_DEV === "1";
 /**
@@ -753,7 +753,7 @@ function createWindow() {
   // Back in the dock for as long as there is a window; the tray is the app
   // the rest of the time. Shown before the window so the window gets a menu
   // bar, which an app with no dock presence is not given.
-  app.dock?.show();
+  dockShow();
   win = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -899,7 +899,7 @@ function createWindow() {
     win = null;
     stopSweeping();
     stopWatchingServer();
-    app.dock?.hide();
+    dockHide();
   });
 
   return win;
@@ -1525,7 +1525,7 @@ app.whenReady().then(async () => {
    * login there is no window at all.
    */
   const hidden = launchedAtLogin();
-  if (hidden) app.dock?.hide();
+  if (hidden) dockHide();
   else createWindow();
   // `KURURU_AUTOSTART` makes a dev shell start as the app does, which is how
   // an isolated instance is driven with nobody to click the tray.
@@ -1551,7 +1551,7 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   stopSweeping();
   stopWatchingServer();
-  app.dock?.hide();
+  dockHide();
 });
 
 /**

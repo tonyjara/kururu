@@ -477,7 +477,8 @@ class Ink extends EventEmitter {
       // A stroke over another app leaves that app in front (`stays.js`).
       neverActivates(win);
       win.setAlwaysOnTop(true, "screen-saver");
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      // Without the accessory transform, which left the window unable to hide with the app (`stays.js`).
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
       // The pen draws on whatever is on the screen, kururu hidden or not (`stays.js`).
       staysUp(win);
       // Made at the bounds, and set there again: macOS keeps a new window

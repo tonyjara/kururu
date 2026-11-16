@@ -626,7 +626,11 @@ class TalkKey extends EventEmitter {
     // Pressed over other apps, and docked beside the floating Kuru: never kururu's way to the front (`stays.js`).
     neverActivates(panel);
     panel.setAlwaysOnTop(true, "floating");
-    panel.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // On every space and over full-screen apps, without the app becoming an
+    // accessory for a moment to get there: that transform also left the
+    // window unable to hide with the app (`stays.js`), and the panel type
+    // already floats over full-screen apps.
+    panel.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     // Over every app means while kururu is hidden too, and docked to the
     // floating Kuru it is that logo's waveform (`stays.js`).
     staysUp(panel);

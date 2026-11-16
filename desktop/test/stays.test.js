@@ -6,6 +6,8 @@
  * at all, never a room clamped into shape.
  */
 import { describe, expect, it } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { firstClickRoom } from "../stays.js";
 
 describe("firstClickRoom", () => {
@@ -41,5 +43,32 @@ describe("firstClickRoom", () => {
 
   it("is none for a room no three buttons need, which would give a whole window the first click", () => {
     expect(firstClickRoom({ x: 0, y: 0, width: 1280, height: 860 }, 1)).toBeNull();
+  });
+});
+
+/**
+ * Electron writes every window's `canHide` when the dock moves, and one call
+ * that went around `stays.js` is what left the window up through every
+ * workspace switch (`stays.js` has the story). The real property is AppKit's
+ * and needs the app; what can be held here is that nothing in `desktop/`
+ * moves the dock any other way.
+ */
+describe("the dock is moved only through stays.js", () => {
+  const dir = join(import.meta.dir, "..");
+  const sources = readdirSync(dir)
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => ({ name, text: readFileSync(join(dir, name), "utf8") }));
+
+  it("passes skipTransformProcessType on every setVisibleOnAllWorkspaces", () => {
+    const calls = sources.flatMap(({ name, text }) => [...text.matchAll(/\.setVisibleOnAllWorkspaces\(([^)]*)\)/g)].map((m) => ({ name, args: m[1] ?? "" })));
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(`${call.name}: ${call.args}`).toContain("skipTransformProcessType: true");
+  });
+
+  it("calls app.dock.show and hide nowhere but stays.js", () => {
+    for (const { name, text } of sources) {
+      if (name === "stays.js") continue;
+      expect(`${name}: ${/\bdock\??\.(show|hide)\(/.test(text)}`).toBe(`${name}: false`);
+    }
   });
 });
