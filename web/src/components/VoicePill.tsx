@@ -51,7 +51,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { OutboxEntry } from "../../../shared/voice";
 import { desktop } from "../desktop";
-import { hasPen, pillPen, useInk } from "../ink";
+import { hasPen, inkShown, penAway, pillPen, useInk } from "../ink";
 import { toggleKuru } from "../kuru";
 import { adoptPlace, placeAt, type Place } from "../place";
 import { useKururu } from "../session";
@@ -136,7 +136,9 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
    * the pill is kept over the ink for exactly this (`desktop/ink.js`).
    */
   const penHere = ui.phase === "listening" && hasPen() && (floating || !voiceIsRemote());
-  const inked = penHere && ink.state.on && ink.state.voice;
+  // A pen put away is no pen here: the pen button is back to bringing it out, and the marks it left are counted on the label.
+  const inked = penHere && inkShown(ink.state) && ink.state.voice;
+  const kept = penHere && ink.state.on && ink.state.voice && ink.state.away === true ? ink.state.marks : 0;
   // The whole set here when this is the pill the session's tools are in; none
   // in the window's pill when the floating one's draw-only form has them.
   const tools = inked && floating;
@@ -148,9 +150,11 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
         ? ink.state.pen
           ? `Listening, drawing${marks ? ` — ${marks} mark${marks === 1 ? "" : "s"}` : ""}`
           : "Listening, pen up — clicks go to the apps"
-        : ui.toggled
-          ? "Listening — tap again to send, Esc to drop"
-          : "Listening — let go to send, Esc to drop"
+        : kept
+          ? `Listening — ${kept} mark${kept === 1 ? "" : "s"} kept, ${ui.toggled ? "tap again" : "let go"} to send`
+          : ui.toggled
+            ? "Listening — tap again to send, Esc to drop"
+            : "Listening — let go to send, Esc to drop"
       : ui.phase === "sending"
         ? sendingLabel(mine)
         : ui.phase === "speaking"
@@ -306,16 +310,19 @@ export function VoicePill({ floating = false }: { floating?: boolean } = {}) {
  *
  * Done is the drawer's pencil pressed again, which puts the marks in Kuru's
  * box; for a recording it is Send, which ends the clip with its marks. The
- * ✕ drops the marks, and the clip with them.
+ * ✕ closes the drawing and nothing else (2026-11-15, the owner: "I want
+ * that to close the drawing"): for a recording it puts the pen away, and
+ * the recording goes on with the marks made so far (`penAway`); with no
+ * recording there is nothing to go on, and it drops the marks.
  */
 export function DrawPill() {
   const { state } = useInk();
   const ink = desktop()?.ink;
-  if (!ink || !state.on) return null;
+  if (!ink || !inkShown(state)) return null;
   const marks = state.marks ? ` — ${state.marks} mark${state.marks === 1 ? "" : "s"}` : "";
   const label = state.ending ? "Keeping the marks…" : state.pen ? `Drawing${marks}` : `Pen up${marks}`;
   const done = state.voice ? "Send" : "Done";
-  const drop = state.voice ? "Drop the clip and the marks" : "Drop the marks and put the pen away";
+  const close = state.voice ? "Put the pen away — the recording goes on, and the marks go with it (Shift)" : "Drop the marks and put the pen away";
   return (
     <div
       className="voice-pill voice-pill-floating voice-pill-drawing"
@@ -343,7 +350,7 @@ export function DrawPill() {
       >
         {done}
       </button>
-      <button className="voice-close" onClick={() => ink.drop()} title={drop} aria-label={drop}>
+      <button className="voice-close" onClick={() => (state.voice ? penAway() : ink.drop())} title={close} aria-label={close}>
         <Icon name="close" />
       </button>
     </div>

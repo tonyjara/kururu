@@ -280,6 +280,7 @@ if (isPicker) {
       pencil: (rect) =>
         ipcRenderer.send("kururu:ink-pencil", rect && typeof rect === "object" ? { x: Number(rect.x), y: Number(rect.y), width: Number(rect.width), height: Number(rect.height) } : null),
       drop: () => ipcRenderer.send("kururu:ink-drop"),
+      away: () => ipcRenderer.send("kururu:ink-away"),
       finish: (id, roll) => ipcRenderer.invoke("kururu:ink-finish", String(id), roll === true),
       undo: () => ipcRenderer.send("kururu:ink-undo"),
       snap: () => ipcRenderer.send("kururu:ink-snap"),

@@ -40,7 +40,7 @@ import { desktop } from "../desktop";
 import { useInterface } from "../fonts";
 import { useKururu } from "../session";
 import { applyTalkGesture, installSpeech, setSpeechVolume, setVoiceProfile, useVoiceUi, voiceNow } from "../voice";
-import { installInk, installShiftPen, useInk } from "../ink";
+import { inkShown, installInk, installShiftPen, useInk } from "../ink";
 import { installReload } from "../reload";
 import { FLOAT_WAVE_MIN, useFloat, usePageZoom } from "../float";
 import { FloatWave } from "./Float";
@@ -171,7 +171,8 @@ export function Pill() {
   // The pen's tools, drawn here for a session whose tools are not beside the meter.
   const float = useFloat();
   const docked = float?.on === true ? float : null;
-  const drawing = ink.state.on && (ink.state.tools === "draw" || docked !== null);
+  // A recording's pen put away has no tools anywhere: the panel made for them alone goes, and the docked row is the waveform's again.
+  const drawing = inkShown(ink.state) && (ink.state.tools === "draw" || docked !== null);
   const phase = DRAW_ONLY ? "idle" : ui.phase;
   // The panel is sized in the screen's points to what this page says, so
   // what is drawn in it is drawn at the window's own scale whatever the site
@@ -224,7 +225,7 @@ export function Pill() {
     report.current();
     // The pen's tools come and go with its session, its label counts the marks, and the panel is sized to them.
     // And docked to the floating Kuru it is the waveform's box, which is as wide as the chat it runs along.
-  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.marks, ink.state.ending, ink.state.voice, docked?.wave, docked?.reach, scale, room]);
+  }, [phase, ui.text, ui.detail, ui.toggled, key, here, drawing, ink.state.on, ink.state.pen, ink.state.away, ink.state.marks, ink.state.ending, ink.state.voice, docked?.wave, docked?.reach, scale, room]);
   // Docked, the box also changes for a reason that is none of those: the
   // waveform gives way to words when the server will not take a clip. The
   // window beside the logo has to be exactly what is drawn, so it is watched.

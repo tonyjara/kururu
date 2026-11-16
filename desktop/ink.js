@@ -175,14 +175,15 @@ class Ink extends EventEmitter {
    * The session as every page draws it. `tools` says where its buttons are
    * — beside the floating pill's meter (`pill`), or in the pill's draw-only
    * form (`draw`) — and `withVoice` is the setting, there whether a session
-   * is on or not.
+   * is on or not. `away` is a recording's pen put away (`putAway`): no
+   * tools drawn anywhere, the marks still the clip's.
    */
   state() {
     const s = this.session;
     const withVoice = this.withVoiceNow();
     return s
-      ? { on: true, id: s.id, voice: s.voice, pen: s.pen, marks: s.bursts.length, ending: s.ending, tool: s.tool, color: s.color, held: s.held !== null, tools: s.inPill ? "pill" : "draw", withVoice }
-      : { on: false, id: null, voice: false, pen: false, marks: 0, ending: false, tool: "pen", color: "red", held: false, tools: "draw", withVoice };
+      ? { on: true, id: s.id, voice: s.voice, pen: s.pen, away: s.away, marks: s.bursts.length, ending: s.ending, tool: s.tool, color: s.color, held: s.held !== null, tools: s.inPill ? "pill" : "draw", withVoice }
+      : { on: false, id: null, voice: false, pen: false, away: false, marks: 0, ending: false, tool: "pen", color: "red", held: false, tools: "draw", withVoice };
   }
 
   withVoiceNow() {
@@ -375,6 +376,10 @@ class Ink extends EventEmitter {
         made: 0,
         /** The pen as it was before hold-to-draw put it down, while the key is held; null otherwise. */
         held: null,
+        /** Whether the pen was put away when hold-to-draw took it out, for the release to put it back there. */
+        heldAway: false,
+        /** A recording's pen put away, its tools with it, until it is put down again (`putAway`). */
+        away: false,
         /** The tools are beside the floating pill's meter, since it owns the session; otherwise in its draw-only form. */
         inPill: this.pillOwns(voice, owner),
       };
@@ -555,10 +560,16 @@ class Ink extends EventEmitter {
     this.penTo(on === true);
   }
 
-  penTo(on) {
+  /**
+   * The pen down or up; `away` with it up is a recording's pen put away
+   * (`putAway`). Down is never away: the pen down again, by any key or
+   * button, brings the tools back with it.
+   */
+  penTo(on, away = false) {
     const session = this.session;
     if (!session || session.ending) return;
     session.pen = on;
+    session.away = !on && away === true && session.voice;
     for (const win of session.overlays.values()) {
       if (!win.isDestroyed()) win.setIgnoreMouseEvents(!session.pen);
     }
@@ -601,12 +612,14 @@ class Ink extends EventEmitter {
     if (down) {
       if (session.held !== null) return;
       const was = session.pen;
+      const away = session.away;
       this.penTo(true);
       session.held = was;
+      session.heldAway = away;
     } else if (session.held !== null) {
       const was = session.held;
       session.held = null;
-      this.penTo(was);
+      this.penTo(was, session.heldAway);
     }
   }
 
@@ -928,7 +941,27 @@ class Ink extends EventEmitter {
     }, SEND_ANSWER_MS);
   }
 
-  /** ✕ on the pill: gone at once, and the owner told to drop its clip with it. */
+  /**
+   * The ✕ on a recording's pen (2026-11-15, the owner: "I want that to close
+   * the drawing"), and Shift letting the pen go: the pen up and its tools
+   * gone, while the recording goes on and every mark made so far stays the
+   * clip's, sent with it however it ends. Before this the ✕ was `drop`,
+   * which ended the recording with the pen; and lifting the pen, the only
+   * other way out, left its tools up saying "Pen up" until the clip ended,
+   * so Shift pressed again and again only ever moved the pen. The overlays
+   * stay, letting the mouse through, so the ink drawn fades where it was
+   * and the pen put down again comes back at once. A session with no voice
+   * has nothing to go on without its pen: its ✕ is still `drop`.
+   */
+  putAway(from) {
+    const session = this.session;
+    if (!session || session.ending || !session.voice) return;
+    if (from && from.id !== session.owner.id && !this.overlayOf(from) && !this.isOurs(from)) return;
+    session.held = null;
+    this.penTo(false, true);
+  }
+
+  /** ✕ on the pill for a session with no voice: gone at once, and the owner told to drop with it. */
   drop(from) {
     const session = this.session;
     if (!session) return;

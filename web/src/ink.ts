@@ -23,7 +23,7 @@ import { shiftChord, shiftDown, shiftHeld, shiftUp, type ShiftPress } from "./sh
 import { cancelTalk, finishTalk, isListening, penRefused, penTalk, setPenWithVoice, voiceError } from "./voice";
 import { TAP_MS } from "../../shared/voice";
 
-const OFF: InkState = { on: false, id: null, voice: false, pen: false, marks: 0, ending: false };
+const OFF: InkState = { on: false, id: null, voice: false, pen: false, away: false, marks: 0, ending: false };
 
 export interface InkUi {
   state: InkState;
@@ -88,6 +88,24 @@ export function clearInkNote(): void {
   if (ui.note) set({ note: null });
 }
 
+/**
+ * A recording's pen put away: up, its tools gone, the recording going on and
+ * the marks made so far still going with it (`Ink.putAway`). A main from
+ * before it has no such verb, and there the pen is lifted, which at least
+ * leaves the recording alone.
+ */
+export function penAway(): void {
+  const ink = desktop()?.ink;
+  if (!ink) return;
+  if (ink.away) ink.away();
+  else ink.pen(false);
+}
+
+/** Whether the pen's tools are to be drawn: a session on, and not a recording's pen put away. */
+export function inkShown(state: InkState): boolean {
+  return state.on && state.away !== true;
+}
+
 /** The pill's pen: a pen for the recording under way, or the pen on and off once it has one. */
 export function pillPen(): void {
   const ink = desktop()?.ink;
@@ -100,8 +118,11 @@ export function pillPen(): void {
  * The pen on or off for the recording under way, from Shift: the pen of
  * the session that is on, or a session started for the recording when
  * there is none ("Draw with every recording" off) — the pill's own pen
- * button, with a side chosen. A session still starting when the press
- * that asked for it is let go is put back up as it arrives.
+ * button, with a side chosen. Off is the pen put away, tools and all, not
+ * merely lifted (`penAway`): lifted, its bar stayed up saying "Pen up" until
+ * the clip ended, and Shift pressed again and again only moved the pen
+ * under it (2026-11-15). A session still starting when the press that
+ * asked for it is let go is put away as it arrives.
  */
 let shiftWants: boolean | null = null;
 
@@ -110,12 +131,13 @@ function shiftPen(on: boolean): void {
   if (!ink) return;
   shiftWants = on;
   if (ui.state.on) {
-    if (ui.state.pen !== on) ink.pen(on);
+    if (on && !ui.state.pen) ink.pen(true);
+    else if (!on && !ui.state.away) penAway();
     return;
   }
   if (!on) return;
   void ink.start(true).then((state) => {
-    if (state.on && state.pen && shiftWants === false) ink.pen(false);
+    if (state.on && shiftWants === false) penAway();
   });
 }
 

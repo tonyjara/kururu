@@ -202,6 +202,11 @@ export interface InkState {
   /** A recording to Kuru goes with it; without, its marks go into the window's Kuru box. */
   voice: boolean;
   pen: boolean;
+  /**
+   * A recording's pen put away (`away`): up, its tools drawn nowhere, its
+   * marks still the clip's. Missing from a window from before 2026-11-15.
+   */
+  away?: boolean;
   marks: number;
   ending: boolean;
   /** What the next stroke is drawn with. Missing from a window older than phase 2. */
@@ -248,6 +253,12 @@ export interface DesktopInk {
   pencil?(rect: { x: number; y: number; width: number; height: number } | null): void;
   /** ✕: the marks dropped, and the owner told to drop its clip. */
   drop(): void;
+  /**
+   * A recording's ✕, and Shift letting the pen go: the pen up and its tools
+   * gone, the recording going on, the marks kept for it. Optional: a window
+   * from before 2026-11-15 has none, and its ✕ lifts the pen (`penAway`).
+   */
+  away?(): void;
   /**
    * The owner's: the set to post, with every picture in it, and the overlays
    * gone. Null when there was no ink. With `roll`, the marks so far only, and

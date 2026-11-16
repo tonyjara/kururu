@@ -1264,6 +1264,8 @@ ipcMain.on("kururu:ink-pencil", (event, rect) => {
   if (fromWindow || float.isPanel(event.sender)) ink.pencil(event.sender, rect);
 });
 ipcMain.on("kururu:ink-drop", (event) => ink.drop(event.sender));
+// A recording's pen put away, its tools with it, and the recording going on (`Ink.putAway`).
+ipcMain.on("kururu:ink-away", (event) => ink.putAway(event.sender));
 ipcMain.handle("kururu:ink-finish", (event, id, roll) => ink.finish(event.sender, String(id), roll === true));
 ipcMain.on("kururu:ink-undo", (event) => {
   if (ink.isOurs(event.sender)) ink.undo();

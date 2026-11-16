@@ -636,9 +636,17 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   its pencil is while a session is on (`pencilAt` → `kururu:ink-pencil` →
   `Ink.pencil`), and a pen-down there is Done, not a mark — on the floating
   chat while it is up, on the window only while it has the keyboard, since a
-  pencil behind another application is not there to press. ✕, Escape with
-  the pen up, the owner's page going, or the helper dying end it with
-  nothing kept.
+  pencil behind another application is not there to press. Without a
+  voice, ✕; with or without, Escape with the pen up, the owner's page
+  going, or the helper dying end it with nothing kept.
+- **A recording's ✕ puts the pen away, and only the pen** (2026-11-15, the
+  owner: "I want that to close the drawing"). `Ink.putAway`: the pen up and
+  its tools gone from the pill and the docked row, the recording going on,
+  every mark so far still the clip's, the overlays left letting the mouse
+  through so the ink fades where it was. The pill's pen, ⌃⌥⌘D or Shift puts
+  it down again, tools and all; the pill says how many marks it kept. The
+  voice's own ✕ and Escape still drop the clip. Before this the draw bar's
+  ✕ was `drop` and ended the recording with the pen.
 - **Phase 2's pen.** Two pens (red, blue) and a highlighter, each stroke keeping what it was drawn with; **Undo** and ⌘Z with
   the pen down take the last mark back, its pictures with it; **Snap** and
   ⌃⌥⌘S (only while a session is on) take the display under the pointer as a
@@ -654,8 +662,9 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   rolls at five minutes takes the marks so far with its clip and keeps the
   pen for the next.
 - **Shift while recording.** While the pill is listening, Shift is the pen's
-  key as the talk key is the mic's: tapped, the pen goes on or off; held, it
-  is down while held and up on release — the same `TAP_MS` and
+  key as the talk key is the mic's: tapped, the pen comes out or is put
+  away, its tools with it (`penAway`, the ✕'s); held, it is down while held
+  and put back on release — the same `TAP_MS` and
   `pressWasTap` the mics use (`web/src/shiftpen.ts`). With no session (Draw
   with every recording off) a press starts one for the clip. Shift is half
   of typing, so nothing happens on the press itself: a release inside
@@ -665,6 +674,10 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   the pen down a click is a stroke, and a key puts the pen back up. Heard by
   the talk-key hook (`--shift`), handed to the pill only for a press that
   began while it was listening, so only while "talk key in every app" is on.
+  Shift used to lift the pen and no more, and a lifted pen keeps its tools
+  up saying "Pen up" until the clip ends, so tapping it again and again
+  moved the pen under a bar that never went (pill.log, 2026-11-15: the
+  docked row 486 ↔ 497 points wide, the label's two words).
 - **Never in a picture:** the applications on Settings → Voice → Screen pen
   (password managers, the keychain and Messages to begin with) are left out
   of every still by the helper's filter, and their window titles are not

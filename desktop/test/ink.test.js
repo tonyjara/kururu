@@ -315,6 +315,54 @@ describe("a session", () => {
   });
 });
 
+describe("a recording's pen put away", () => {
+  it("closes the drawing and not the recording: the marks go with the clip, and the pen comes back down", async () => {
+    const { ink, owner } = setup();
+    await ink.start({ voice: true });
+    const at = ink.session.at;
+    draw(ink, live()[0], [[100, 100], [140, 120]], at + 100);
+    ink.putAway(live()[0].webContents);
+    expect(ink.state()).toMatchObject({ on: true, pen: false, away: true, marks: 1 });
+    // Nothing ended: the owner was told nothing, and the overlays let the mouse through.
+    expect(told(owner, "cancel")).toHaveLength(0);
+    expect(live()).toHaveLength(2);
+    expect(live().every((w) => w.ignore === true)).toBe(true);
+    expect(shortcuts.has("Escape")).toBe(false);
+    // Down again, by any of its ways, is no longer away.
+    ink.setPen(true);
+    expect(ink.state()).toMatchObject({ pen: true, away: false });
+    draw(ink, live()[1], [[10, 10], [20, 20]], at + 5000);
+    ink.putAway(null);
+    const bundle = await ink.finish(owner, ink.session.id);
+    expect(bundle.marks).toHaveLength(2);
+    ink.dispose();
+  });
+
+  it("is a recording's only: with no voice there is nothing to go on, and the ✕ is still drop", async () => {
+    const { ink, main } = setup();
+    await ink.start({ voice: false, asker: main });
+    ink.putAway(main);
+    expect(ink.state()).toMatchObject({ pen: true, away: false });
+    ink.dispose();
+  });
+
+  it("hold-to-draw out of a pen put away puts it back away", async () => {
+    const { ink } = setup();
+    await ink.start({ voice: true });
+    ink.putAway(null);
+    ink.hold(true);
+    expect(ink.state()).toMatchObject({ pen: true, away: false });
+    ink.hold(false);
+    expect(ink.state()).toMatchObject({ pen: false, away: true });
+    // Lifted, not put away, before the hold: lifted after it.
+    ink.setPen(false);
+    ink.hold(true);
+    ink.hold(false);
+    expect(ink.state()).toMatchObject({ pen: false, away: false });
+    ink.dispose();
+  });
+});
+
 describe("every way out leaves no overlay", () => {
   let ink;
   let owner;
