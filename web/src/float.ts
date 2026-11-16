@@ -98,30 +98,75 @@ export function useFloat(): FloatState | null {
  * same a day later, cut at its right end and its foot while the owner talked.
  *
  * The app cannot set these windows back to 100% without setting the window
- * back too, since the zoom is the site's. So the page measures it — a window
- * with no frame is as wide outside, in the screen's points, as its page is
- * inside in the page's own pixels, times the zoom — and whoever draws to the
- * pixel undoes it with the inverse on its root (`zoom` in CSS). A change of
- * zoom changes the page's width in its own pixels, so it arrives as a
- * resize.
+ * back too, since the zoom is the site's. So the page asks Chromium for it
+ * (`zoom` on the bridge), and whoever draws to the pixel undoes it with the
+ * inverse on its root (`zoom` in CSS). A change of zoom changes the page's
+ * width in its own pixels, so it arrives as a resize.
+ *
+ * **It used to be measured, and the measure lied mid-resize.** A window with
+ * no frame is as wide outside, in the screen's points, as its page is inside
+ * in its own pixels, times the zoom — but the outside size and the inside
+ * one reach the page at different moments, and the resize event can come
+ * between them. The docked pill goes from 148 points to 497 and back as
+ * Shift brings the pen's tools out and puts them away, and read between the
+ * two the zoom came out a third or three times what it was; nothing measured
+ * again until the next resize, and the report sized the window to the wrong
+ * drawing, so it stuck (2026-11-15, the owner's two screenshots: the
+ * waveform shrunk to a third, away from the logo, and a dark empty strip —
+ * the pen's tools drawn three times too big, their top-left corner all that
+ * fitted). A window from before the bridge had it still measures, and takes
+ * the measure only when its width and its height say the same zoom, which
+ * two sizes caught halfway through a resize do not.
  */
-function pageZoom(): number {
+function pageZoom(): number | null {
   if (typeof window === "undefined") return 1;
-  // The visual viewport's width where there is one: it is not rounded to a whole pixel, and a twelfth of a pixel in 73 is a point at the far edge.
-  const zoom = window.outerWidth / (window.visualViewport?.width || window.innerWidth);
+  const asked = desktop()?.zoom?.();
+  let zoom: number;
+  if (typeof asked === "number") zoom = asked;
+  else {
+    // The visual viewport where there is one: it is not rounded to a whole pixel, and a twelfth of a pixel in 73 is a point at the far edge.
+    const across = window.outerWidth / (window.visualViewport?.width || window.innerWidth);
+    const down = window.outerHeight / (window.visualViewport?.height || window.innerHeight);
+    if (!agrees(across, down)) return null;
+    zoom = across;
+  }
   // Checked before it is used: a window still being made can have no width either way.
   if (!Number.isFinite(zoom) || zoom < 0.2 || zoom > 6) return 1;
   // Whole per-milles, so the measure's own rounding is not a new number on every resize.
   return Math.round(zoom * 1000) / 1000;
 }
 
+/** Whether a zoom read off the width and one read off the height are the same zoom: a few per cent, for a height of a few dozen pixels rounded. */
+export function agrees(across: number, down: number): boolean {
+  return Number.isFinite(across) && Number.isFinite(down) && across > 0 && Math.abs(across - down) <= across * ZOOM_AGREES;
+}
+const ZOOM_AGREES = 0.04;
+/** How many frames a measure that does not agree is tried again for, before it waits for the next resize. */
+const ZOOM_TRIES = 20;
+
 export function usePageZoom(): number {
-  const [zoom, setZoom] = useState(pageZoom);
+  const [zoom, setZoom] = useState(() => pageZoom() ?? 1);
   useEffect(() => {
-    const again = () => setZoom(pageZoom());
-    again();
-    window.addEventListener("resize", again);
-    return () => window.removeEventListener("resize", again);
+    let frame = 0;
+    let tries = 0;
+    const again = () => {
+      cancelAnimationFrame(frame);
+      const now = pageZoom();
+      if (now !== null) {
+        tries = 0;
+        setZoom(now);
+      } else if (tries++ < ZOOM_TRIES) frame = requestAnimationFrame(again);
+    };
+    const resized = () => {
+      tries = 0;
+      again();
+    };
+    resized();
+    window.addEventListener("resize", resized);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", resized);
+    };
   }, []);
   return zoom;
 }

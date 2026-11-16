@@ -1088,10 +1088,17 @@ Edges, said plainly:
   big for its window and cut off on the right and at the foot — what the
   owner marked on 2026-11-10, and what more room round the mark would only
   have hidden until the next step. The app cannot set them back without
-  setting the window back, so each page measures the zoom (`usePageZoom` in
-  `float.ts`: the window's width outside over the page's inside) and puts
-  the inverse on its root, and the pill says its size in the screen's
-  points. The pill at its own place was left out of that at first, and on
+  setting the window back, so each page asks Chromium for the zoom
+  (`usePageZoom` in `float.ts`, `webFrame.getZoomFactor` through the
+  bridge's `zoom`) and puts the inverse on its root, and the pill says its
+  size in the screen's points. It was measured at first — the window's
+  width outside over the page's inside — and a resize hands the page the new
+  inside before the new outside: on 2026-11-15 the docked pill, resized as
+  Shift brought the pen's tools out and put them away, read a third and
+  three times its zoom and kept it, the waveform drawn at a third of its
+  size away from the logo and the tools so big only a dark corner of them
+  fitted. A window from before the bridge still measures, and takes a
+  measure only when its width and height agree. The pill at its own place was left out of that at first, and on
   2026-11-11 the owner marked it cut at its right end and its foot while
   they talked, the window at 110%: its panel was sized in the page's pixels
   too. It now does what the docked pill does, wherever it is.

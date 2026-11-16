@@ -18,7 +18,7 @@
  * ships and loads from disk; nothing arriving over HTTP can make itself
  * `file:`, and nothing served can therefore reach the half below.
  */
-const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 
 const isPicker = location.protocol === "file:" && location.pathname.endsWith("connect.html");
 
@@ -106,6 +106,14 @@ if (isPicker) {
      * it is the whole of what it can do.
      */
     show: () => ipcRenderer.send("kururu:show"),
+    /**
+     * This page's zoom as Chromium holds it (`webFrame`), for a page drawn
+     * to the pixel in a window made its size: measured from the window's
+     * sizes instead, it was wrong whenever it was read mid-resize, and the
+     * wrong number stayed until the next resize (`pageZoom` in
+     * `web/src/float.ts`).
+     */
+    zoom: () => webFrame.getZoomFactor(),
     /**
      * The window's three buttons, for a page that draws them itself: see
      * `claimFrame`'s note in `main.js`. `claim` asks for the system's to be

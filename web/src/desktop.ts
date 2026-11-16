@@ -22,6 +22,8 @@ export interface DesktopBridge {
    * the phone type the path instead.
    */
   pickFolder?(start?: string | null): Promise<string | null>;
+  /** This page's zoom factor as Chromium holds it, 1 for none. Optional: a window from before 2026-11-15 has none, and the page measures it (`pageZoom`). */
+  zoom?(): number;
   /**
    * Bring this window forward. Clicking a notification is the only caller.
    *
