@@ -134,10 +134,57 @@ vault ask --title "Bancard staging keys for Pylink" --reason "PYL-14's local che
   is kept in the Keychain and refused for the file;
 - written `0600` beside itself and renamed in.
 
+### A file
+
+A field can take a file instead of text — a certificate (`.p12`, `.pfx`,
+`.pem`), an Apple `.p8`, a service account's `.json` — so nobody base64s one
+in a terminal and pastes the result (the owner, 2026-11-18, looking at a
+dialog that asked for SIFEN's `.p12` that way):
+
+```sh
+vault ask --title "SIFEN certificate for bpay" --reason "The signer reads it." \
+  --file-field "Certificate" --name bpay/sifen-cert --accept .p12,.pfx \
+  --field "Its password" --name bpay/sifen-cert-password
+```
+
+In JSON a field says `"kind": "file"` and, optionally, `"accept": [".p12",
+".pfx"]`; `ask_secret` takes the same.
+
+- **The dialog** draws a zone to drop the file on and a **Choose file…**
+  button, which on a phone is the system's own picker (Files, iCloud
+  Drive): no secure context is needed for it, so the phone takes files
+  too. Only the file's name and size are drawn. What the page holds until
+  Save is the `File`, never its bytes; on Save they are read as base64 into
+  the same `vault-answer` message the text values travel in.
+- **Refused on the spot** (`fileProblem`, `VaultAsk.tsx`), and again on the
+  server (`adoptValues`, `Vault.answer`): an empty file, one over
+  `FILE_MAX` (1 MB), one whose name does not end in what the field accepts.
+  A phone is not given the extensions as the picker's `accept`, because
+  iOS greys out every file for an extension it has no type for (`.p8`);
+  the name is checked after the pick instead.
+- **Kept** as the file's base64, in the Keychain like any item; the file's
+  name and size go in `vault.json` beside the label (`file`), and `vault
+  list`, `list_secrets` and Settings → Vault say `file (sifen.p12, 3.2
+  KB)`. A base64 longer than one piece is `kururu-parts:<n>:` and itself
+  (`keychain.ts`), counted so its pieces are read and deleted by one
+  `security -i` — about 1 ms a piece to read and 11 ms to write, so a
+  usual certificate (a few KB, three pieces) is instant and a 1 MB one
+  takes some ten seconds to save and under one to use.
+- **With `--env`**, the base64 is what is written to the variable.
+- **Text saved over a file item** makes it text again, and the other way.
+
+**An old base64 item** — `bpay/sifen-p12-base64`, pasted before files —
+keeps working as it was: `--secret` gives the same base64. `vault convert
+ITEM --to-file NAME` makes it a file item, so `--file` hands it over as the
+file: the server reads the value only to check it is base64 and to measure
+it, puts it back without its line breaks if it had any, and says the item's
+line, never the value.
+
 ## Using a secret: `vault run`
 
 ```sh
 vault run --secret pylink/bancard-staging-private=BANCARD_PRIVATE_KEY -- bun run smoke
+vault run --file bpay/sifen-cert=SIFEN_CERT_PATH -- bun run sign
 vault run --askpass deck/sudo -- sudo -A systemctl restart thing
 ```
 
@@ -151,12 +198,24 @@ vault run --askpass deck/sudo -- sudo -A systemctl restart thing
   `stdio: ignore`). A CLI that hangs up — Ctrl-C, its agent ended — ends the
   group, `SIGTERM` then `SIGKILL` after three seconds. The command is argv,
   not a shell line: `sh -c '…'` when it needs one.
+- **`--file ITEM=VAR`** writes the item's bytes to a `0600` file under the
+  file's own name (`sifen.p12`) in a `0700` folder made for the run under
+  `~/.local/state/kururu/vault/run/`, and puts that file's **path** in VAR.
+  The folder is removed when the command ends — exit, failure, a command
+  not found, its caller hanging up — before the caller hears the exit. A
+  server that dies mid-run leaves one behind, so each server removes, as it
+  starts, any run folder older than ten minutes (`sweepRunFiles`). While the
+  command runs the file is readable by anything running as the owner, as an
+  env file is. `--file` on a text item writes the text. `--secret` on a file
+  item gives its base64, for a program that wants it inline.
 - **The output** comes back as JSON lines — stdout and stderr as base64 of
   the masked bytes, kururu's own words as `note`, then `exit` — and the CLI
   exits with the command's code: 2 for an item not kept, 77 for not allowed,
   127 for a command not found.
 - **Masking** (`shared/mask.ts`) replaces each value, its base64 and its
-  URL-encoding with `[vault:<name>]`, on bytes, across chunk boundaries,
+  URL-encoding with `[vault:<name>]` — for a file item, also its raw bytes
+  and each of its lines of 24 characters or more, since a PEM key or a
+  JSON key file tends to be printed a line at a time — on bytes, across chunk boundaries,
   holding back only a tail that could still begin a value. Values shorter
   than four characters are not masked: they would mask every such letter.
   What it misses is anything the command transforms first.
@@ -246,7 +305,8 @@ the Keychain on a Mac, service `kururu-config`, account `<file>:<field>`
 ## Tests
 
 `server/test/vaultitems.test.ts` drives an ask from open to answer with a
-store in memory and a scratch home, and greps everything that left the vault
+store in memory and a scratch home, a file field and `convertToFile`
+included, and greps everything that left the vault
 — what pages were sent, the log, `vault.json`, the caller's answer — for the
 values. `server/test/keychain.test.ts` makes a throwaway keychain in a
 scratch folder and deletes it after, and never touches the login keychain;

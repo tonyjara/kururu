@@ -26,6 +26,8 @@
 export interface Secret {
   name: string;
   value: string;
+  /** Bytes to mask as they are, besides `value`: a file item's own, which need not be text. */
+  bytes?: Uint8Array;
 }
 
 /** Values shorter than this are not masked: a one-letter password would turn every "a" in the output into a marker. They are still never printed by kururu, and the docs say so. */
@@ -36,9 +38,13 @@ const latin = (text: string) => Buffer.from(text, "utf8").toString("latin1");
 /** Every byte pattern to replace, longest first so a value inside another's base64 is not cut in two. */
 export function patternsOf(secrets: readonly Secret[]): { pattern: string; mark: string }[] {
   const out = new Map<string, string>();
-  for (const { name, value } of secrets) {
-    if (value.length < MASK_MIN) continue;
+  for (const { name, value, bytes } of secrets) {
     const mark = `[vault:${name}]`;
+    if (bytes && bytes.length >= MASK_MIN) {
+      const pattern = Buffer.from(bytes).toString("latin1");
+      if (!out.has(pattern)) out.set(pattern, mark);
+    }
+    if (value.length < MASK_MIN) continue;
     for (const form of [value, Buffer.from(value, "utf8").toString("base64"), encodeURIComponent(value)]) {
       const pattern = latin(form);
       if (pattern.length >= MASK_MIN && !out.has(pattern)) out.set(pattern, mark);
@@ -49,12 +55,10 @@ export function patternsOf(secrets: readonly Secret[]): { pattern: string; mark:
 
 export class Masker {
   private readonly patterns: { pattern: string; mark: string }[];
-  private readonly hold: number;
   private tail = "";
 
   constructor(secrets: readonly Secret[]) {
     this.patterns = patternsOf(secrets);
-    this.hold = Math.max(0, ...this.patterns.map((p) => p.pattern.length - 1));
   }
 
   private replace(text: string): string {
@@ -71,13 +75,22 @@ export class Masker {
     // — but never part of a marker that was just written, which cannot.
     const replaced = this.replace(text);
     // Only as much as is the start of some value: a line that cannot be one
-    // goes now, so a prompt or a progress line is not kept waiting.
+    // goes now, so a prompt or a progress line is not kept waiting. Found by
+    // looking for each pattern's first byte from the left of the window and
+    // testing what follows, not by trying every length of tail: a file's
+    // pattern is a megabyte long, and trying every length is quadratic.
     let keep = 0;
-    for (let k = Math.min(this.hold, replaced.length); k > 0; k -= 1) {
-      const end = replaced.slice(-k);
-      if (this.patterns.some((p) => p.pattern.startsWith(end))) {
-        keep = k;
-        break;
+    for (const { pattern } of this.patterns) {
+      const first = pattern[0]!;
+      let i = Math.max(0, replaced.length - (pattern.length - 1));
+      for (;;) {
+        i = replaced.indexOf(first, i);
+        if (i < 0 || replaced.length - i <= keep) break;
+        if (pattern.startsWith(replaced.slice(i))) {
+          keep = replaced.length - i;
+          break;
+        }
+        i += 1;
       }
     }
     let cut = replaced.length - keep;

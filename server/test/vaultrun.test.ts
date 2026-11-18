@@ -7,12 +7,12 @@
  * their environment on purpose, which is the accident the masker is for.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Masker, maskText } from "../../shared/mask";
 import type { VaultItemView } from "../../shared/vaultitems";
-import { adoptRunRequest, commandText, VaultRuns, type Approval, type RunEvent, type RunRequest } from "../src/vaultrun";
+import { adoptRunRequest, commandText, sweepRunFiles, VaultRuns, type Approval, type RunEvent, type RunRequest } from "../src/vaultrun";
 
 const SECRET = "sk_test_FAKE_0123456789";
 
@@ -44,6 +44,26 @@ describe("the masker", () => {
     }
   });
 
+  it("masks bytes as they are, split anywhere, and a pattern a megabyte long without stalling", () => {
+    const bytes = Buffer.from([0x30, 0x82, 0x0a, 0xff, 0x00, 0x13, 0x37, 0x99, 0x42]);
+    const text = Buffer.concat([Buffer.from("a "), bytes, Buffer.from(" b")]);
+    for (let cut = 1; cut < text.length; cut += 1) {
+      const m = new Masker([{ name: "c/p12", value: "", bytes }]);
+      const out = Buffer.concat([m.push(text.subarray(0, cut)), m.push(text.subarray(cut)), m.end()]).toString();
+      expect(out).toBe("a [vault:c/p12] b");
+    }
+    const big = Buffer.alloc(1024 * 1024, 7);
+    big[0] = 0x30;
+    const m = new Masker([{ name: "c/big", value: big.toString("base64"), bytes: big }]);
+    const started = Date.now();
+    const noise = Buffer.from("M".repeat(64 * 1024));
+    let out = 0;
+    for (let i = 0; i < 16; i += 1) out += m.push(noise).length;
+    out += m.end().length;
+    expect(out).toBe(16 * noise.length);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("leaves a value too short to mask, and output with nothing to mask, alone", () => {
     expect(maskText("a b c", [{ name: "x", value: "a" }])).toBe("a b c");
     expect(maskText("plain", [])).toBe("plain");
@@ -58,7 +78,7 @@ describe("a run", () => {
   let usedBy: string[];
   let runs: VaultRuns;
 
-  const item = (name: string, use: "free" | "ask" = "free"): VaultItemView => ({ name, label: name, use, store: "keychain", env: [], createdAt: 0, updatedAt: 0, by: "", lastUse: null });
+  const item = (name: string, use: "free" | "ask" = "free"): VaultItemView => ({ name, label: name, use, file: null, store: "keychain", env: [], createdAt: 0, updatedAt: 0, by: "", lastUse: null });
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "kururu-vaultrun-"));
@@ -74,6 +94,7 @@ describe("a run", () => {
       used: (_names, by) => usedBy.push(by),
       approve: async () => approval,
       askpassPath: () => join(dir, "askpass"),
+      filesDir: () => join(dir, "files"),
       port: 1,
       logPath: () => join(dir, "uses.jsonl"),
     });
@@ -82,7 +103,7 @@ describe("a run", () => {
 
   const run = async (req: Partial<RunRequest>) => {
     const events: RunEvent[] = [];
-    const full: RunRequest = { argv: ["sh", "-c", "true"], cwd: dir, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, secrets: [{ name: "a/key", variable: "KEY" }], askpass: null, ...req };
+    const full: RunRequest = { argv: ["sh", "-c", "true"], cwd: dir, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, secrets: [{ name: "a/key", variable: "KEY" }], files: [], askpass: null, ...req };
     await runs.run(full, { name: "PYL-14 (a12)", agentId: "a12" }, (ev) => events.push(ev), new AbortController().signal);
     const text = (key: "o" | "e") => Buffer.concat(events.filter((e): e is { o: string } & { e: string } => key in e).map((e) => Buffer.from((e as Record<string, string>)[key]!, "base64"))).toString();
     return { events, out: text("o"), err: text("e"), exit: events.find((e) => "exit" in e) as { exit: number | null } | undefined };
@@ -138,7 +159,7 @@ describe("a run", () => {
   it("trades a live ticket for the value three times, then no more", async () => {
     const trades: (string | null)[] = [];
     let asked: Promise<void> | null = null;
-    const full: RunRequest = { argv: ["sh", "-c", 'echo "$KURURU_VAULT_TICKET"; sleep 1'], cwd: dir, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, secrets: [], askpass: "a/key" };
+    const full: RunRequest = { argv: ["sh", "-c", 'echo "$KURURU_VAULT_TICKET"; sleep 1'], cwd: dir, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, secrets: [], files: [], askpass: "a/key" };
     await runs.run(
       full,
       { name: "a shell", agentId: null },
@@ -156,7 +177,63 @@ describe("a run", () => {
     expect(trades.map((t) => t === SECRET)).toEqual([true, true, true, false]);
   });
 
+  it("hands a file item over as a 0600 file under its own name, its path in the variable, and removes it after", async () => {
+    const pem = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7FAKE\n-----END PRIVATE KEY-----\n";
+    items.set("c/cert", { ...item("c/cert"), file: { name: "cert.pem", size: pem.length } });
+    values.set("c/cert", Buffer.from(pem).toString("base64"));
+    const r = await run({
+      secrets: [],
+      files: [{ name: "c/cert", variable: "CERT" }],
+      argv: ["sh", "-c", 'echo "$CERT"; stat -f %Lp "$CERT"; stat -f %Lp "$(dirname "$(dirname "$CERT")")"; wc -c < "$CERT"; head -2 "$CERT"; exit 4'],
+    });
+    const [path, mode, dirMode, size, , line] = r.out.split("\n").map((l) => l.trim());
+    expect(path!.startsWith(join(dir, "files", "run-"))).toBe(true);
+    expect(path!.endsWith("/cert.pem")).toBe(true);
+    expect(mode).toBe("600");
+    expect(dirMode).toBe("700");
+    expect(Number(size)).toBe(pem.length);
+    // A line of the key printed alone is masked too.
+    expect(line).toBe("[vault:c/cert]");
+    expect(r.out).not.toContain("FAKE");
+    expect(r.exit?.exit).toBe(4);
+    expect(existsSync(path!)).toBe(false);
+    expect(readdirSync(join(dir, "files"))).toEqual([]);
+  });
+
+  it("gives a file item's base64 to --secret, and masks its bytes and its base64", async () => {
+    const bytes = Buffer.from([0x30, 0x82, 0x01, 0x02, 0xfe, 0x46, 0x41, 0x4b, 0x45]);
+    items.set("c/p12", { ...item("c/p12"), file: { name: "c.p12", size: bytes.length } });
+    values.set("c/p12", bytes.toString("base64"));
+    const r = await run({ secrets: [{ name: "c/p12", variable: "P12" }], argv: ["sh", "-c", 'echo "$P12"; printf "%s" "$P12" | base64 -d'] });
+    expect(r.out).toBe("[vault:c/p12]\n[vault:c/p12]");
+  });
+
+  it("removes the file when the command cannot start, and when the item is gone", async () => {
+    items.set("c/cert", { ...item("c/cert"), file: { name: "c.p8", size: 4 } });
+    values.set("c/cert", Buffer.from("FAKE").toString("base64"));
+    const r = await run({ secrets: [], files: [{ name: "c/cert", variable: "CERT" }], argv: ["/no/such/command"] });
+    expect(r.exit?.exit).toBe(127);
+    expect(readdirSync(join(dir, "files"))).toEqual([]);
+    values.delete("c/cert");
+    const r2 = await run({ secrets: [{ name: "a/key", variable: "KEY" }], files: [{ name: "c/cert", variable: "CERT" }] });
+    expect(r2.exit?.exit).toBe(2);
+    expect(readdirSync(join(dir, "files"))).toEqual([]);
+  });
+
+  it("sweeps run folders a dead server left, but not one a run may still be using", () => {
+    const files = join(dir, "files");
+    mkdirSync(join(files, "run-old"), { recursive: true });
+    mkdirSync(join(files, "run-new"));
+    mkdirSync(join(files, "other"));
+    const old = (Date.now() - 3_600_000) / 1000;
+    utimesSync(join(files, "run-old"), old, old);
+    expect(sweepRunFiles(files)).toBe(1);
+    expect(readdirSync(files).sort()).toEqual(["other", "run-new"]);
+  });
+
   it("reads a caller's run off the wire, and refuses one without a command or an item", () => {
+    expect(adoptRunRequest({ argv: ["x"], cwd: dir, files: [{ name: "c/cert", variable: "CERT" }] })).toMatchObject({ files: [{ name: "c/cert", variable: "CERT" }] });
+    expect("error" in adoptRunRequest({ argv: ["x"], cwd: dir, secrets: [{ name: "a/key", variable: "K" }], files: [{ name: "c/cert", variable: "K" }] })).toBe(true);
     expect("error" in adoptRunRequest({ argv: [], cwd: dir, secrets: [{ name: "a/key", variable: "K" }] })).toBe(true);
     expect("error" in adoptRunRequest({ argv: ["x"], cwd: "relative", secrets: [{ name: "a/key", variable: "K" }] })).toBe(true);
     expect("error" in adoptRunRequest({ argv: ["x"], cwd: dir, secrets: [] })).toBe(true);

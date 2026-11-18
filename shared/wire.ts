@@ -56,7 +56,7 @@ import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
 import type { InterfaceAppearance, TerminalAppearance } from "./theme";
 import type { BarSettings } from "./statusbar";
-import type { UseAnswer, UseRule, VaultAsk } from "./vaultitems";
+import type { UseAnswer, UseRule, VaultAsk, WireValue } from "./vaultitems";
 
 /**
  * How to reach this server from a device that is not this machine — the answer
@@ -1716,7 +1716,7 @@ export type ClientMessage =
    * that carries a vault value, and the server neither logs nor echoes it;
    * replied to with the outcome per field. See `server/src/vaultstore.ts`.
    */
-  | { type: "vault-answer"; id: number; ask: string; values: Record<string, string> | null; uses?: Record<string, UseRule> }
+  | { type: "vault-answer"; id: number; ask: string; values: Record<string, WireValue> | null; uses?: Record<string, UseRule> }
   /** The owner's answer to a command waiting to use an item. Replied to with nothing. */
   | { type: "vault-allow"; id: number; ask: string; answer: UseAnswer }
   /** Settings → Vault: the items, their rules, recent uses. Replied to with a `VaultPage` (`shared/vaultitems.ts`). */

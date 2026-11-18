@@ -12,13 +12,16 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, sy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { envShape, quoteEnv, setVariable } from "../../shared/envfile";
-import { adoptAskRequest, adoptValues, defaultUse, outcomeLines, validItemName, type AskRequest, type VaultAsk } from "../../shared/vaultitems";
-import { decodePieces, encodePieces, type SecretStore } from "../src/keychain";
+import { adoptAskRequest, adoptValues, defaultUse, FILE_MAX, itemLine, outcomeLines, sizeWords, validItemName, type AnswerValue, type AskRequest, type VaultAsk } from "../../shared/vaultitems";
+import { decodePieces, encodePieces, piecesOf, type SecretStore } from "../src/keychain";
 import { envPath, writeEnvVariable } from "../src/vaultfile";
 import { Vault } from "../src/vaultstore";
 
 const PUBLIC = "pk_test_FAKE0123456789abcdef";
 const PRIVATE = "sk_test_FAKE'with$odd\"chars";
+
+/** Answers as a page sends them, text by field id. */
+const texts = (entries: [string, string][]) => new Map<string, AnswerValue>(entries.map(([k, text]) => [k, { kind: "text", text }]));
 
 describe("env files", () => {
   it("replaces only the named variable, keeping export and every other byte", () => {
@@ -90,9 +93,30 @@ describe("the ask's shape", () => {
     expect(defaultUse("x/products-api", "Products")).toBe("free");
   });
 
-  it("reads values off the wire as field ids to strings, and nothing else", () => {
-    expect([...adoptValues({ "0": "a", "1": 2, x: "b", "10": "c" })!]).toEqual([["0", "a"]]);
+  it("reads values off the wire as field ids to text or files, and refuses what is neither", () => {
+    expect([...adoptValues({ "0": "a", x: "b", "10": "c" })!]).toEqual([["0", { kind: "text", text: "a" }]]);
+    expect(adoptValues({ "1": 2 })).toBeNull();
     expect(adoptValues(null)).toBeNull();
+    const file = adoptValues({ "0": { name: "C:\\Users\\x\\../sifen cert.p12", base64: "MIIK\nAQMw" } })!.get("0");
+    expect(file).toEqual({ kind: "file", name: "sifen cert.p12", base64: "MIIKAQMw", size: 6 });
+    expect(adoptValues({ "0": { name: "a.p12", base64: "not base64!" } })).toBeNull();
+    expect(adoptValues({ "0": { name: "a.p12", base64: "" } })).toBeNull();
+    expect(adoptValues({ "0": { name: "", base64: "QUJD" } })).toBeNull();
+    expect(adoptValues({ "0": { name: "big.p12", base64: Buffer.alloc(FILE_MAX + 1).toString("base64") } })).toBeNull();
+    expect(adoptValues({ "0": { name: "max.p12", base64: Buffer.alloc(FILE_MAX).toString("base64") } })!.get("0")).toMatchObject({ size: FILE_MAX });
+  });
+
+  it("says a size so that just over the limit does not read as the limit", () => {
+    expect([10, 3300, 1024, 20_000, FILE_MAX, 1_100_000].map(sizeWords)).toEqual(["10 B", "3.2 KB", "1 KB", "20 KB", "1 MB", "1.05 MB"]);
+  });
+
+  it("takes a file field, with the extensions it accepts", () => {
+    const req = adoptAskRequest({ title: "SIFEN", fields: [{ label: "Certificate", name: "bpay/sifen-cert", kind: "file", accept: ".P12, pfx" }] }) as AskRequest;
+    expect(req.fields[0]).toMatchObject({ kind: "file", accept: [".p12", ".pfx"] });
+    expect((adoptAskRequest(good) as AskRequest).fields[0]).toMatchObject({ kind: "text", accept: null });
+    expect("error" in adoptAskRequest({ title: "x", fields: [{ label: "x", name: "a", kind: "blob" }] })).toBe(true);
+    expect("error" in adoptAskRequest({ title: "x", fields: [{ label: "x", name: "a", accept: [".p12"] }] })).toBe(true);
+    expect("error" in adoptAskRequest({ title: "x", fields: [{ label: "x", name: "a", kind: "file", accept: ["../etc"] }] })).toBe(true);
   });
 });
 
@@ -106,6 +130,19 @@ describe("the Keychain's pieces", () => {
     expect(decodePieces(pieces)).toBe(pem);
     expect(decodePieces(encodePieces("ñandú"))).toBe("ñandú");
     expect(decodePieces(encodePieces("kururu-b64:looks-encoded"))).toBe("kururu-b64:looks-encoded");
+  });
+
+  it("keeps a long printable value — a file's base64 — as itself, its count in the head", () => {
+    for (const size of [1801, 3600, 3601, 100_000, Math.ceil(FILE_MAX / 3) * 4]) {
+      const value = Buffer.alloc(Math.floor((size * 3) / 4), 0xa5).toString("base64").slice(0, size).padEnd(size, "Q");
+      const pieces = encodePieces(value);
+      expect(pieces.every((p) => p.length <= 1800)).toBe(true);
+      expect(piecesOf(pieces[0]!)).toBe(pieces.length);
+      expect(decodePieces(pieces) === value).toBe(true);
+    }
+    expect(piecesOf("kururu-b64:abc")).toBeNull();
+    expect(piecesOf("plain")).toBe(1);
+    expect(decodePieces(encodePieces("kururu-parts:2:looks-counted"))).toBe("kururu-parts:2:looks-counted");
   });
 });
 
@@ -175,7 +212,7 @@ describe("an ask, opened and answered", () => {
     if (view.kind === "values") expect(view.fields[1]!.env).toEqual({ file: "~/.config/pylink-local/env", variable: "BANCARD_PRIVATE_KEY" });
     const answered = await vault.answer(
       id,
-      new Map([
+      texts([
         ["0", PUBLIC],
         ["1", PRIVATE],
       ]),
@@ -204,7 +241,7 @@ describe("an ask, opened and answered", () => {
 
   it("skips an empty field, and Cancel saves nothing", async () => {
     const one = vault.ask(bancard(), "Kuru");
-    expect((await vault.answer(one.id, new Map([["0", PUBLIC]]), new Map())).map((o) => o.outcome)).toEqual(["saved", "skipped"]);
+    expect((await vault.answer(one.id, texts([["0", PUBLIC]]), new Map())).map((o) => o.outcome)).toEqual(["saved", "skipped"]);
     const two = vault.ask(bancard(), "Kuru");
     await vault.answer(two.id, null, new Map());
     expect((await two.done).map((o) => o.outcome)).toEqual(["cancelled", "cancelled"]);
@@ -230,7 +267,7 @@ describe("an ask, opened and answered", () => {
     writeFileSync(join(home, "rc"), "alias x=y\n");
     const req = adoptAskRequest({ title: "t", fields: [{ label: "x", name: "a/b", env: { file: "~/rc", variable: "A" } }] }) as AskRequest;
     const { id } = vault.ask(req, "Kuru");
-    const [o] = await vault.answer(id, new Map([["0", PUBLIC]]), new Map());
+    const [o] = await vault.answer(id, texts([["0", PUBLIC]]), new Map());
     expect(o!.outcome).toBe("failed");
     expect(store.values.get("a/b")).toBe(PUBLIC);
     expect(readFileSync(join(home, "rc"), "utf8")).toBe("alias x=y\n");
@@ -247,10 +284,75 @@ describe("an ask, opened and answered", () => {
 
   it("never lets a caller make an item free that the owner made ask", async () => {
     const first = vault.ask(bancard(), "Kuru");
-    await vault.answer(first.id, new Map([["1", PRIVATE]]), new Map([["1", "ask"]]));
+    await vault.answer(first.id, texts([["1", PRIVATE]]), new Map([["1", "ask"]]));
     vault.ask(adoptAskRequest({ title: "t", fields: [{ label: "x", name: "pylink/bancard-staging-private", use: "free" }] }) as AskRequest, "Kuru");
     const view = vault.asks()[0]!;
     expect(view.kind === "values" && view.fields[0]!.use).toBe("ask");
+  });
+});
+
+describe("files", () => {
+  let store: ReturnType<typeof memoryStore>;
+  let vault: Vault;
+  let shown: VaultAsk[][];
+  let log: string[];
+  let saved: unknown;
+  const BYTES = Buffer.from([0x30, 0x82, 0x0a, 0x46, 0x41, 0x4b, 0x45, 0x00, 0xff, 0x13]);
+  const B64 = BYTES.toString("base64");
+
+  beforeEach(() => {
+    store = memoryStore();
+    shown = [];
+    log = [];
+    vault = new Vault({ store, changed: (a) => shown.push(a), load: () => null, save: (v) => (saved = v), log: (l) => log.push(l), setTimer: () => 0, clearTimer: () => {} });
+  });
+
+  const sifen = () => adoptAskRequest({ title: "SIFEN", fields: [{ label: "Certificate", name: "bpay/sifen-cert", kind: "file", accept: [".p12", ".pfx"] }] }) as AskRequest;
+
+  it("keeps a file as its base64, with its name and size, and shows the pages neither", async () => {
+    const { id } = vault.ask(sifen(), "BPAY-9 (a3)");
+    const view = shown.at(-1)![0]!;
+    if (view.kind === "values") expect(view.fields[0]).toMatchObject({ kind: "file", accept: [".p12", ".pfx"] });
+    const [o] = await vault.answer(id, new Map([["0", { kind: "file", name: "sifen.p12", base64: B64, size: BYTES.length }]]), new Map());
+    expect(o!.outcome).toBe("saved");
+    expect(store.values.get("bpay/sifen-cert")).toBe(B64);
+    const item = vault.item("bpay/sifen-cert")!;
+    expect(item.file).toEqual({ name: "sifen.p12", size: 10 });
+    expect(itemLine(item)).toContain("file (sifen.p12, 10 B)");
+    expect(JSON.stringify({ shown, log, saved, line: itemLine(item) })).not.toContain(B64);
+  });
+
+  it("refuses a file the field does not accept, and text where a file was asked for", async () => {
+    const one = vault.ask(sifen(), "Kuru");
+    const [a] = await vault.answer(one.id, new Map([["0", { kind: "file", name: "notes.txt", base64: B64, size: 10 }]]), new Map());
+    expect(a).toMatchObject({ outcome: "failed", why: "notes.txt is not .p12 or .pfx" });
+    const two = vault.ask(sifen(), "Kuru");
+    const [b] = await vault.answer(two.id, texts([["0", B64]]), new Map());
+    expect(b!.outcome).toBe("failed");
+    expect(store.values.size).toBe(0);
+  });
+
+  it("makes an old base64 text item a file, never saying its value, and refuses one that is not base64", async () => {
+    const ask = vault.ask(adoptAskRequest({ title: "old", fields: [{ label: "p12 base64", name: "bpay/sifen-p12-base64" }, { label: "pw", name: "bpay/pw" }] }) as AskRequest, "Kuru");
+    const wrapped = B64.replace(/(.{4})/g, "$1\n");
+    await vault.answer(ask.id, texts([["0", wrapped], ["1", "not-base64-FAKE!"]]), new Map());
+    const item = await vault.convertToFile("bpay/sifen-p12-base64", "sifen.p12", "a shell");
+    expect(item.file).toEqual({ name: "sifen.p12", size: 10 });
+    // Kept without its line breaks, so `--secret` gives the same base64 every program reads.
+    expect(store.values.get("bpay/sifen-p12-base64")).toBe(B64);
+    await expect(vault.convertToFile("bpay/pw", "pw.bin", "a shell")).rejects.toThrow(/does not hold base64/);
+    await expect(vault.convertToFile("bpay/sifen-p12-base64", "../x.p12", "a shell")).rejects.toThrow(/one name/);
+    await expect(vault.convertToFile("no/such", "x.p12", "a shell")).rejects.toThrow(/No item/);
+    expect(JSON.stringify({ log, saved })).not.toContain(B64);
+    expect(JSON.stringify({ log, saved })).not.toContain("FAKE");
+  });
+
+  it("makes a file item text again when text is saved over it", async () => {
+    const one = vault.ask(sifen(), "Kuru");
+    await vault.answer(one.id, new Map([["0", { kind: "file", name: "a.p12", base64: B64, size: 10 }]]), new Map());
+    const two = vault.ask(adoptAskRequest({ title: "t", fields: [{ label: "now text", name: "bpay/sifen-cert" }] }) as AskRequest, "Kuru");
+    await vault.answer(two.id, texts([["0", "plain-FAKE"]]), new Map());
+    expect(vault.item("bpay/sifen-cert")!.file).toBeNull();
   });
 });
 
@@ -390,7 +492,7 @@ describe("how long an ask stays up, and why it ended", () => {
     expect(second.asks().map((a) => a.id)).toEqual([id]);
     expect(timers.at(-1)!.ms).toBe(2 * 3_600_000);
     const waiting = second.wait(id)!;
-    await second.answer(id, new Map([["0", PRIVATE]]), new Map());
+    await second.answer(id, texts([["0", PRIVATE]]), new Map());
     expect((await waiting)[0]!.outcome).toBe("saved");
     // And a third, a while later, can still say how it ended.
     now += 3_600_000;

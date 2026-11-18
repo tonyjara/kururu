@@ -52,6 +52,20 @@ export function defaultUse(name: string, label: string): UseRule {
 export const MAX_FIELDS = 8;
 /** A value's longest. A PEM key is a few KB; anything near this is not a key. */
 export const VALUE_MAX = 64 * 1024;
+/**
+ * A file's longest. A .p12 or a .pfx is a few KB, an Apple .p8 a few hundred
+ * bytes, a service account's JSON two or three; a megabyte is room for a
+ * certificate chain with every intermediate in it, and past that it is not a
+ * credential. The Keychain keeps it in pieces of 1800 characters
+ * (`keychain.ts`), so this is also what bounds the pieces.
+ */
+export const FILE_MAX = 1024 * 1024;
+/** A file's base64, as the Keychain and `--secret` hold it, at its longest. */
+export const FILE_B64_MAX = Math.ceil(FILE_MAX / 3) * 4;
+/** A file's name as the owner's disk had it, kept to show and to name the temporary copy a command is handed. */
+export const FILE_NAME_MAX = 128;
+/** An extension a file field may say it wants: `.pfx`. */
+const EXTENSION = /^\.[a-z0-9]{1,10}$/;
 /** How long an ask waits for the owner before it closes as timed out, when its caller does not say. */
 export const ASK_MS = 15 * 60_000;
 /**
@@ -92,10 +106,22 @@ export interface EnvTarget {
   variable: string;
 }
 
+/**
+ * What a field takes: text pasted into a masked input, or a file picked or
+ * dropped — a certificate, a `.p8`, a service account's JSON — whose bytes
+ * are kept as they are, so nobody has to base64 one in a terminal and paste
+ * the result (the owner, 2026-11-18, looking at a dialog that asked for
+ * SIFEN's .p12 that way).
+ */
+export type FieldKind = "text" | "file";
+
 /** One field as a caller asks for it. */
 export interface FieldAsk {
   label: string;
   name: string;
+  kind: FieldKind;
+  /** For a file: the extensions it takes, lower-case with the dot, or null for any. */
+  accept: string[] | null;
   env: EnvTarget | null;
   /** The rule the caller asks for. Only `ask` is the caller's to set; a caller cannot make an item free. */
   use: UseRule | null;
@@ -181,7 +207,19 @@ export function adoptAskRequest(raw: unknown): AskRequest | { error: string } {
       if (field.use !== "ask" && field.use !== "free") return { error: `${at}'s use is "ask" or "free".` };
       use = field.use;
     }
-    fields.push({ label, name: field.name, env, use });
+    const kind = field.kind === undefined || field.kind === null ? "text" : field.kind;
+    if (kind !== "text" && kind !== "file") return { error: `${at}'s kind is "text" or "file".` };
+    let accept: string[] | null = null;
+    if (field.accept !== undefined && field.accept !== null) {
+      if (kind !== "file") return { error: `${at} takes text; accept is for a file field.` };
+      const list = typeof field.accept === "string" ? field.accept.split(",") : Array.isArray(field.accept) ? field.accept : null;
+      const exts = list?.map((e) => (typeof e === "string" ? e.trim().toLowerCase() : "")).filter(Boolean).map((e) => (e.startsWith(".") ? e : `.${e}`));
+      if (!exts || !exts.length || exts.length > 12 || !exts.every((e) => EXTENSION.test(e))) {
+        return { error: `${at}'s accept is a list of extensions, such as .pfx,.p12.` };
+      }
+      accept = [...new Set(exts)];
+    }
+    fields.push({ label, name: field.name, kind, accept, env, use });
   }
   // A number off the wire: checked, never clamped, so a caller that asked
   // for a day hears that it cannot have one instead of getting six hours
@@ -208,6 +246,10 @@ export interface AskFieldView {
   use: UseRule;
   /** An item by this name is kept already, and a value saved here replaces it. */
   exists: boolean;
+  /** A masked input, or a file to pick or drop. Absent from an ask a server before files kept open: text. */
+  kind?: FieldKind;
+  /** For a file, the extensions it takes, or null for any. */
+  accept?: string[] | null;
 }
 
 /**
@@ -265,11 +307,19 @@ export function outcomeLines(outcomes: readonly FieldOutcome[], labels: Readonly
     .join("\n");
 }
 
+/** A file item's file, as the owner's disk named it: never its bytes. */
+export interface FileFacts {
+  name: string;
+  size: number;
+}
+
 /** An item as Settings and `list_secrets` show it: never a value. */
 export interface VaultItemView {
   name: string;
   label: string;
   use: UseRule;
+  /** A file's name and size when the item is a file, kept as its base64; null for text. */
+  file: FileFacts | null;
   /** Where the value lives: the login Keychain, or a 0600 file on a node with none. */
   store: "keychain" | "file";
   /** The env files it was last written to, by the dialog. Kururu does not keep them in step. */
@@ -281,21 +331,102 @@ export interface VaultItemView {
   lastUse: { at: number; by: string } | null;
 }
 
+/**
+ * "3.2 KB": a size as the dialog and `vault list` say it. Megabytes to two
+ * places, so a file just over the limit does not read as the limit itself
+ * ("1.05 MB; up to 1 MB", not "1.0 MB; up to 1.0 MB").
+ */
+export function sizeWords(bytes: number): string {
+  const trim = (n: number, places: number) => String(Number(n.toFixed(places)));
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${trim(bytes / 1024, bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${trim(bytes / (1024 * 1024), 2)} MB`;
+}
+
+/** "file (certificate.pfx, 3.2 KB)", or "text". */
+export function kindWords(file: FileFacts | null): string {
+  return file ? `file (${file.name}, ${sizeWords(file.size)})` : "text";
+}
+
 /** An item's line in `list_secrets` and `vault list`. */
 export function itemLine(item: VaultItemView): string {
   const env = item.env.map((e) => `${e.variable} in ${e.file}`).join(", ");
   const used = item.lastUse ? `, last used ${new Date(item.lastUse.at).toISOString().slice(0, 16).replace("T", " ")} by ${item.lastUse.by}` : "";
-  return `${item.name} — ${item.label} (${item.use === "ask" ? "asks before each use" : "free to use"}${env ? `; also written to ${env}` : ""}${used})`;
+  const file = item.file ? `${kindWords(item.file)}; ` : "";
+  return `${item.name} — ${item.label} (${file}${item.use === "ask" ? "asks before each use" : "free to use"}${env ? `; also written to ${env}` : ""}${used})`;
 }
 
-/** The answer's values, read off the wire: field id to text, at most `MAX_FIELDS`, each a string of at most `VALUE_MAX`. */
-export function adoptValues(raw: unknown): Map<string, string> | null {
+/**
+ * A file's name as it may be kept: the last part of whatever the browser
+ * sent, with no control characters, no leading dots, and nothing a shell or
+ * a path would read as more than a name. Null when nothing is left.
+ */
+export function cleanFileName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const last = raw.split(/[\\/]/).pop() ?? "";
+  const clean = last
+    .replace(/[\u0000-\u001f\u007f]+/g, "")
+    .replace(/[^A-Za-z0-9 ._()+@,-]/g, "_")
+    .replace(/^[.\s]+/, "")
+    .trim()
+    .slice(0, FILE_NAME_MAX);
+  return clean || null;
+}
+
+/** Whether a file's name ends in one of the extensions a field takes. */
+export function acceptsName(accept: readonly string[] | null | undefined, name: string): boolean {
+  if (!accept || !accept.length) return true;
+  const lower = name.toLowerCase();
+  return accept.some((e) => lower.endsWith(e));
+}
+
+/** The canonical base64 of some bytes, or null when `text` is not base64: whitespace and line breaks taken out, then decoded and encoded again, so only what round-trips is kept. */
+export function canonicalBase64(text: string): string | null {
+  const bare = text.replace(/\s+/g, "");
+  if (!bare || bare.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(bare)) return null;
+  return bare;
+}
+
+/** How many bytes a canonical base64 string decodes to. */
+export function base64Bytes(b64: string): number {
+  const pad = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  return (b64.length / 4) * 3 - pad;
+}
+
+/** A value in an answer: text from a masked input, or a file as its name and its bytes' base64. */
+export type AnswerValue = { kind: "text"; text: string } | { kind: "file"; name: string; base64: string; size: number };
+
+/** What a page sends for one field: the text, or `{ name, base64 }` for a file. */
+export type WireValue = string | { name: string; base64: string };
+
+/**
+ * The answer's values, read off the wire: field id to text or file, at most
+ * `MAX_FIELDS`. A text at most `VALUE_MAX`; a file's name cleaned, its
+ * base64 checked to be base64 and at most `FILE_MAX` once decoded. Null when
+ * something was sent that cannot be read, which the server refuses rather
+ * than reading as a skip: a Save that quietly dropped a certificate would be
+ * a dialog that said it was saved.
+ */
+export function adoptValues(raw: unknown): Map<string, AnswerValue> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const out = new Map<string, string>();
+  const out = new Map<string, AnswerValue>();
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (out.size >= MAX_FIELDS) break;
-    if (!/^[0-9]$/.test(k) || typeof v !== "string" || v.length > VALUE_MAX) continue;
-    out.set(k, v);
+    if (!/^[0-9]$/.test(k)) continue;
+    if (typeof v === "string") {
+      if (v.length > VALUE_MAX) return null;
+      out.set(k, { kind: "text", text: v });
+      continue;
+    }
+    if (!v || typeof v !== "object") return null;
+    const f = v as Record<string, unknown>;
+    const name = cleanFileName(f.name);
+    if (!name || typeof f.base64 !== "string" || f.base64.length > FILE_B64_MAX + 8) return null;
+    const base64 = canonicalBase64(f.base64);
+    if (base64 === null) return null;
+    const size = base64Bytes(base64);
+    if (size > FILE_MAX) return null;
+    out.set(k, { kind: "file", name, base64, size });
   }
   return out;
 }

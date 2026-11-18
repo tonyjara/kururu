@@ -17,6 +17,15 @@
  * keyboard reads turned off, because a key offered back by autofill in
  * another field is a key in the wrong place.
  *
+ * **A file field** — a certificate, a `.p8`, a service account's JSON — is a
+ * zone to drop the file on and a Choose file… button, which on a phone is the
+ * system's own picker (Files, iCloud Drive), so the phone takes files too and
+ * needs no secure context for it. What is held until Save is the `File`, in
+ * a ref, never its bytes; the zone draws only its name and size; the bytes
+ * are read on Save, as base64, straight into the same message, and dropped
+ * with the dialog. A file over `FILE_MAX`, an empty one, or one whose name
+ * does not end in what the field accepts is refused on the spot with why.
+ *
  * The reason is drawn as Markdown (`kurumd.ts`, as Kuru's replies are), since
  * it is often a walkthrough — which console, which button, what to copy —
  * with steps and links in it. It scrolls inside itself past two-fifths of the
@@ -34,7 +43,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { FieldOutcome, UseAnswer, VaultAsk } from "../../../shared/vaultitems";
+import { acceptsName, FILE_MAX, sizeWords, type FieldOutcome, type UseAnswer, type VaultAsk, type WireValue } from "../../../shared/vaultitems";
 import { replyTree } from "../kurumd";
 import * as api from "../session";
 import { KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
@@ -88,7 +97,110 @@ export function VaultAsks() {
   );
 }
 
-function Field({ field, input, onUse }: { field: Values["fields"][number]; input: (el: HTMLInputElement | null) => void; onUse: (ask: boolean) => void }) {
+type FieldView = Values["fields"][number];
+
+/** Why a picked file cannot go in this field, or null when it can. */
+function fileProblem(file: File, accept: readonly string[] | null | undefined): string | null {
+  if (!acceptsName(accept, file.name)) return `${file.name} is not ${accept?.join(" or ")}.`;
+  if (file.size === 0) return `${file.name} is empty.`;
+  if (file.size > FILE_MAX) return `${file.name} is ${sizeWords(file.size)}; the vault takes files up to ${sizeWords(FILE_MAX)}.`;
+  return null;
+}
+
+/**
+ * A phone's picker greys out every file when `accept` names an extension it
+ * has no type for (.p8 on iOS), so there the list is checked after the pick
+ * instead of given to the picker.
+ */
+const coarse = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+
+function FilePick({ field, onFile }: { field: FieldView; onFile: (file: File | null) => void }) {
+  const [picked, setPicked] = useState<{ name: string; size: number } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+  const chooser = useRef<HTMLInputElement>(null);
+  const take = (file: File | undefined) => {
+    if (!file) return;
+    const why = fileProblem(file, field.accept);
+    setProblem(why);
+    if (why) return;
+    setPicked({ name: file.name, size: file.size });
+    onFile(file);
+  };
+  const drag = (event: React.DragEvent, on: boolean) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (on) event.dataTransfer.dropEffect = "copy";
+    setOver(on);
+  };
+  return (
+    <>
+      <div
+        className={`vault-drop${over ? " vault-drop-over" : ""}${picked ? " vault-drop-picked" : ""}`}
+        onDragEnter={(event) => drag(event, true)}
+        onDragOver={(event) => drag(event, true)}
+        onDragLeave={(event) => drag(event, false)}
+        onDrop={(event) => {
+          drag(event, false);
+          take(event.dataTransfer.files[0]);
+        }}
+      >
+        {picked ? (
+          <span className="vault-file">
+            <span className="vault-file-name">{picked.name}</span> <span className="vault-file-size">{sizeWords(picked.size)}</span>
+          </span>
+        ) : (
+          <span className="vault-drop-hint">
+            {coarse ? "Pick the file" : "Drop the file here"}
+            {field.accept?.length ? ` (${field.accept.join(", ")})` : ""}
+          </span>
+        )}
+        <span className="vault-drop-buttons">
+          {picked && (
+            <button
+              type="button"
+              className="button button-quiet"
+              onClick={() => {
+                setPicked(null);
+                setProblem(null);
+                onFile(null);
+              }}
+            >
+              Remove
+            </button>
+          )}
+          <button id={`vault-${field.id}`} type="button" className="button button-quiet" onClick={() => chooser.current?.click()}>
+            {picked ? "Choose another…" : "Choose file…"}
+          </button>
+        </span>
+        <input
+          ref={chooser}
+          type="file"
+          hidden
+          accept={coarse ? undefined : field.accept?.join(",")}
+          onChange={(event) => {
+            take(event.target.files?.[0]);
+            // So picking the same file again after a Remove still fires.
+            event.target.value = "";
+          }}
+        />
+      </div>
+      {problem && <p className="vault-file-problem">{problem}</p>}
+    </>
+  );
+}
+
+function Field({
+  field,
+  input,
+  onFile,
+  onUse,
+}: {
+  field: FieldView;
+  input: (el: HTMLInputElement | null) => void;
+  onFile: (file: File | null) => void;
+  onUse: (ask: boolean) => void;
+}) {
   const [shown, setShown] = useState(false);
   const [asks, setAsks] = useState(field.use === "ask");
   return (
@@ -96,28 +208,33 @@ function Field({ field, input, onUse }: { field: Values["fields"][number]; input
       <label className="vault-label" htmlFor={`vault-${field.id}`}>
         {field.label}
       </label>
-      <div className="vault-row">
-        <input
-          id={`vault-${field.id}`}
-          ref={input}
-          className="dialog-input vault-input"
-          type={shown ? "text" : "password"}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          data-1p-ignore
-          data-lpignore="true"
-          data-form-type="other"
-          placeholder={field.exists ? "Paste to replace what is kept" : "Paste here"}
-          onKeyDown={(event) => event.stopPropagation()}
-        />
-        <button type="button" className="button button-quiet vault-show" onClick={() => setShown((s) => !s)} aria-pressed={shown}>
-          {shown ? "Hide" : "Show"}
-        </button>
-      </div>
+      {field.kind === "file" ? (
+        <FilePick field={field} onFile={onFile} />
+      ) : (
+        <div className="vault-row">
+          <input
+            id={`vault-${field.id}`}
+            ref={input}
+            className="dialog-input vault-input"
+            type={shown ? "text" : "password"}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            data-1p-ignore
+            data-lpignore="true"
+            data-form-type="other"
+            placeholder={field.exists ? "Paste to replace what is kept" : "Paste here"}
+            onKeyDown={(event) => event.stopPropagation()}
+          />
+          <button type="button" className="button button-quiet vault-show" onClick={() => setShown((s) => !s)} aria-pressed={shown}>
+            {shown ? "Hide" : "Show"}
+          </button>
+        </div>
+      )}
       <p className="vault-where">
         Keychain · <code>{field.name}</code>
+        {field.kind === "file" && " as the file's bytes"}
         {field.exists && " (replaces it)"}
         {field.env && (
           <>
@@ -142,6 +259,7 @@ function Field({ field, input, onUse }: { field: Values["fields"][number]; input
 
 function ValuesAsk({ ask, more, onDone }: { ask: Values; more: string | null; onDone: (outcomes: FieldOutcome[]) => void }) {
   const inputs = useRef(new Map<string, HTMLInputElement>());
+  const files = useRef(new Map<string, File>());
   const uses = useRef(new Map(ask.fields.map((f) => [f.id, f.use])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,15 +271,18 @@ function ValuesAsk({ ask, more, onDone }: { ask: Values; more: string | null; on
     if (busy) return;
     setBusy(true);
     setError(null);
-    let values: Record<string, string> | null = null;
-    if (!cancel) {
-      values = {};
+    const gather = async (): Promise<Record<string, WireValue> | null> => {
+      if (cancel) return null;
+      const values: Record<string, WireValue> = {};
       for (const [id, el] of inputs.current) values[id] = el.value;
-    }
-    void api
-      .answerVault(ask.id, values, Object.fromEntries(uses.current))
+      for (const [id, file] of files.current) values[id] = { name: file.name, base64: await base64Of(file) };
+      return values;
+    };
+    void gather()
+      .then((values) => api.answerVault(ask.id, values, Object.fromEntries(uses.current)))
       .then((outcomes) => {
         for (const el of inputs.current.values()) el.value = "";
+        files.current.clear();
         if (cancel) return;
         onDone(outcomes);
       })
@@ -195,11 +316,15 @@ function ValuesAsk({ ask, more, onDone }: { ask: Values; more: string | null; on
               if (el) inputs.current.set(field.id, el);
               else inputs.current.delete(field.id);
             }}
+            onFile={(file) => {
+              if (file) files.current.set(field.id, file);
+              else files.current.delete(field.id);
+            }}
             onUse={(on) => uses.current.set(field.id, on ? "ask" : "free")}
           />
         ))}
         <p className="vault-note">
-          The values go to the vault and to the places above; {ask.from} is told only whether each was saved. An empty field is skipped. Open until {until(ask.until)}.
+          The values go to the vault and to the places above; {ask.from} is told only whether each was saved. An empty field is skipped{ask.fields.some((f) => f.kind === "file") ? ", and a file's contents are never shown" : ""}. Open until {until(ask.until)}.
         </p>
         {error && <p className="dialog-move-refused">{error}</p>}
       </div>
@@ -213,6 +338,19 @@ function ValuesAsk({ ask, more, onDone }: { ask: Values; more: string | null; on
       </div>
     </form>
   );
+}
+
+/** A file's bytes as base64, read when Save is pressed and not before. */
+function base64Of(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result ?? "");
+      resolve(url.slice(url.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(new Error(`${file.name} could not be read.`));
+    reader.readAsDataURL(file);
+  });
 }
 
 function Outcomes({ ask, outcomes, onClose }: { ask: Values; outcomes: FieldOutcome[]; onClose: () => void }) {

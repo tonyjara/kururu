@@ -142,7 +142,9 @@ and never through a model.** Kuru's `ask_secret` and an agent's `vault ask`
 open a dialog on every page of this server; the value travels once, in
 `vault-answer`, to `Vault.answer` (`server/src/vaultstore.ts`), into the
 Keychain through `security -i` on stdin (`server/src/keychain.ts`) and, when
-the field says so, one variable of an env file under home
+the field says so, one variable of an env file under home; a file the
+owner picks or drops travels the same road as its base64, and the page
+draws only its name and size
 (`server/src/vaultfile.ts`: resolve, check, realpath, check again, refuse;
 backed up first; `0600`). The caller hears a word per field. Nothing logs,
 broadcasts or returns a value; `vault.json` holds names and rules only, is
@@ -150,8 +152,9 @@ never lent and is off the backup; `server/test/vaultitems.test.ts` greps
 everything that leaves for the values. The limit is stated, not hidden: an
 item made by `/usr/bin/security` is readable by any process running as the
 owner. A command uses one through `vault run` (`server/src/vaultrun.ts`):
-the server runs it, the value in its environment or given to sudo by an
-askpass ticket, its output masked (`shared/mask.ts`), every use a line in
+the server runs it, the value in its environment, a file item as a `0600`
+copy in a run folder of its own that goes when the command does, or given
+to sudo by an askpass ticket, its output masked (`shared/mask.ts`), every use a line in
 `vault-uses.jsonl`; no route hands a caller a value but the askpass's, for a
 ticket only that run's environment holds. An item set to ask waits for the
 owner's Allow on every page (`Vault.approve`); unanswered or its caller

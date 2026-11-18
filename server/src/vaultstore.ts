@@ -23,7 +23,26 @@
  * the tests drive a whole ask with a store in memory and a scratch home.
  */
 import { randomUUID } from "node:crypto";
-import { defaultUse, durationWords, type AskFieldView, type AskRequest, type EnvTarget, type FieldOutcome, type UseAnswer, type UseRule, type VaultAsk, type VaultItemView } from "../../shared/vaultitems";
+import {
+  acceptsName,
+  base64Bytes,
+  canonicalBase64,
+  cleanFileName,
+  defaultUse,
+  durationWords,
+  FILE_MAX,
+  sizeWords,
+  type AnswerValue,
+  type AskFieldView,
+  type AskRequest,
+  type EnvTarget,
+  type FieldOutcome,
+  type FileFacts,
+  type UseAnswer,
+  type UseRule,
+  type VaultAsk,
+  type VaultItemView,
+} from "../../shared/vaultitems";
 import type { Approval } from "./vaultrun";
 import { readConfigFile, writeConfigFile } from "./config";
 import { stateDir, writeAtomic } from "./fsutil";
@@ -52,6 +71,8 @@ interface ItemMeta {
   updatedAt: number;
   by: string;
   lastUse: { at: number; by: string } | null;
+  /** A file item's name and size: its value is the file's base64. Absent for text. */
+  file?: FileFacts | null;
 }
 
 type Timer = unknown;
@@ -108,6 +129,8 @@ function adoptItems(raw: unknown): Map<string, ItemMeta> {
       ? m.env.filter((e): e is EnvTarget => Boolean(e) && typeof (e as EnvTarget).file === "string" && typeof (e as EnvTarget).variable === "string").slice(0, ENV_KEPT)
       : [];
     const last = m.lastUse && typeof m.lastUse === "object" ? (m.lastUse as Record<string, unknown>) : null;
+    const f = m.file && typeof m.file === "object" ? (m.file as Record<string, unknown>) : null;
+    const file = f && typeof f.name === "string" && typeof f.size === "number" && Number.isFinite(f.size) ? { name: f.name, size: f.size } : null;
     out.set(name, {
       label: typeof m.label === "string" ? m.label : name,
       use: m.use === "ask" ? "ask" : "free",
@@ -116,6 +139,7 @@ function adoptItems(raw: unknown): Map<string, ItemMeta> {
       updatedAt: num(m.updatedAt),
       by: typeof m.by === "string" ? m.by : "",
       lastUse: last && typeof last.by === "string" ? { at: num(last.at), by: last.by } : null,
+      file,
     });
   }
   return out;
@@ -221,7 +245,7 @@ export class Vault {
   list(): VaultItemView[] {
     return [...this.items]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, m]) => ({ name, label: m.label, use: m.use, store: this.deps.store.kind, env: m.env, createdAt: m.createdAt, updatedAt: m.updatedAt, by: m.by, lastUse: m.lastUse }));
+      .map(([name, m]) => ({ name, label: m.label, use: m.use, file: m.file ?? null, store: this.deps.store.kind, env: m.env, createdAt: m.createdAt, updatedAt: m.updatedAt, by: m.by, lastUse: m.lastUse }));
   }
 
   item(name: string): VaultItemView | null {
@@ -244,7 +268,7 @@ export class Vault {
       }
       const had = this.items.get(f.name);
       const use: UseRule = had?.use ?? (f.use === "ask" ? "ask" : defaultUse(f.name, f.label));
-      return { id: String(i), label: f.label, name: f.name, env, use, exists: Boolean(had) };
+      return { id: String(i), label: f.label, name: f.name, env, use, exists: Boolean(had), kind: f.kind, accept: f.accept };
     });
     const id = randomUUID().slice(0, 8);
     const view: OpenAsk["view"] = { kind: "values", id, title: req.title, reason: req.reason, from, fields, until: this.now() + req.openFor };
@@ -322,7 +346,7 @@ export class Vault {
    * and the other pages' dialogs close with it. Throws only for an ask that
    * is not open, which a second page pressing Save a moment late is.
    */
-  async answer(id: string, values: ReadonlyMap<string, string> | null, uses: ReadonlyMap<string, UseRule>): Promise<FieldOutcome[]> {
+  async answer(id: string, values: ReadonlyMap<string, AnswerValue> | null, uses: ReadonlyMap<string, UseRule>): Promise<FieldOutcome[]> {
     const open = this.open.get(id);
     if (!open) throw new Error("That ask is closed: it was answered elsewhere or ran out of time.");
     if (values === null) {
@@ -336,11 +360,23 @@ export class Vault {
     const outcomes: FieldOutcome[] = [];
     const writeEnv = this.deps.writeEnv ?? ((file: string, variable: string, value: string) => writeEnvVariable(file, variable, value));
     for (const field of open.view.fields) {
-      const value = values.get(field.id);
-      if (!value) {
+      const answered = values.get(field.id);
+      const isFile = field.kind === "file";
+      if (!answered || (answered.kind === "text" ? !answered.text : !answered.base64)) {
         outcomes.push({ field: field.id, name: field.name, outcome: "skipped" });
         continue;
       }
+      if ((answered.kind === "file") !== isFile) {
+        outcomes.push({ field: field.id, name: field.name, outcome: "failed", why: isFile ? "a file was asked for and text came" : "text was asked for and a file came" });
+        continue;
+      }
+      if (answered.kind === "file" && !acceptsName(field.accept, answered.name)) {
+        outcomes.push({ field: field.id, name: field.name, outcome: "failed", why: `${answered.name} is not ${field.accept?.join(" or ")}` });
+        continue;
+      }
+      // A file is kept as its base64: the store keeps text, and `--secret`
+      // hands a program the base64 it would otherwise have been pasted.
+      const value = answered.kind === "file" ? answered.base64 : answered.text;
       try {
         await this.deps.store.put(field.name, value);
       } catch (err) {
@@ -357,6 +393,7 @@ export class Vault {
         updatedAt: now,
         by: open.view.from,
         lastUse: had?.lastUse ?? null,
+        file: answered.kind === "file" ? { name: answered.name, size: answered.size } : null,
       };
       let envFailed: string | null = null;
       if (field.env) {
@@ -439,6 +476,38 @@ export class Vault {
       for (const name of open.names) this.lasting.set(`${open.agentId} ${name}`, until);
     }
     this.endUse(id, answer === "deny" ? "denied" : "owner", answer === "deny" ? "the owner pressed Deny" : answer === "lasting" ? "the owner allowed it for 15 minutes" : "the owner allowed it once");
+  }
+
+  /** A file item's name and size, or null for text or no such item. */
+  fileOf(name: string): FileFacts | null {
+    return this.items.get(name)?.file ?? null;
+  }
+
+  /**
+   * A text item that holds a file's base64 — pasted the old way, `base64 -i
+   * cert.p12 | pbcopy` — made a file item called `fileName`, so `vault run
+   * --file` can hand it to a command as the file again. The value is read
+   * here to check it is base64 and to measure it, and is put back only
+   * without its line breaks; nothing about it but its size is said. Throws
+   * a sentence with no value in it.
+   */
+  async convertToFile(name: string, fileName: string, by: string): Promise<VaultItemView> {
+    const meta = this.items.get(name);
+    if (!meta) throw new Error(`No item ${name} in the vault.`);
+    const clean = cleanFileName(fileName);
+    if (!clean || clean !== fileName.trim()) throw new Error("The file's name is one name, such as certificate.p12: letters, digits, spaces and . _ - ( ) + @ , only.");
+    const value = await this.deps.store.get(name);
+    if (value === null) throw new Error(`${name} has no value kept.`);
+    const b64 = canonicalBase64(value);
+    if (b64 === null) throw new Error(`${name} does not hold base64, so it is not a file's: it stays text. A file can be asked for again with vault ask --file-field.`);
+    const size = base64Bytes(b64);
+    if (size > FILE_MAX) throw new Error(`${name} is ${sizeWords(size)} once decoded; a file is at most ${sizeWords(FILE_MAX)}.`);
+    if (b64 !== value) await this.deps.store.put(name, b64);
+    meta.file = { name: clean, size };
+    meta.updatedAt = this.now();
+    this.persist();
+    this.log(`${by} made ${name} a file (${clean}, ${sizeWords(size)})`);
+    return this.item(name)!;
   }
 
   /** The owner's switch, from Settings. */

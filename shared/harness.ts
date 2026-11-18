@@ -476,7 +476,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "ask_secret",
     description:
-      `Ask the user to paste secrets — API keys, passwords, tokens — into a dialog on their screen (the Kururu window and the phone alike), instead of into this conversation. Each field's value goes straight to the Mac's Keychain as a vault item, and, when the field has env, into that one variable of an env file under their home folder (backed up first, only that variable replaced, kept 0600). You are told per field saved, skipped, cancelled (the user pressed Cancel), timeout (nobody answered while it was up: ask again later, or tell them it is waiting) or failed, each with why, and never a value: never ask the user to type a secret to you, and never read one back from the Keychain or an env file. Name items lower-case in up to four /-separated parts, project first: pylink/bancard-staging-private. Use one dialog for keys that belong together. The dialog stays up on every screen, the phone included and across kururu restarting, for open_for_min (default 15, at most 360): when the user is away, ask for hours rather than asking again and again. This call waits up to timeout_s (default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S}); if the user has not answered by then it returns the ask's id, and calling again with ask=<id> waits again, or tells how it ended up to a day later. Agents ask for themselves with \`vault ask\` and run a command with an item in its environment with \`vault run --secret NAME=VAR -- command\` (\`vault --help\`), from ~/.local/state/kururu/bin/vault.`,
+      `Ask the user to paste secrets — API keys, passwords, tokens — into a dialog on their screen (the Kururu window and the phone alike), instead of into this conversation. Each field's value goes straight to the Mac's Keychain as a vault item, and, when the field has env, into that one variable of an env file under their home folder (backed up first, only that variable replaced, kept 0600). You are told per field saved, skipped, cancelled (the user pressed Cancel), timeout (nobody answered while it was up: ask again later, or tell them it is waiting) or failed, each with why, and never a value: never ask the user to type a secret to you, and never read one back from the Keychain or an env file. Name items lower-case in up to four /-separated parts, project first: pylink/bancard-staging-private. Use one dialog for keys that belong together. A certificate or key that is a file (.p12, .pfx, .pem, an Apple .p8, a service account's .json) is a field with kind "file" — the user picks or drops it and its bytes are kept as they are, at most 1 MB — never "base64 it and paste it". The dialog stays up on every screen, the phone included and across kururu restarting, for open_for_min (default 15, at most 360): when the user is away, ask for hours rather than asking again and again. This call waits up to timeout_s (default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S}); if the user has not answered by then it returns the ask's id, and calling again with ask=<id> waits again, or tells how it ended up to a day later. Agents ask for themselves with \`vault ask\` and run a command with an item in its environment with \`vault run --secret NAME=VAR -- command\`, or a file item as a temporary file whose path is in VAR with \`vault run --file NAME=VAR -- command\` (\`vault --help\`), from ~/.local/state/kururu/bin/vault.`,
     inputSchema: obj(
       {
         title: str("What is being asked for, as the dialog's heading: \"Bancard staging keys for Pylink\"."),
@@ -496,6 +496,8 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
                 ["file", "variable"],
               ),
               use: { type: "string", enum: ["ask", "free"], description: "ask: the user approves each use by a command. Default: ask for a sudo password or a production key, free otherwise; the user can change it in the dialog." },
+              kind: { type: "string", enum: ["text", "file"], description: "file: the user picks or drops a file instead of pasting text. Default text." },
+              accept: { type: "array", items: { type: "string" }, description: "For a file field, the extensions it takes: [\".p12\", \".pfx\"]. Default any." },
             },
             ["label", "name"],
           ),
@@ -510,7 +512,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
   {
     name: "list_secrets",
     description:
-      "The vault's items on this Mac: each by name and label, whether using it is free or asks the user each time, the env files it was last written to, and when it was last used and by whom. Never a value. Use it to find the name to give `vault run`, or to see whether a key was saved already before asking the user again.",
+      "The vault's items on this Mac: each by name and label, whether it is a file (its name and size), whether using it is free or asks the user each time, the env files it was last written to, and when it was last used and by whom. Never a value. Use it to find the name to give `vault run`, or to see whether a key was saved already before asking the user again.",
     inputSchema: obj({}),
   },
   {

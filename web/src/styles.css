@@ -4977,6 +4977,58 @@ html.pill-page #root {
   flex: none;
   padding: 4px 10px;
 }
+/* A file field: a dashed zone to drop on, its file's name and size once
+   picked, the buttons at the end; it wraps under the name on a phone. */
+.vault-drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  min-height: 44px;
+  padding: 6px 6px 6px 10px;
+  border: var(--border-thick) dashed var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  font-size: var(--fs-base);
+}
+.vault-drop-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+.vault-drop-picked {
+  border-style: solid;
+}
+.vault-drop-hint {
+  color: var(--dim);
+}
+.vault-file {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.vault-file-name {
+  font-family: var(--mono);
+}
+.vault-file-size {
+  color: var(--dim);
+  white-space: nowrap;
+}
+.vault-drop-buttons {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
+.vault-drop-buttons .button {
+  flex: none;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.vault-file-problem {
+  margin: 4px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
 .vault-where,
 .vault-note {
   margin: 4px 0 0;

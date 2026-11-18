@@ -15,6 +15,16 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Files in the vault.** A vault dialog can ask for a file — a certificate
+  (.p12, .pfx, .pem), an Apple .p8, a service account's .json — instead of
+  text: drop it on the field or press Choose file…, on the Mac or the
+  phone. Only its name and size are shown; it is kept in the Keychain, up
+  to 1 MB. Agents ask with `vault ask --file-field` and use it with `vault
+  run --file ITEM=VAR`, which hands the command a private temporary copy's
+  path and deletes it when the command ends. Nobody has to base64 a
+  certificate and paste it any more, and an item kept that way can be made
+  a file with `vault convert ITEM --to-file NAME`.
+
 - **Columns of your own on a workspace's board.** "Add column" after the last
   column makes one — a Backlog, say — and its header's menu renames, moves,
   folds or deletes it, as on your own board. Drag a column by its grip to put

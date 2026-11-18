@@ -1,6 +1,6 @@
 /**
  * The vault for programs on this Mac: `vault ask`, `vault list`, `vault
- * run` and the askpass `vault run --askpass` points sudo at
+ * run`, `vault convert` and the askpass `vault run --askpass` points sudo at
  * (`server/src/vault-cli.ts`).
  *
  * Programs on this Mac only — loopback, no `Origin`, nothing a proxy added
@@ -20,7 +20,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { cardCode } from "../../../shared/board";
-import { adoptAskRequest, itemLine, outcomeLines } from "../../../shared/vaultitems";
+import { adoptAskRequest, itemLine, outcomeLines, validItemName } from "../../../shared/vaultitems";
 import { harness, host, vault, vaultRuns, workspaces } from "../context";
 import { adoptRunRequest, type RunEvent } from "../vaultrun";
 import { localCaller } from "../web/chain";
@@ -168,6 +168,37 @@ export const vaultRoutes: Route[] = [
       };
       await vaultRuns.run(run, callerName(agentOf(body)), emit, hangup.signal);
       if (!res.writableEnded) res.end();
+    },
+  },
+
+  /**
+   * `vault convert ITEM --to-file NAME`: a text item that holds a file's
+   * base64, pasted the old way, made a file item. Says the item's new line,
+   * which has the file's name and size and no value.
+   */
+  {
+    path: "/api/vault/convert",
+    method: "POST",
+    handle: async (req, res) => {
+      if (refuseRemote(req, res)) return;
+      let body: Record<string, unknown> = {};
+      try {
+        const raw = await readJsonBody(req, 4096);
+        body = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+      } catch {
+        json(res, { error: "that was not JSON" }, 400);
+        return;
+      }
+      if (!validItemName(body.name) || typeof body.file !== "string") {
+        json(res, { error: "vault convert ITEM --to-file NAME, such as: vault convert bpay/sifen-p12-base64 --to-file sifen.p12" }, 400);
+        return;
+      }
+      try {
+        const item = await vault.convertToFile(body.name, body.file, callerName(agentOf(body)).name);
+        json(res, { item, text: itemLine(item) });
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+      }
     },
   },
 

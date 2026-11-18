@@ -62,7 +62,7 @@ import type { NodesView } from "../../shared/nodes";
 import type { MoveCheck, MoveDone, MovePlan, NewWorkspaceMade } from "../../shared/move";
 import { EMPTY_SECRETS, type Lendable, type LendAsk, type SecretsView } from "../../shared/secrets";
 import type { VaultView } from "../../shared/vaultview";
-import type { FieldOutcome, UseAnswer, UseRule, VaultAsk, VaultPage } from "../../shared/vaultitems";
+import type { FieldOutcome, UseAnswer, UseRule, VaultAsk, VaultPage, WireValue } from "../../shared/vaultitems";
 import type { InterfaceAppearance, TerminalAppearance } from "../../shared/theme";
 import type { BarSettings } from "../../shared/statusbar";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "../../shared/reload";
@@ -1403,7 +1403,7 @@ export function moveWorkspaceTo(workspaceId: string, nodeId: string, folder: str
  * the fields to the socket, or null for Cancel. Nothing here keeps them —
  * not the draft store, not a log — and the reply is a word per field.
  */
-export function answerVault(ask: string, values: Record<string, string> | null, uses: Record<string, UseRule>): Promise<FieldOutcome[]> {
+export function answerVault(ask: string, values: Record<string, WireValue> | null, uses: Record<string, UseRule>): Promise<FieldOutcome[]> {
   return request((id) => ({ type: "vault-answer", id, ask, values, uses })) as Promise<FieldOutcome[]>;
 }
 

@@ -49,6 +49,25 @@ describe.if(mac)("the Keychain store", () => {
     expect(await store.get("t/none")).toBeNull();
   });
 
+  it("keeps a file's base64 of 128 KB in counted pieces, read in one go, and removes every piece", async () => {
+    const value = Buffer.alloc(128 * 1024, 0x5a).toString("base64");
+    const started = Date.now();
+    await store.put("t/file", value);
+    const wrote = Date.now() - started;
+    const read = Date.now();
+    expect((await store.get("t/file")) === value).toBe(true);
+    // One `security -i` for the ~100 pieces, not a spawn each (~14 ms apiece): about 100 ms.
+    expect(Date.now() - read).toBeLessThan(1000);
+    expect(wrote).toBeLessThan(10_000);
+    await store.put("t/file", "short-FAKE");
+    expect(await store.get("t/file")).toBe("short-FAKE");
+    expect(await store.has("t/file#1")).toBe(false);
+    await store.put("t/file", value);
+    await store.remove("t/file");
+    expect(await store.has("t/file")).toBe(false);
+    expect(await store.has("t/file#90")).toBe(false);
+  }, 30_000);
+
   it("replaces a long value with a short one without leaving the old tail", async () => {
     await store.put("t/shrink", VALUES.pem!);
     await store.put("t/shrink", VALUES.plain!);

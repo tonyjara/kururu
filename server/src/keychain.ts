@@ -19,6 +19,13 @@
  *   as itself, which is what the owner sees in Keychain Access, and anything
  *   else — a line break, a letter with an accent, a 3 KB PEM key — as
  *   `kururu-b64:` and its base64, which is printable by construction.
+ * - **A value that is printable but long** — a file's base64, up to a
+ *   megabyte and some 780 pieces — is `kururu-parts:<n>:` and itself, with
+ *   its count in the head, because a spawn of `security` costs about 14 ms
+ *   and 780 of them one after another would make every use of a certificate
+ *   wait ten seconds. Knowing the count, the pieces are read, and deleted,
+ *   by one `security -i` with a line each: it answers missing pieces with
+ *   nothing, so without the count a gap would shift every piece after it.
  *
  * What `security` says on stderr is never kept or logged: on a refusal it can
  * print its usage, and nothing it prints is worth the risk of the one line
@@ -49,23 +56,51 @@ export interface SecretStore {
 
 /** Characters of one piece. Hex doubles it, and the line keeps room for the command and a keychain's path. */
 const CHUNK = 1800;
-/** The most pieces a value is read back from: `VALUE_MAX` in base64 is under this many. */
+/** The most pieces a `kururu-b64:` value is read back from, one spawn each: `VALUE_MAX` in base64 is under this many. */
 const MAX_CHUNKS = 64;
+/** The most pieces a `kururu-parts:` head may claim: a megabyte's base64 is about 780. A head claiming more is not believed. */
+const MAX_PARTS = 1024;
 export const B64 = "kururu-b64:";
+export const PARTS = "kururu-parts:";
+const PARTS_HEAD = /^kururu-parts:(\d{1,4}):/;
 
-/** What is written: the value as itself when `-w` would print it back unchanged, else marked base64, in pieces. */
-export function encodePieces(value: string): string[] {
-  const plain = /^[\x20-\x7e]*$/.test(value) && value.length <= CHUNK && !value.startsWith(B64);
-  const data = plain ? value : B64 + Buffer.from(value, "utf8").toString("base64");
+const chunks = (data: string): string[] => {
   const pieces: string[] = [];
   for (let i = 0; i < data.length; i += CHUNK) pieces.push(data.slice(i, i + CHUNK));
   return pieces.length ? pieces : [""];
+};
+
+/**
+ * What is written: the value as itself when `-w` would print it back
+ * unchanged and it fits one piece; a longer printable value as
+ * `kururu-parts:<n>:` and itself; anything else marked base64. In pieces.
+ */
+export function encodePieces(value: string): string[] {
+  const printable = /^[\x20-\x7e]*$/.test(value) && !value.startsWith(B64) && !value.startsWith(PARTS);
+  if (printable && value.length <= CHUNK) return [value];
+  if (printable) {
+    // The count is in the head, and the head's length depends on the count.
+    for (let n = 1; ; n += 1) {
+      const data = `${PARTS}${n}:${value}`;
+      if (Math.ceil(data.length / CHUNK) <= n) return chunks(data);
+    }
+  }
+  return chunks(B64 + Buffer.from(value, "utf8").toString("base64"));
+}
+
+/** How many pieces a head says its value is in: the count for `kururu-parts:`, null for a `kururu-b64:` value (read until one is missing), 1 otherwise. */
+export function piecesOf(head: string): number | null {
+  const parts = PARTS_HEAD.exec(head);
+  if (parts) return Math.min(Number(parts[1]), MAX_PARTS);
+  return head.startsWith(B64) ? null : 1;
 }
 
 /** The value back from what `encodePieces` wrote. */
 export function decodePieces(pieces: readonly string[]): string {
   const data = pieces.join("");
-  return data.startsWith(B64) ? Buffer.from(data.slice(B64.length), "base64").toString("utf8") : data;
+  if (data.startsWith(B64)) return Buffer.from(data.slice(B64.length), "base64").toString("utf8");
+  const parts = PARTS_HEAD.exec(data);
+  return parts ? data.slice(parts[0].length) : data;
 }
 
 const pieceName = (name: string, i: number) => (i === 0 ? name : `${name}#${i}`);
@@ -118,6 +153,30 @@ export function keychainStore(service: string, keychain?: string): SecretStore {
     const ran = await security(["delete-generic-password", "-s", service, "-a", account, ...where], null);
     return ran.code === 0;
   };
+  const tail = where.length ? ` ${quoted(where[0] ?? "")}` : "";
+  /** Pieces `from` to `to` (not included), each one line of one `security -i`: their values in order, or null when any came back missing. */
+  const readPieces = async (name: string, from: number, to: number): Promise<string[] | null> => {
+    if (from >= to) return [];
+    const lines: string[] = [];
+    for (let i = from; i < to; i += 1) lines.push(`find-generic-password -s ${quoted(service)} -a ${quoted(pieceName(name, i))} -w${tail}\n`);
+    const ran = await security(["-i"], lines.join(""));
+    if (ran.code !== 0) throw new Error(`the Keychain could not be read (security said ${ran.code})`);
+    const got = ran.stdout.split("\n");
+    if (got[got.length - 1] === "") got.pop();
+    return got.length === to - from && got.every(Boolean) ? got : null;
+  };
+  /** Pieces `from` to `to` deleted by one `security -i`; one already gone is no matter. */
+  const dropPieces = async (name: string, from: number, to: number): Promise<void> => {
+    if (from >= to) return;
+    const lines: string[] = [];
+    for (let i = from; i < to; i += 1) lines.push(`delete-generic-password -s ${quoted(service)} -a ${quoted(pieceName(name, i))}${tail}\n`);
+    await security(["-i"], lines.join(""));
+  };
+  /** How many pieces the value kept under `name` is in now: 0 for none, null for a `kururu-b64:` one, whose count is found by reading. */
+  const countNow = async (name: string): Promise<number | null> => {
+    const head = await readPiece(name).catch(() => null);
+    return head === null ? 0 : piecesOf(head);
+  };
   const store: SecretStore = {
     kind: "keychain",
     async put(name, value) {
@@ -125,7 +184,7 @@ export function keychainStore(service: string, keychain?: string): SecretStore {
       // written as a single NUL, the only way `-X` can say nothing.
       if (!value) throw new Error("an empty value is not kept");
       const pieces = encodePieces(value);
-      const tail = where.length ? ` ${quoted(where[0] ?? "")}` : "";
+      const before = await countNow(name);
       const lines = pieces.map((piece, i) => {
         const hex = Buffer.from(piece, "utf8").toString("hex") || "00";
         // An empty value as one NUL would read back as "\0"; an empty value is refused before this anyway.
@@ -135,7 +194,9 @@ export function keychainStore(service: string, keychain?: string): SecretStore {
       if (ran.code !== 0) throw new Error(`the Keychain refused it (security said ${ran.code})`);
       // A shorter value than the last leaves pieces behind; they go now, so a
       // read never joins an old tail onto a new head.
-      for (let i = pieces.length; i < MAX_CHUNKS; i += 1) if (!(await drop(pieceName(name, i)))) break;
+      if (before === null) {
+        for (let i = pieces.length; i < MAX_CHUNKS; i += 1) if (!(await drop(pieceName(name, i)))) break;
+      } else await dropPieces(name, pieces.length, before);
       // Read back and compared, because `security -i` can say 0 for a line it
       // did not take. Compared here and never returned or logged.
       const back = await store.get(name);
@@ -145,18 +206,26 @@ export function keychainStore(service: string, keychain?: string): SecretStore {
       const first = await readPiece(name);
       if (first === null) return null;
       const pieces = [first];
-      if (first.startsWith(B64)) {
+      const count = piecesOf(first);
+      if (count === null) {
         for (let i = 1; i < MAX_CHUNKS; i += 1) {
           const next = await readPiece(pieceName(name, i));
           if (next === null) break;
           pieces.push(next);
         }
+      } else if (count > 1) {
+        const rest = await readPieces(name, 1, count);
+        if (!rest) throw new Error("the Keychain has only some of its pieces");
+        pieces.push(...rest);
       }
       return decodePieces(pieces);
     },
     has: (name) => exists(name),
     async remove(name) {
-      for (let i = 0; i < MAX_CHUNKS; i += 1) if (!(await drop(pieceName(name, i))) && i > 0) break;
+      const count = await countNow(name);
+      if (count === null) {
+        for (let i = 0; i < MAX_CHUNKS; i += 1) if (!(await drop(pieceName(name, i))) && i > 0) break;
+      } else await dropPieces(name, 0, Math.max(count, 1));
     },
   };
   return store;

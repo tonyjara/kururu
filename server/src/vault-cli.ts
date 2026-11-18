@@ -4,7 +4,8 @@
  * An agent never holds a vault value, and so this process never holds one
  * either: `ask` opens the owner's dialog and waits for a word per field,
  * `list` prints names, and `run` sends the command to the server, which runs
- * it with the items in its environment and streams its output back masked.
+ * it with the items in its environment — or a file item as a temporary
+ * file, its path in the environment — and streams its output back masked.
  * A CLI that fetched a value and handed it to a command would make a fetch
  * the interface, and anything that can run this can run a fetch and print it.
  *
@@ -41,8 +42,13 @@ function die(line: string, code = 2): never {
 const HELP = `vault — keep secrets out of transcripts.
 
   vault ask --title TEXT [--reason TEXT] [--timeout 3h] --field LABEL --name ITEM [--env FILE:VAR] [--use ask] [--field …]
+  vault ask … --file-field LABEL --name ITEM [--accept .pfx,.p12] …
       Open a dialog on the owner's screen (the Kururu window and the phone)
-      with one masked field per --field. Each value is saved to the Mac's
+      with one masked field per --field, and a file to pick or drop per
+      --file-field — a certificate (.p12, .pfx, .pem), an Apple .p8, a
+      service account's .json; at most 1 MB, its bytes kept as they are.
+      Ask for a file this way: never tell the owner to base64 one and paste
+      it. The dialog shows the file's name and size, never its contents. Each value is saved to the Mac's
       Keychain as the vault item --name, and with --env also written to that
       one variable of an env file under the home folder (backed up first,
       only that variable replaced, kept 0600). You are told, per field:
@@ -54,27 +60,42 @@ const HELP = `vault — keep secrets out of transcripts.
       was cancelled or a field skipped or failed.
       Names are lower-case, up to four /-separated parts:
       pylink/bancard-staging-private.
+      With --env, a file field's base64 is what is written to the variable.
       --reason is Markdown and may be a whole walkthrough (where to find the
       key, the steps, the links), up to 8000 characters: write the lines
       with $'1. …\\n2. …' or send it in --json. The dialog scrolls it.
 
   vault ask --json -
       The same ask as JSON on stdin: {"title", "reason", "fields": [{"label",
-      "name", "env": {"file", "variable"}, "use"}]}.
+      "name", "env": {"file", "variable"}, "use", "kind": "file",
+      "accept": [".p12", ".pfx"]}]}. "kind" is "text" when left out.
 
-  vault run --secret ITEM=VAR [--secret …] [--askpass ITEM] -- COMMAND [ARGS…]
-      Run one command with each item in its environment as VAR. The server
+  vault run [--secret ITEM=VAR] [--file ITEM=VAR] [--askpass ITEM] -- COMMAND [ARGS…]
+      Run one command with each --secret item in its environment as VAR.
+      --file writes the item's bytes to a 0600 file in a private folder,
+      under the file's own name, puts that file's PATH in VAR, and removes
+      it when the command ends, however it ends:
+      vault run --file bpay/sifen-cert=SIFEN_CERT_PATH -- bun run sign
+      --secret on a file item gives its base64, for a program that wants
+      it inline. The server
       runs it, in this folder with this environment, stdin closed; its
       output comes back with every value (and its base64 and URL-encoding)
-      replaced by [vault:ITEM]. Exits with the command's code. An item set
+      replaced by [vault:ITEM] — a file's bytes and its long lines too. Exits with the command's code. An item set
       to ask makes this wait for the owner to allow it (exit 77 if they do
       not). --askpass gives ITEM to \`sudo -A\` instead of the environment:
       vault run --askpass deck/sudo -- sudo -A systemctl restart thing
       Every run is logged: who, which items, the command, where, when.
 
   vault list
-      The vault's items: name, label, whether a use asks the owner first, the
-      env files each was written to. Never a value.
+      The vault's items: name, label, whether it is a file (its name and
+      size), whether a use asks the owner first, the env files each was
+      written to. Never a value.
+
+  vault convert ITEM --to-file NAME
+      An item that holds a file's base64, pasted before the vault took
+      files (base64 -i cert.p12 | pbcopy), made a file item named NAME, so
+      vault run --file can hand it over as the file. Its value stays where
+      it is, is never shown, and --secret still gives the same base64.
 
   vault to-files
       For going back to a kururu from before 2026-11-10 only: every key the
@@ -137,6 +158,8 @@ function readStdin(): Promise<string> {
 
 interface Field {
   label: string;
+  kind?: "file";
+  accept?: string[];
   name?: string;
   env?: { file: string; variable: string };
   use?: string;
@@ -165,6 +188,12 @@ async function askCommand(args: string[]): Promise<void> {
     if (flag === "--title") title = value();
     else if (flag === "--reason") reason = value();
     else if (flag === "--field") fields.push({ label: value() });
+    else if (flag === "--file-field") fields.push({ label: value(), kind: "file" });
+    else if (flag === "--accept") {
+      const f = last(flag);
+      if (f.kind !== "file") die("--accept belongs to a --file-field");
+      f.accept = value().split(",");
+    }
     else if (flag === "--name") last(flag).name = value();
     else if (flag === "--use") last(flag).use = value();
     else if (flag === "--timeout") {
@@ -270,9 +299,10 @@ function streamLines(path: string, body: unknown, onLine: (line: Record<string, 
   });
 }
 
-/** `--secret ITEM=VAR` and `--askpass ITEM` up to `--`, the command after it. */
+/** `--secret ITEM=VAR`, `--file ITEM=VAR` and `--askpass ITEM` up to `--`, the command after it. */
 async function runCommand(args: string[]): Promise<void> {
   const secrets: { name: string; variable: string }[] = [];
+  const files: { name: string; variable: string }[] = [];
   let askpass: string | null = null;
   let i = 0;
   for (; i < args.length; i += 1) {
@@ -285,14 +315,19 @@ async function runCommand(args: string[]): Promise<void> {
       const at = value.lastIndexOf("=");
       if (at <= 0) die("--secret is ITEM=VARIABLE, such as pylink/bancard-staging-private=BANCARD_PRIVATE_KEY");
       secrets.push({ name: value.slice(0, at), variable: value.slice(at + 1) });
+    } else if (flag === "--file") {
+      const at = value.lastIndexOf("=");
+      if (at <= 0) die("--file is ITEM=VARIABLE, such as bpay/sifen-cert=SIFEN_CERT_PATH: VARIABLE gets the file's path");
+      files.push({ name: value.slice(0, at), variable: value.slice(at + 1) });
     } else if (flag === "--askpass") askpass = value;
     else die(`unknown flag ${flag}; see vault --help`);
   }
   const argv = args.slice(i + 1);
   if (args[i] !== "--" || !argv.length) die("put the command after --: vault run --secret ITEM=VAR -- command args");
+  if (!secrets.length && !files.length && !askpass) die("name an item: --secret ITEM=VAR, --file ITEM=VAR or --askpass ITEM");
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") env[k] = v;
-  const payload = JSON.stringify({ argv, cwd: process.cwd(), env, secrets, askpass, agentId });
+  const payload = JSON.stringify({ argv, cwd: process.cwd(), env, secrets, files, askpass, agentId });
   await new Promise<void>((resolve) => {
     const req = request(
       { host: "127.0.0.1", port, path: "/api/vault/run", method: "POST", headers: { ...tokenHeaders(), "content-type": "application/json", "content-length": Buffer.byteLength(payload) } },
@@ -359,6 +394,14 @@ async function runCommand(args: string[]): Promise<void> {
   });
 }
 
+/** `convert ITEM --to-file NAME`: the item's line after, never its value. */
+async function convertCommand(args: string[]): Promise<void> {
+  const [name, flag, file, ...rest] = args;
+  if (!name || flag !== "--to-file" || !file || rest.length) die("vault convert ITEM --to-file NAME, such as: vault convert bpay/sifen-p12-base64 --to-file sifen.p12");
+  const answer = await ask("/api/vault/convert", { name, file, agentId });
+  process.stdout.write(`${String(answer.text ?? "")}\n`);
+}
+
 /** sudo's askpass during a `run --askpass`: the value to sudo, for the run's ticket. Not for agents. */
 async function askpassCommand(): Promise<void> {
   const ticket = process.env.KURURU_VAULT_TICKET;
@@ -396,7 +439,8 @@ async function toFilesCommand(): Promise<void> {
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
-  if (!command || command === "--help" || command === "-h" || command === "help") {
+  // `vault ask --help` too: an agent asks the command it is about to use, and an unknown flag there would read as no help.
+  if (!command || command === "--help" || command === "-h" || command === "help" || rest.includes("--help") || rest.includes("-h")) {
     process.stdout.write(HELP);
     return;
   }
@@ -404,6 +448,7 @@ async function main(): Promise<void> {
   if (command === "run") return runCommand(rest);
   if (command === "askpass") return askpassCommand();
   if (command === "to-files") return toFilesCommand();
+  if (command === "convert") return convertCommand(rest);
   if (command === "list") {
     const answer = await ask("/api/vault/list", null);
     process.stdout.write(`${String(answer.text ?? "")}\n`);

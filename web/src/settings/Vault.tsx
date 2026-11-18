@@ -21,7 +21,7 @@
  */
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { NEVER_SHARED } from "../../../shared/secrets";
-import type { VaultPage as StorePage, VaultUse } from "../../../shared/vaultitems";
+import { kindWords, type VaultPage as StorePage, type VaultUse } from "../../../shared/vaultitems";
 import { envLentTo, lentRows, lentTo, type VaultKey, type VaultLogin, type VaultPage as KeyPage, type VaultView, type VaultWorkspace } from "../../../shared/vaultview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -152,6 +152,7 @@ function Kept({ readOnly }: { readOnly: boolean }) {
         ) : (
           page.items.map((item) => {
             const parts = [
+              item.file ? kindWords(item.file) : null,
               item.env.length ? `also in ${item.env.map((e) => `${e.variable} in ${e.file}`).join(", ")}` : null,
               item.lastUse ? `last used ${when(item.lastUse.at)} by ${item.lastUse.by}` : "never used",
               `saved ${when(item.updatedAt)}${item.by ? ` for ${item.by}` : ""}`,

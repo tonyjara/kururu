@@ -120,7 +120,7 @@ import { Slots, writeSlotCommand } from "./slots";
 import { machineStore } from "./keychain";
 import { readAsksFile, Vault, writeAsksFile } from "./vaultstore";
 import { vaultAskpassPath, writeVaultCommand } from "./vaultbin";
-import { usesPath, VaultRuns } from "./vaultrun";
+import { sweepRunFiles, usesPath, vaultFilesDir, VaultRuns } from "./vaultrun";
 import { specsSnapshot } from "./specs";
 import { dataDir, dbPath, Store } from "./store";
 import { startSubprojectScan, stopSubprojectScan } from "./subprojects";
@@ -696,9 +696,15 @@ export async function attach(port: Port): Promise<void> {
     used: (names, by) => vault.used(names, by),
     approve: (run, note, signal) => vault.approve(run, note, signal),
     askpassPath: vaultAskpassPath,
+    filesDir: vaultFilesDir,
     port: PORT,
     logPath: () => usesPath(dataDir()),
   }));
+  {
+    // A file item's copy outlives its run only when a server died under it.
+    const swept = sweepRunFiles(vaultFilesDir());
+    if (swept) console.log(`kururu: vault: removed ${swept} file cop${swept === 1 ? "y" : "ies"} a run before this server left behind`);
+  }
   writeVaultCommand();
   provide("automations", new Automations({
     store,
