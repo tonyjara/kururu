@@ -72,9 +72,17 @@ export function durationWords(ms: number): string {
   if (!h) return part(Math.max(1, m), "minute");
   return m ? `${part(h, "hour")} ${part(m, "minute")}` : part(h, "hour");
 }
-/** The words a caller may write, clipped where the dialog would. */
+/**
+ * The words a caller may write. A title and a label are one line each and are
+ * clipped where the dialog would; the reason is not clipped but refused when
+ * it is longer, because it is often a walkthrough (where in a console to find
+ * the key, which button, what to copy), and a walkthrough cut at step three is
+ * worse than no walkthrough: it was 600 and clipped until HOL-145's APNs ask
+ * stopped mid-word on 2026-11-18. The dialog scrolls the reason inside itself,
+ * so the length is for the vault's own file, not for the screen.
+ */
 export const TITLE_MAX = 120;
-export const REASON_MAX = 600;
+export const REASON_MAX = 8000;
 export const LABEL_MAX = 80;
 
 /** Where a field's value goes besides its Keychain item: one variable in an env file under the home folder. */
@@ -108,6 +116,23 @@ function words(value: unknown, max: number): string | null {
 }
 
 /**
+ * The reason as its lines: unlike `words`, a newline stays one, since a
+ * numbered list of steps is what a reason often is and the dialog draws it as
+ * Markdown. Other control characters go, trailing spaces go, and a run of
+ * blank lines is one.
+ */
+function prose(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/\r\n?/g, "\n")
+    .replace(/\t/g, "  ")
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, " ")
+    .replace(/[ \u00a0]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
  * A caller's ask read off the wire — Kuru's tool arguments, the CLI's body —
  * into its shape, or why it is not one. Everything the dialog will show and
  * everything the server will write to is checked here, so a bad path or a
@@ -121,7 +146,8 @@ export function adoptAskRequest(raw: unknown): AskRequest | { error: string } {
   const r = raw as Record<string, unknown>;
   const title = words(r.title, TITLE_MAX);
   if (!title) return { error: "A title is needed: what the owner is being asked for, such as \"Bancard staging keys for Pylink\"." };
-  const reason = words(r.reason, REASON_MAX) ?? "";
+  const reason = prose(r.reason);
+  if (reason.length > REASON_MAX) return { error: `The reason is ${reason.length} characters; at most ${REASON_MAX}. Say the rest in a file and name it.` };
   if (!Array.isArray(r.fields) || r.fields.length === 0) return { error: "At least one field is needed." };
   if (r.fields.length > MAX_FIELDS) return { error: `At most ${MAX_FIELDS} fields in one ask.` };
   const fields: FieldAsk[] = [];

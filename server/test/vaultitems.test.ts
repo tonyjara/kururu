@@ -416,3 +416,27 @@ describe("how long an ask stays up, and why it ended", () => {
     expect(make(() => kept).asks().map((a) => a.id)).toEqual([id]);
   });
 });
+
+describe("an ask's reason", () => {
+  const ask = (reason: unknown) => adoptAskRequest({ title: "APNs key", reason, fields: [{ label: "Key", name: "holapy/apns-key" }] });
+
+  it("keeps a long walkthrough whole, its lines included (HOL-145 was cut at 600)", () => {
+    const steps = Array.from({ length: 14 }, (_, i) => `${i + 1}. Step ${i + 1}: open https://developer.apple.com/account/resources/authkeys/list and do the next thing carefully.`);
+    const reason = `Holapy's push notifications need it.\r\n\r\n\r\n${steps.join("\n")}\t  `;
+    const r = ask(reason) as AskRequest;
+    expect("error" in r).toBe(false);
+    expect(r.reason.length).toBeGreaterThan(600);
+    expect(r.reason.split("\n")).toEqual(["Holapy's push notifications need it.", "", ...steps]);
+  });
+
+  it("refuses one past the limit rather than cutting it", () => {
+    const r = ask("x".repeat(8001));
+    expect("error" in r && r.error).toContain("8001");
+    expect("error" in ask("x".repeat(8000))).toBe(false);
+  });
+
+  it("takes control characters out but not newlines, and is empty when absent", () => {
+    expect((ask("a\u0000b\u001bc\nd") as AskRequest).reason).toBe("a b c\nd");
+    expect((ask(undefined) as AskRequest).reason).toBe("");
+  });
+});

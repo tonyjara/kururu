@@ -4911,11 +4911,50 @@ html.pill-page #root {
    scrim does not dismiss it, so it says nothing of its own here. */
 .vault-scrim {
   z-index: 55;
+  padding-top: max(16px, 6vh);
 }
+/* A column the height of what is in it, up to the screen less the scrim's
+   top and as much again under it (`dvh`, so a phone's toolbars are not
+   counted as room). The title and Save keep their places; the middle — the
+   reason, the fields, the note — scrolls when it must, which on a small
+   phone it does, so a walkthrough of any length never pushes Save off the
+   screen. The reason scrolls inside itself past two-fifths of the screen, so
+   on a Mac its steps can be read beside the fields they lead to. The `use`
+   ask is not a form and scrolls as a whole, as it always did. */
 .vault-dialog {
-  width: min(480px, 92vw);
-  max-height: 80vh;
+  width: min(560px, 92vw);
+  max-height: calc(100dvh - 2 * max(16px, 6vh));
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.vault-form {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.vault-form > * {
+  flex: none;
+}
+.vault-form > .vault-body {
+  flex: 0 1 auto;
+  min-height: 8em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.vault-reason {
+  max-height: 40dvh;
+  margin: 0 0 4px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: var(--border) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .vault-field {
   margin: 12px 0 0;

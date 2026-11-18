@@ -74,6 +74,11 @@ vault ask --title "Bancard staging keys for Pylink" --reason "PYL-14's local che
   that wakes up later still finds it. The first Save or Cancel answers; the
   others close. The scrim does not close it, and it says when it closes by
   itself.
+- **The reason may be a whole walkthrough**: Markdown, newlines kept, up to
+  8000 characters and refused past that rather than cut (it was 600 and cut
+  mid-word until 2026-11-18). The dialog draws it as Kuru's replies are drawn,
+  web links clickable, in a box that scrolls; only that box gives way to the
+  screen, so the fields and Save stay in sight on a phone.
 - **How long it stays up** is the caller's: fifteen minutes by default,
   `--timeout 3h` (`vault ask`) or `open_for_min` (`ask_secret`), at most six
   hours, a stay outside 1 minute–6 hours refused rather than clamped. Ask for

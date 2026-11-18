@@ -480,7 +480,7 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     inputSchema: obj(
       {
         title: str("What is being asked for, as the dialog's heading: \"Bancard staging keys for Pylink\"."),
-        reason: str("One or two sentences on why, for the user: what will use them."),
+        reason: str("Why, for the user: what will use them — and, when the user has to go and make or find the value, the whole walkthrough: which console, which page, which button, what to copy, as a numbered Markdown list with the links in it. Newlines and Markdown are kept and links are clickable; the dialog scrolls it. At most 8000 characters, refused (not cut) past that."),
         fields: {
           type: "array",
           description: "One per value, in the order the user should see them. At most 8.",

@@ -17,6 +17,14 @@
  * keyboard reads turned off, because a key offered back by autofill in
  * another field is a key in the wrong place.
  *
+ * The reason is drawn as Markdown (`kurumd.ts`, as Kuru's replies are), since
+ * it is often a walkthrough — which console, which button, what to copy —
+ * with steps and links in it. It scrolls inside itself past two-fifths of the
+ * screen, the fields under it scroll with it, and the title and Save stay put,
+ * so a reason of any length never pushes Save off a phone.
+ * A web link opens outside the app, as the drawer's do; a path is words,
+ * since a dialog that holds pasted keys is no place to open a file from.
+ *
  * The scrim does not close it. A tap beside a dialog that holds two pasted
  * keys should not throw them away; Cancel is a button.
  *
@@ -24,10 +32,12 @@
  * here too, in the same place, with Allow once, Allow for 15 minutes and
  * Deny.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FieldOutcome, UseAnswer, VaultAsk } from "../../../shared/vaultitems";
+import { replyTree } from "../kurumd";
 import * as api from "../session";
+import { KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
 
 type Values = Extract<VaultAsk, { kind: "values" }>;
 
@@ -41,6 +51,19 @@ function until(at: number): string {
 /** "a shell" at the start of a sentence. */
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 type Use = Extract<VaultAsk, { kind: "use" }>;
+
+const REASON_DOORS: MarkdownDoors = { leaf: (text) => text, link: () => null };
+
+/** The caller's reason, steps and links and all, in a box that scrolls rather than pushing Save off the screen. */
+function Reason({ text }: { text: string }) {
+  const tree = useMemo(() => replyTree(text), [text]);
+  if (!text) return null;
+  return (
+    <div className="vault-reason kuru-md" tabIndex={0}>
+      <KuruMarkdown blocks={tree} doors={REASON_DOORS} />
+    </div>
+  );
+}
 
 export function VaultAsks() {
   const asks = api.useKururu().vaultAsks;
@@ -150,6 +173,7 @@ function ValuesAsk({ ask, more, onDone }: { ask: Values; more: string | null; on
 
   return (
     <form
+      className="vault-form"
       onSubmit={(event) => {
         event.preventDefault();
         send(false);
@@ -158,23 +182,27 @@ function ValuesAsk({ ask, more, onDone }: { ask: Values; more: string | null; on
     >
       <h2 className="dialog-title">{ask.title}</h2>
       <p className="dialog-hint">
-        Asked by {ask.from}{more ? ` · ${more}` : ""}. {ask.reason}
+        Asked by {ask.from}
+        {more ? ` · ${more}` : ""}.
       </p>
-      {ask.fields.map((field) => (
-        <Field
-          key={field.id}
-          field={field}
-          input={(el) => {
-            if (el) inputs.current.set(field.id, el);
-            else inputs.current.delete(field.id);
-          }}
-          onUse={(on) => uses.current.set(field.id, on ? "ask" : "free")}
-        />
-      ))}
-      <p className="vault-note">
-        The values go to the vault and to the places above; {ask.from} is told only whether each was saved. An empty field is skipped. Open until {until(ask.until)}.
-      </p>
-      {error && <p className="dialog-move-refused">{error}</p>}
+      <div className="vault-body">
+        <Reason text={ask.reason} />
+        {ask.fields.map((field) => (
+          <Field
+            key={field.id}
+            field={field}
+            input={(el) => {
+              if (el) inputs.current.set(field.id, el);
+              else inputs.current.delete(field.id);
+            }}
+            onUse={(on) => uses.current.set(field.id, on ? "ask" : "free")}
+          />
+        ))}
+        <p className="vault-note">
+          The values go to the vault and to the places above; {ask.from} is told only whether each was saved. An empty field is skipped. Open until {until(ask.until)}.
+        </p>
+        {error && <p className="dialog-move-refused">{error}</p>}
+      </div>
       <div className="dialog-actions">
         <button type="button" className="button button-quiet" onClick={() => send(true)} disabled={busy}>
           Cancel

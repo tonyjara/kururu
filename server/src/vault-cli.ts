@@ -54,6 +54,9 @@ const HELP = `vault — keep secrets out of transcripts.
       was cancelled or a field skipped or failed.
       Names are lower-case, up to four /-separated parts:
       pylink/bancard-staging-private.
+      --reason is Markdown and may be a whole walkthrough (where to find the
+      key, the steps, the links), up to 8000 characters: write the lines
+      with $'1. …\\n2. …' or send it in --json. The dialog scrolls it.
 
   vault ask --json -
       The same ask as JSON on stdin: {"title", "reason", "fields": [{"label",
