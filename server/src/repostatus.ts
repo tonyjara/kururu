@@ -15,6 +15,7 @@ import { GIT_STATUS_MS, type GitAction, type RepoGit, type WorkspaceBranch, type
 import { broadcast, host, state, workspaces } from "./context";
 import { type DatabaseScanInput, scanDatabases } from "./databases";
 import { allowRoot } from "./files";
+import { linksOf } from "./pathlinks";
 import { readHead, repoAt } from "./git";
 import { tabCwd } from "./terminals";
 import { commitTyped, defaultBranch, fastForward, fetchAll, mainRoot, pullBranch, pushBranch, repoStatus } from "./worktree";
@@ -168,7 +169,10 @@ export async function pollBranches(): Promise<void> {
       const choices = await rootChoices(workspaceDirs(workspace));
       if (!choices.includes(project)) choices.unshift(project);
       for (const root of choices) allowRoot(root);
-      projects.push({ workspaceId: workspace.id, root: project, choices });
+      // The kernel's paths are the disk's and these are as they were spelt,
+      // so a root through a link is sent with it (`shared/pathlinks.ts`).
+      const links = await linksOf([project, ...choices, ...(workspace.root ? [workspace.root] : [])]);
+      projects.push({ workspaceId: workspace.id, root: project, choices, ...(links.length ? { links } : {}) });
       scans.push({ workspaceId: workspace.id, project, roots: choices });
     }
   }

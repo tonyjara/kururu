@@ -15,6 +15,7 @@ in this folder.
 | `dashboard.ts` | The profile's Dashboard: its fixed tabs, the rule that it holds them and nothing else, and its layout made to fit. Pure, tested. See [layout](layout.md#the-dashboard) |
 | `tunnels.ts` | Which dev server a tunnel serves — by port, and nothing else — and the tunnels no dev server is on. Pure, tested |
 | `halves.ts` | Where a tab goes when nobody named a pane: a terminal to the lower half, anything else to the upper, by geometry, the mark that keeps terminals in one pane, the word to split when the half is missing. Pure, tested. See [layout](layout.md#the-two-halves) |
+| `pathlinks.ts` | Two spellings of one folder: a root as it was spelt (through a symbolic link) and the kernel's path, compared by following the links the server found (`server/src/pathlinks.ts`), which `WorkspaceProject.links` carries. Pure, tested |
 | `workspaceroot.ts` | A workspace's root folder as it may be stored: absolute, `~` expanded, `.`/`..` folded, or none; and drawn with `~` again. Pure, tested. See [layout](layout.md#terminals-tabs-and-panes) |
 | `harness.ts` | The harness's vocabulary: the MCP tool catalogue, the role prompt, key and paste grammar, when a waiting message may be typed, the frames of a notice, transcript turns, its model, effort and compaction point, its folder's two files. Pure, tested |
 | `agy.ts` | Antigravity's `agy`, the pure half: the title payload read as reports, the transcript's last reply, the quota as the bar's limits, the session settings, Kuru's line, MCP config, hooks and role. See [antigravity](antigravity.md) |
@@ -109,6 +110,7 @@ in this folder.
 | `src/notices.ts` | Status edges and `announce`: notification policy applied per client |
 | `src/madelinks.ts` · `src/conversation.ts` | What an agent made, swept and opened, and files sent on · search, a card's history, turns off reports, Kuru's asides |
 | `src/look.ts` · `src/lending.ts` · `src/thisnode.ts` | Settings saved and told to every client · spawn env, logins, the vault census, lending · this node's summary, address and Telegram lead |
+| `src/pathlinks.ts` | The deepest symbolic link a root goes through, by `lstat` and kept a minute — the server's half of `shared/pathlinks.ts` |
 | `src/repostatus.ts` · `src/editors.ts` · `src/sweeps.ts` | Workspace dirs, branches and git status · nvim hooks, the census, close and kill · the polls, the web chain, the timers (`startSweeps`/`stopSweeps`) |
 | `src/workspaces.ts` | Profiles, workspaces, focus. The arrangement lives HERE |
 | `src/persist.ts` | The arrangement on disk. Structure only — never respawns. Keys, never boards |

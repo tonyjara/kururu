@@ -73,6 +73,16 @@ describe("ownTags", () => {
     expect(ownTags(reply("t1", "see ~/Desktop/Nyto/holapy/docs/x.md"), book)).toEqual(["wkhol"]);
     expect(ownTags(reply("t1", "see docs/x.md", { files: [{ root: "/Users/me/Desktop/Nyto/kururu", path: "docs/x.md", line: null, text: "docs/x.md" }] }), book)).toEqual(["wkkur"]);
   });
+  /** bpay's root is `pylink`, a link to `bpay`, and the server finds files under the real one (2026-11-19). */
+  test("a root spelt through a link is also known by where it leads", () => {
+    const linked = tagBook([space("wkbpay", "bpay", [], "/Users/me/Desktop/Nyto/pylink")], undefined, [{ from: "/Users/me/Desktop/Nyto/pylink", to: "/Users/me/Desktop/Nyto/bpay" }]);
+    expect(ownTags(reply("t1", "done", { files: [{ root: "/Users/me/Desktop/Nyto/bpay", path: "dashboard/a.ts", line: null, text: "" }] }), linked)).toEqual(["wkbpay"]);
+    expect(ownTags(reply("t1", "see /Users/me/Desktop/Nyto/bpay/dashboard/a.ts"), linked)).toEqual(["wkbpay"]);
+    expect(ownTags(reply("t1", "see /Users/me/Desktop/Nyto/pylink/a.ts"), linked)).toEqual(["wkbpay"]);
+    // Without the link the real path is nobody's, as before.
+    const unlinked = tagBook([space("wkbpay", "bpay", [], "/Users/me/Desktop/Nyto/pylink")]);
+    expect(ownTags(reply("t1", "done", { files: [{ root: "/Users/me/Desktop/Nyto/bpay", path: "a.ts", line: null, text: "" }] }), unlinked)).toEqual([]);
+  });
   test("a reply's quoted opening is not the message's own words", () => {
     expect(ownTags(you("t5", '[reply to Kuru 18:42 "Holapy is up" (t4)] yes'), book)).toEqual([]);
   });

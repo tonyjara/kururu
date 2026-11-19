@@ -45,6 +45,32 @@ describe("previewUrl", () => {
   });
 });
 
+describe("a root spelt through a symbolic link", () => {
+  /** bpay's root is `pylink`, a link to `bpay`; the kernel and git both say `bpay` (2026-11-19). */
+  const links = [{ from: "/n/pylink", to: "/n/bpay" }];
+  const places = [
+    { name: "bpay", root: "/n/pylink" },
+    { name: "Holapy", root: "/n/holapy" },
+  ];
+
+  test("a server in the real folder is named after the workspace on the link", () => {
+    expect(previewLabel(dev({ cwd: "/n/bpay/dashboard", repo: "/n/bpay" }), places, links)).toBe("bpay");
+    expect(previewLabel(dev({ cwd: "/n/bpay/dashboard" }), [{ name: "Payments", root: "/n/pylink" }], links)).toBe("Payments");
+    // Without the link it was nobody's, and fell back to the folder's name.
+    expect(previewLabel(dev({ cwd: "/n/bpay/dashboard" }), [{ name: "Payments", root: "/n/pylink" }])).toBe("dashboard");
+  });
+
+  test("a folder beside the link is not under it", () => {
+    expect(previewLabel(dev({ cwd: "/n/bpayments/web" }), [{ name: "Payments", root: "/n/pylink" }], links)).toBe("web");
+  });
+
+  test("a card's worktree finds its server through the link", () => {
+    const servers = [dev({ port: 3021, cwd: "/n/bpay/dashboard" })];
+    expect(serverIn(servers, "/n/pylink", 3021, links)?.port).toBe(3021);
+    expect(serverIn(servers, "/n/pylink", 3021)).toBeNull();
+  });
+});
+
 describe("previewLabel", () => {
   const places = [
     { name: "Holapy", root: "/n/holapy" },

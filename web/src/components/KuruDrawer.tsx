@@ -180,7 +180,8 @@ import { firstLine, foldKeys, foldText, isFolded, isLong, readFolds, useFoldLong
 import { foldInline, replyTree } from "../kurumd";
 import { useKuruSearch } from "../kurusearch";
 import { fingerPointer } from "../terminals";
-import { isLoopback } from "../preview";
+import { isLoopback, projectLinks } from "../preview";
+import type { PathLink } from "../../../shared/pathlinks";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { dictate, dictateStop, dictateToggled, dismissVoice, useDictation, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
@@ -305,7 +306,7 @@ export function KuruDrawer({
    */
   chips: ReactNode;
 }) {
-  const { kuru, kuruPeers, channels, voice, nodes } = useKururu();
+  const { kuru, kuruPeers, channels, voice, nodes, projects } = useKururu();
   const conversation = kuru.find((c) => c.profileId === profile.id) ?? null;
   const selfName = nodes?.self.name ?? "here";
   const peerNames = kuruPeers.map((peer) => peer.node.name);
@@ -337,7 +338,14 @@ export function KuruDrawer({
   const anyProjects = spacesHere.some((space) => space.projects.length > 0);
   // The profile's own board, whose cards ("MV-94 Yetapa") may name a project; read only when there is one to name.
   const profileCards = anyProjects ? profile.board.cards : null;
-  const book = useMemo(() => tagBook(spacesHere, profileCards ? { name: profile.name, cards: profileCards } : undefined), [spacesHere, profileCards, profile.name]);
+  /* By what they say rather than by the message, so the book is not made
+     again each time the projects move and no link has. */
+  const linksSaid = JSON.stringify(projectLinks(projects));
+  const links = useMemo(() => JSON.parse(linksSaid) as PathLink[], [linksSaid]);
+  const book = useMemo(
+    () => tagBook(spacesHere, profileCards ? { name: profile.name, cards: profileCards } : undefined, links),
+    [spacesHere, profileCards, profile.name, links],
+  );
   /** Every workspace, and every project shown in one under it, as a tag names it. */
   const tagNames: TagName[] = useMemo(
     () =>

@@ -67,7 +67,7 @@ import { AGENT_MIME, GROUP_MIME, WORKSPACE_MIME, allowDrop, beginDrag, endDrag, 
 import type { Action } from "../keys";
 import { agentLabel, agentSummary, remoteHost, remoteNote, shortenPath } from "../labels";
 import { useLongPress } from "../longpress";
-import { devServerUrl, metroAddress, previewLabel, type NamedRoot } from "../preview";
+import { devServerUrl, metroAddress, previewLabel, projectLinks, type NamedRoot } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { Menu, Popover, type MenuItem } from "./Menu";
@@ -1741,7 +1741,11 @@ function DevServers({ workspaces }: { workspaces: readonly Workspace[] }) {
     const name = names.get(p.workspaceId);
     return name ? [{ name, root: p.root }] : [];
   });
-  const label = (dev: DevServer) => previewLabel(dev, roots);
+  /* A root may be spelt through a symbolic link, and a server's folder is the
+     kernel's, which never is: the links are what the two are compared through
+     (`shared/pathlinks.ts`) — bpay's root is `pylink`, a link to `bpay`. */
+  const links = projectLinks(projects);
+  const label = (dev: DevServer) => previewLabel(dev, roots, links);
   /* Shut by default. The list is the phone's way in and is a thing you go and
      get, not a thing you watch — so the count is what the heading carries, and
      the rows are one press away. */

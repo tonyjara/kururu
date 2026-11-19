@@ -64,7 +64,7 @@ import { useCardClick } from "../cardclick";
 import { useCardDone } from "../cardDone";
 import { referItem } from "../kuru";
 import { noteItem, popOutNote } from "../notes";
-import { isLoopback, previewUrl, serverIn } from "../preview";
+import { isLoopback, previewUrl, projectLinks, serverIn } from "../preview";
 import { revealCard } from "../reveal";
 import { sameJson } from "../same";
 import * as api from "../session";
@@ -1156,7 +1156,10 @@ function DevLine({
   onStop: () => void;
   onReveal: (agentId: string) => void;
 }) {
-  const found = serverIn(servers, worktree.path, dev.port);
+  /* A worktree is kept as its root was spelt, and a server's folder is the
+     kernel's: through a linked root the two differ (`shared/pathlinks.ts`). */
+  const { projects } = api.useKururu();
+  const found = serverIn(servers, worktree.path, dev.port, projectLinks(projects));
   const url = terminal.exited
     ? null
     : found

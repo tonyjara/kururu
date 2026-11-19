@@ -55,6 +55,7 @@ import type { LendAsk, SecretsView } from "./secrets";
 import type { WorkspaceDatabase } from "./databases";
 import type { NotifyEvent, NotifySettings } from "./notify";
 import type { MergeResolution, ProjectSettings } from "./projects";
+import type { PathLink } from "./pathlinks";
 import type { InterfaceAppearance, TerminalAppearance } from "./theme";
 import type { BarSettings } from "./statusbar";
 import type { UseAnswer, UseRule, VaultAsk, WireValue } from "./vaultitems";
@@ -345,6 +346,14 @@ export interface WorkspaceProject {
    * one is choosing among roots, never naming one.
    */
   choices: string[];
+  /**
+   * The symbolic links this workspace's root, its choices and its root in
+   * Settings are spelt through, when any is: what a client follows before
+   * comparing one of them with a path the kernel reported, such as a dev
+   * server's cwd, which never has a link in it (`shared/pathlinks.ts`).
+   * Absent when there is none, which is nearly always.
+   */
+  links?: PathLink[];
 }
 
 /**

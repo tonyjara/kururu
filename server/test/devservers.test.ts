@@ -35,6 +35,21 @@ describe("matchDevCommand", () => {
     expect(matchDevCommand("bun run serve.ts")).toBeNull();
   });
 
+  /** bpay's dashboard on :3021, a Nuxt build run as it is in production (the owner, 2026-11-19: "still can't see any dev servers for bpay"). */
+  it("finds a built server served on this Mac", () => {
+    expect(matchDevCommand("node --env-file-if-exists=.env.local --env-file=/Users/me/.config/bpay/dashboard.env .output/server/index.mjs")).toBe("nitro");
+    expect(matchDevCommand("node /p/apps/web/.output/server/index.mjs")).toBe("nitro");
+    expect(matchDevCommand("bun '.output/server/index.mjs'")).toBe("nitro");
+    expect(matchDevCommand("next start -p 3000")).toBe("next start");
+    expect(matchDevCommand("npx astro preview")).toBe("astro preview");
+    expect(matchDevCommand("nuxt preview")).toBe("nuxt preview");
+    expect(matchDevCommand("remix-serve ./build/server/index.js")).toBe("remix-serve");
+    // A build's entry by any other name is still nobody's server.
+    expect(matchDevCommand("node server/index.mjs")).toBeNull();
+    expect(matchDevCommand("node .output/public/index.mjs")).toBeNull();
+    expect(matchDevCommand("next build")).toBeNull();
+  });
+
   it("Metro is told from the rest", () => {
     expect(isMetro("expo start")).toBe(true);
     expect(isMetro("react-native start")).toBe(true);

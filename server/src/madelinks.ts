@@ -269,13 +269,25 @@ function rootAllowed(root: string): boolean {
   }
 }
 
+/** A folder with its links followed, or as it is when it cannot be read. */
+function realOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
 /**
  * The workspace on screen if its project holds this root, else the first one
  * in the profile whose project does, else null — the drawer's link, which
  * names none. The projects are the branch walk's (`pollBranches`).
  */
 function workspaceOfRoot(root: string): string | null {
-  const holds = (dir: string) => inside(dir, root);
+  // Real on both sides as well as spelt: a root an agent wrote is often the
+  // disk's, under a workspace whose root goes through a link (`shared/pathlinks.ts`).
+  const real = realOr(root);
+  const holds = (dir: string) => inside(dir, root) || inside(realOr(dir), real);
   const here = state.projects.find((p) => p.workspaceId === workspaces.activeWorkspace.id);
   if (here && [here.root, ...here.choices].some(holds)) return here.workspaceId;
   return state.projects.find((p) => [p.root, ...p.choices].some(holds))?.workspaceId ?? null;

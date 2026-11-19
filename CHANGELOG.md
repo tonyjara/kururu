@@ -322,6 +322,17 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **A build you serve on this Mac is in Dev servers.** A Nuxt or other Nitro
+  build started with `node .output/server/index.mjs`, `next start`, `astro
+  preview`, `nuxt preview` and `remix-serve` were never listed, so a
+  dashboard run as it runs in production had no row and no link for the
+  phone.
+
+- **A workspace whose root is a symbolic link names its dev servers.** A
+  root such as `~/code/app`, a link to another folder, is now matched
+  against the real folder the server runs in, for a dev server's name, a
+  card's dev line, the workspace a link opens in and Kuru's chat tags.
+
 - **The OpenRouter balance is back on the bottom bar.** Since the key moved
   to the Keychain, every server start after the first looked for it before
   the Keychain was open, took the placeholder in the file for no key, and

@@ -36,7 +36,25 @@ const DEV_COMMANDS = [
   "http-server", "live-server", "rails server", "swift run",
   "manage.py runserver", "flask run", "fastapi dev", "uvicorn",
   "php artisan serve", "hugo server", "jekyll serve", "dotnet watch",
+  // A build served on this Mac is reached the same way as a dev server, and is
+  // as much the thing a phone wants to open: the owner's bpay dashboard runs
+  // its production build on :3021 and was the one server the list left out
+  // (2026-11-19). ghosttown's defaults stop above; these go past them.
+  "next start", "astro preview", "nuxt preview", "remix-serve", "react-router-serve",
 ];
+
+/**
+ * A built Nitro server — Nuxt, TanStack Start, SolidStart and Analog all put
+ * theirs at `.output/server/index.mjs` and start it with a bare `node`. Matched
+ * by its path because its name says nothing: `programName` reads a package's
+ * `index` as the folder above it, which here is `server`, and `node
+ * dist/index.js` is every other build on the disk, which is not a server.
+ */
+const NITRO_ENTRY = /(?:^|\/)\.output\/server\/index\.mjs$/;
+
+function isNitroEntry(token: string): boolean {
+  return NITRO_ENTRY.test(token.replace(/^['"]+|['"]+$/g, ""));
+}
 
 /** Script names that mean "dev server" when a package manager runs one. */
 const DEV_SCRIPTS = ["dev", "start", "serve", "watch"];
@@ -139,6 +157,7 @@ export function matchDevCommand(args: string): string | null {
   while (i < tokens.length && tokens.length - i > 0) {
     const token = tokens[i]!;
     if (isPreamble(token)) { i++; continue; }
+    if (isNitroEntry(token)) return "nitro";
     const name = programName(token);
     if (LAUNCHERS.has(name) && !PACKAGE_MANAGERS.has(name)) { i++; continue; }
 
@@ -155,6 +174,7 @@ export function matchDevCommand(args: string): string | null {
          manager a program, which is matched as if it had been typed alone. A
          word with a dot or a slash in it is a file the package manager runs
          (`bun run serve.ts`), whose name is nobody's program. */
+      if (isNitroEntry(script)) return "nitro"; // `bun .output/server/index.mjs`: bun is a runtime as well
       return /[./]/.test(script) ? null : matchDevCommand(rest.slice(at).join(" "));
     }
 

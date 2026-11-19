@@ -64,6 +64,7 @@
 import { cardCode } from "./board";
 import { chipsIn } from "./chips";
 import type { KuruItem, NoticeItem } from "./kuru";
+import { followLinks, type PathLink } from "./pathlinks";
 import { splitReply } from "./reply";
 import { namesOf, plain, spaceOfKey, unaccent, visibleProjects, type Subprojects } from "./subprojects";
 
@@ -249,7 +250,16 @@ function projectsNamed(words: string, among: readonly BookProject[]): string[] {
  * made from, and its cards — since a card there ("MV-94 Yetapa") is about a
  * project as much as one on the workspace's own board.
  */
-export function tagBook(spaces: readonly TagSpace[], profile?: { name: string; cards: readonly CardWords[] }): TagBook {
+export function tagBook(
+  spaces: readonly TagSpace[],
+  profile?: { name: string; cards: readonly CardWords[] },
+  /**
+   * The links the roots are spelt through (`shared/pathlinks.ts`): a root
+   * through one is also known by where it leads, since a file Kuru names is
+   * often found under the server's real path of it.
+   */
+  links: readonly PathLink[] = [],
+): TagBook {
   const roots: { root: string; key: string }[] = [];
   const projects: BookProject[] = [];
   const homeForm = (path: string) => {
@@ -263,6 +273,8 @@ export function tagBook(spaces: readonly TagSpace[], profile?: { name: string; c
       // The same folder as a person writes it, from their home.
       const tilde = homeForm(root);
       if (tilde) roots.push({ root: tilde, key: space.key });
+      const real = followLinks(root, links);
+      if (real !== root) roots.push({ root: real, key: space.key });
     }
     for (const project of space.projects ?? []) {
       const at = root && project.dir ? `${root}/${project.dir}` : null;
@@ -270,7 +282,7 @@ export function tagBook(spaces: readonly TagSpace[], profile?: { name: string; c
         key: project.key,
         space: space.key,
         patterns: project.names.map((name) => namePattern(name, true)).filter((re): re is RegExp => re !== null),
-        paths: at ? [at, homeForm(at)].filter((p): p is string => p !== null) : [],
+        paths: at ? [...new Set([at, homeForm(at), followLinks(at, links)])].filter((p): p is string => p !== null) : [],
         rel: project.dir,
         rootName: root ? root.slice(root.lastIndexOf("/") + 1) : null,
       });

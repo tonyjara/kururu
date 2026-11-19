@@ -25,7 +25,8 @@
  * had been opened for it. (When the element picker lands it is injected by the
  * proxy, and this is the line that will have to go: the picker is worth a hop.)
  */
-import type { DevServer } from "../../shared/wire";
+import { type PathLink, uniqueLinks, withinLinked } from "../../shared/pathlinks";
+import type { DevServer, WorkspaceProject } from "../../shared/wire";
 
 /** Where a page is, reduced to the two fields that decide this. */
 export interface Origin {
@@ -102,10 +103,13 @@ function trimmed(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
-function within(path: string, root: string): boolean {
-  const r = trimmed(root);
-  const p = trimmed(path);
-  return p === r || p.startsWith(r === "/" ? "/" : `${r}/`);
+/**
+ * Every link the server found under the active profile's roots, once — what a
+ * root is followed through before it is compared with a dev server's folder,
+ * which is the kernel's and never spelt through one (`shared/pathlinks.ts`).
+ */
+export function projectLinks(projects: readonly WorkspaceProject[]): PathLink[] {
+  return uniqueLinks(projects.flatMap((project) => project.links ?? []));
 }
 
 /** A name or a folder reduced to what both spell alike: "Tile Bandit" and `tile-bandit`. */
@@ -153,11 +157,12 @@ function outranks(place: NamedRoot, best: NamedRoot): boolean {
  * repository's, then the folder's, then the program when not even the folder
  * could be read.
  */
-export function previewLabel(dev: DevServer, workspaces: readonly NamedRoot[] = []): string {
+export function previewLabel(dev: DevServer, workspaces: readonly NamedRoot[] = [], links: readonly PathLink[] = []): string {
   let best: NamedRoot | null = null;
   for (const place of workspaces) {
     if (!place.root) continue;
-    const holds = (dev.cwd && within(dev.cwd, place.root)) || (dev.repo && within(dev.repo, place.root));
+    const holds =
+      (dev.cwd && withinLinked(dev.cwd, place.root, links)) || (dev.repo && withinLinked(dev.repo, place.root, links));
     if (holds && (!best || outranks(place, best))) best = place;
   }
   if (best) return best.name;
@@ -173,7 +178,7 @@ export function previewLabel(dev: DevServer, workspaces: readonly NamedRoot[] = 
  * next free one after its own — and a project whose dev line starts two
  * servers has both in the worktree; the offered port is only the tie-break.
  */
-export function serverIn(servers: DevServer[], path: string, offered: number): DevServer | null {
-  const inside = servers.filter((dev) => dev.cwd === path || dev.cwd?.startsWith(`${path}/`));
+export function serverIn(servers: DevServer[], path: string, offered: number, links: readonly PathLink[] = []): DevServer | null {
+  const inside = servers.filter((dev) => dev.cwd !== undefined && withinLinked(dev.cwd, path, links));
   return inside.find((dev) => dev.port === offered) ?? inside[0] ?? null;
 }
