@@ -122,7 +122,7 @@ describe("who goes next", () => {
   it("closes a lane while the load is high, and lets the user's priority through", () => {
     const busy: Reading = { ...calm, load1: 30 };
     const w1 = waiter("w1", "build");
-    expect(decide(state([], [w1]), w1, busy, S, 0)).toMatchObject({ ok: false, reason: "load 30 is over 24 (2x 12 cores)" });
+    expect(decide(state([], [w1]), w1, busy, S, 0)).toMatchObject({ ok: false, reason: "load 30 is about 2.5× more work than its 12 cores can run at once, and this lane waits past 2× the cores" });
     expect(decide(state([], [w1], { W1: 10 }), w1, busy, S, 0).ok).toBe(true);
     // Maestro's gate is four times the cores.
     const m = waiter("w2", "maestro");

@@ -127,6 +127,18 @@ export interface SlotsDeps {
   changed: (view: SlotsView) => void;
   /** Whether a window is open, which is the only reason to read memory while nothing is queued. */
   watched: () => boolean;
+  /**
+   * The free memory somebody else has just read, in MB, or null when nobody
+   * has: the "This Mac" chip runs the same `vm_stat` on the process sweep's
+   * beat (`mac.ts`), and two forks for one figure was one too many.
+   */
+  freeMb?: () => number | null;
+  /**
+   * The machine in a line of plain words, for Kuru and `slot status`, or null
+   * before it has been read. In place of "load 146 on 12 cores", which Kuru
+   * passed on to the owner word for word and nobody could read.
+   */
+  machine?: () => string | null;
   store: SimPoolStore | null;
   now?: () => number;
   /** The load and memory, in place of the machine's: for tests. */
@@ -371,6 +383,11 @@ export class Slots {
     this.reading.load1 = loadavg()[0] ?? 0;
     this.reading.cores = cpus().length || 1;
     if (!this.busy() && !this.deps.watched()) return;
+    const lent = this.deps.freeMb?.() ?? null;
+    if (lent !== null && Number.isFinite(lent)) {
+      this.reading.freeMb = lent;
+      return;
+    }
     if (process.platform === "darwin") {
       try {
         const { stdout } = await run("vm_stat", [], { timeout: 5000 });
@@ -935,8 +952,10 @@ export class Slots {
     const v = this.view();
     const lines = [
       `slots  load ${v.load1} (build ≤${v.buildGate ?? "-"} maestro ≤${v.maestroGate ?? "-"})  free ${v.freeGb} GB (floor ${v.minFreeGb})  booted ${v.booted ?? "?"}/${v.bootedMax}`,
-      "",
     ];
+    const machine = this.deps.machine?.();
+    if (machine) lines.push(`this Mac  ${machine}`);
+    lines.push("");
     const pad = (s: string, n: number) => (s.length >= n ? `${s.slice(0, n - 1)} ` : s.padEnd(n));
     lines.push(`${pad("LANE", 9)}${pad("WHO", 15)}${pad("HELD", 10)}${pad("WHY", 35)}SIMULATOR / PORT`);
     const order: LeaseLane[] = [...LANES, "sim"];
@@ -974,7 +993,7 @@ export class Slots {
     const now = this.now();
     const v = this.view();
     const who = (agentId: string | null, fallback: string) => (agentId ? `${nameOf(agentId)} (as ${fallback})` : fallback);
-    const out = [`slots (the shared build and simulator queue; load ${v.load1} on ${v.cores} cores, ${v.freeGb} GB free):`];
+    const out = [`slots (the shared build and simulator queue; this Mac: ${this.deps.machine?.() ?? `load ${v.load1} on ${v.cores} cores, ${v.freeGb} GB free`}):`];
     for (const l of v.leases) out.push(`  - ${who(l.agentId, l.who)} holds ${l.lane === "sim" ? `simulator ${l.name ?? l.udid}` : l.lane} for "${l.why}" · ${fmtDur(now - l.since)} of ${fmtDur(l.until - l.since)}`);
     for (const w of v.waiting) {
       out.push(

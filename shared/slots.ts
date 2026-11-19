@@ -23,6 +23,7 @@
  * Pure, tested in `server/test/slots.test.ts`. No clock is read here: every
  * function that needs the time is handed it.
  */
+import { loadWords } from "./mac";
 import type { QueuedWait } from "./needs";
 
 /** The lanes, in the order `status` lists them. */
@@ -347,7 +348,8 @@ export function admission(lane: Lane, priority: boolean, reading: Reading, setti
   const mult = settings.load[lane];
   if (mult !== null && !priority) {
     const limit = mult * reading.cores;
-    if (reading.load1 > limit) reasons.push(`load ${round1(reading.load1)} is over ${round1(limit)} (${mult}x ${reading.cores} cores)`);
+    // Said as work against cores: "load 146 is over 24 (2x 12 cores)" was a sentence nobody waiting could read.
+    if (reading.load1 > limit) reasons.push(`load ${round1(reading.load1)} is ${loadWords(reading.load1, reading.cores)}, and this lane waits past ${mult}× the cores`);
   }
   if (lane !== "device" && reading.freeMb < settings.minFreeGb * 1024) {
     reasons.push(`free memory ${(reading.freeMb / 1024).toFixed(1)} GB is under ${settings.minFreeGb} GB`);

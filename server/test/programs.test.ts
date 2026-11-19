@@ -30,13 +30,13 @@ function snap(id: string, pid: number, agent: string | null, extra: Partial<Agen
   } as AgentSnapshot;
 }
 
-/** `ps -eo pid=,ppid=,rss=,args=`: two login shells, agy under one, claude under the other, a plain shell. */
+/** `ps -eo pid=,ppid=,rss=,pcpu=,args=`: two login shells, agy under one, claude under the other, a plain shell. */
 const PS = `
-  100     1  2048 /bin/zsh -l -c agy --model claude-opus-5-5-high --prompt-interactive hello
-  101   100 90000 /Users/me/.local/bin/agy --model claude-opus-5-5-high --prompt-interactive hello
-  200     1  2048 /bin/zsh -l -c claude
-  201   200 90000 claude --dangerously-skip-permissions
-  300     1  2048 /bin/zsh -l
+  100     1  2048  0.0 /bin/zsh -l -c agy --model claude-opus-5-5-high --prompt-interactive hello
+  101   100 90000  3.1 /Users/me/.local/bin/agy --model claude-opus-5-5-high --prompt-interactive hello
+  200     1  2048  0.0 /bin/zsh -l -c claude
+  201   200 90000 12.4 claude --dangerously-skip-permissions
+  300     1  2048  0.0 /bin/zsh -l
 `;
 
 describe("programsUnder", () => {

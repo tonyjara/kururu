@@ -48,6 +48,7 @@ import type { MergeReply, MergeResolution, ProjectSettings, WorktreeOutcome, Wor
 import type { NotifySettings } from "../../shared/notify";
 import type { OpenRouterStatus } from "../../shared/openrouter";
 import type { SlotsView } from "../../shared/slots";
+import { setMac } from "./mac";
 import type { WebStatus } from "../../shared/web";
 import type { ChannelKind, ChannelsStatus, TelegramStatus } from "../../shared/channels";
 import type { BackupStatus } from "../../shared/backup";
@@ -398,6 +399,10 @@ function connect(): void {
         break;
       case "slots":
         set({ slots: msg.slots });
+        break;
+      case "mac":
+        // Its own store, so a figure that moves every few seconds redraws one chip. See `mac.ts`.
+        setMac(msg.mac);
         break;
       case "vault-asks":
         set({ vaultAsks: Array.isArray(msg.asks) ? msg.asks : [] });

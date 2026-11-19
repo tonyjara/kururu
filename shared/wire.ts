@@ -41,6 +41,7 @@ import type { SnapshotDelta } from "./snapdelta";
 import type { LaunchSettings } from "./launchers";
 import type { ReloadAsk, ReloadHold, ReloadPage } from "./reload";
 import type { OpenRouterStatus } from "./openrouter";
+import type { MacView } from "./mac";
 import type { SlotsView } from "./slots";
 import type { WebStatus } from "./web";
 import type { ChannelKind, ChannelsStatus } from "./channels";
@@ -561,6 +562,8 @@ export type ServerMessage =
    * `shared/slots.ts`.
    */
   | { type: "slots"; slots: SlotsView }
+  /** What this Mac is using now and who has it, a process sweep apart while a window is open. See `shared/mac.ts`. */
+  | { type: "mac"; mac: MacView }
   /**
    * The web for agents, as Settings → Web draws it: the providers in their
    * order, each with its switch, its fields (a secret only as its hint), its

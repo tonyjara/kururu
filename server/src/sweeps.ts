@@ -20,7 +20,7 @@ import { DEV_SCAN_MS, GIT_SCAN_MS, MACHINE_POLL_MS, OPENROUTER_POLL_MS, USAGE_PO
 import { PING_MS } from "./backpressure";
 import { codexUsageSnapshot, pollCodexUsage } from "./codexusage";
 import { agyUsageSnapshot, pollAgyUsage } from "./agy";
-import { broadcast, checkLiveness, clients, harness, host, memory, overlay, pushSnapshot, state, usageReader, windows, workspaces } from "./context";
+import { broadcast, checkLiveness, clients, harness, host, mac, memory, overlay, pushSnapshot, state, usageReader, windows, workspaces } from "./context";
 import { listenersOf, scanDevServers, stopDevServer } from "./devservers";
 import { NVIM_SCAN_MS, nvimCensus, pollEditors } from "./editors";
 import { allowRoot } from "./files";
@@ -236,6 +236,8 @@ async function pollMemory(procs: ProcRows): Promise<void> {
  * read and the write back.
  */
 function pollPrograms(procs: ProcRows): void {
+  // The first sweep can run before the host is attached, when a new host is slow to start.
+  if (!host) return;
   // Adopts a list the host has pushed (or `create` appended to) since the last
   // fill, so the blanks read are the host's current ones.
   host.agents = programs.apply(host.agents);
@@ -438,6 +440,8 @@ const sweepProcesses = sweep("processes", async () => {
     sweep("memory", () => pollMemory(procs))(),
     sweep("programs", () => pollPrograms(procs))(),
     sweep("tunnels", async () => seeTunnels(procs))(),
+    // What this Mac is using, and who has it, off the same table. See `mac.ts`.
+    sweep("this Mac", async () => mac?.see(procs))(),
   ]);
 });
 let procTimer: ReturnType<typeof setTimeout> | null = null;

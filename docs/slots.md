@@ -46,7 +46,8 @@ Maestro run on it; another agent's always does.
 The load is the 1-minute load average (`os.loadavg`), the memory what macOS
 hands out without swapping (free, inactive, speculative and purgeable pages off
 `vm_stat`; `freemem` on Linux), read every five seconds while anything is
-queued or a window is open. A priority skips the load gate and never the memory
+queued or a window is open — borrowed from [the chip's reading](#this-mac)
+while it has a fresh one, so the two never fork for the same figure. A priority skips the load gate and never the memory
 floor: a Mac that swaps is slower for the user's agent too.
 
 Settings, all optional, in `~/.config/kururu/slots.json` — every default is the
@@ -119,10 +120,10 @@ written in the last hour or belonging to a checkout a build lease names.
 
 ## Where it shows
 
-- **The footer**: this Mac's load and free memory beside the allowances
-  (`Load.tsx`), in the colour of the queue's own gates — over a build's, a
-  warning; over a test's, critical — with the lanes, leases and waiters on a
-  hover.
+- **The footer**: the "This Mac" chip beside the allowances (`Load.tsx`), in
+  the colour of the queue's own gates — over a build's, a warning; over a
+  test's, critical — with the lanes, leases and waiters on a hover. What it
+  draws is [the Mac, not the load](#this-mac).
 - **Under the agents' pane** of a workspace marked mobile: one line, what the
   agents in that pane hold and wait for ("P5 · waiting for build behind P2 (14m
   in)"). Always there in such a pane — "nothing held here" when idle — because
@@ -133,9 +134,51 @@ written in the last hour or belonging to a checkout a build lease names.
   queue jammed, a lane held by something forgotten, or the user waiting without
   having said so. The server's clock decides the ten minutes.
 - **Kuru**: `kururu_status` has a slots section while anything is held or
-  waiting, naming agents the way it names them everywhere;
+  waiting, naming agents the way it names them everywhere, and saying the
+  Mac in a line of plain words (`macLine`) rather than a bare load;
   `prioritize_agent` is the user-is-waiting priority, listed only where slots
   are in use (a pool, a lease, a waiter, or a workspace marked mobile).
+
+## This Mac
+
+The chip drew the 1-minute load until 2026-11-19 — "146 · 7 GB", and "146 on
+12 cores" in its popover — and the owner asked what that even meant. A load
+has no ceiling and no unit, and "7 GB free" was said of a Mac with 20 GB
+pushed out to swap. So the chip says what is in use (`shared/mac.ts`,
+`server/src/mac.ts`):
+
+- **Processors**: the share of every core in use over the last beat, with the
+  last three minutes drawn beside it. The load is a sentence in the popover
+  (`loadWords`: "about 12× more work than its 12 cores can run at once"),
+  since it is what the queue admits by and the only figure that says how long
+  the line for a core is. It is a minute's average, and the words say so: a
+  Mac at 20% with a load still over the gate is "Settling", not "Overloaded".
+- **Memory**: used of total in Activity Monitor's parts (apps, wired,
+  compressed; the cache apart), the pressure macOS reports
+  (`kern.memorystatus_vm_pressure_level`) and what is in swap.
+- **What is using it**, by processor or by memory: a process is filed under
+  the kururu terminal it is under (named by its card's code, with its
+  workspace and the heaviest programs in it), else the simulator it is under
+  (a `launchd_sim`, named from its `device.plist`), else its app. A share is
+  of every core, so the rows add up to the headline.
+
+The colour is unchanged in meaning: `macMood` makes `loadSeverity`'s
+comparisons and adds the memory pressure, and a test holds the two together.
+A waiter's reason says the load the same way ("load 30 is about 2.5× more
+work than its 12 cores can run at once, and this lane waits past 2× the
+cores").
+
+**It must not be one of the things it reports.** The share is two `os.cpus()`
+readings apart, no fork. Who is using it comes off the process sweep's own
+`ps` (`proctable.ts`, one more column, `pcpu`), so there is no second read and
+no `top`. Memory is `vm_stat`, which the queue ran on its own timer and now
+borrows from here (`SlotsDeps.freeMb`), and one `sysctl`; both run beside the
+sweep rather than in it, and neither runs while no window is open. The booted
+simulators are counted off the same table, so `xcrun` is still not run for
+anybody who has not asked about one. The reading goes to the pages as its own
+message (`mac`) into its own store (`web/src/mac.ts`): it moves every three
+seconds, and through the session's state it would have redrawn every
+component that reads it.
 
 ## A workspace marked mobile
 

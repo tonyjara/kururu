@@ -1813,8 +1813,9 @@ kbd {
   color: var(--danger);
 }
 
-/* This Mac's load — see `Load.tsx`. The figure carries the colour of the slot
-   queue's gates, as the balance carries its runway's. */
+/* This Mac — see `Load.tsx`. The chip's figure is the share of the cores in
+   use, in the colour of the slot queue's gates and the memory pressure
+   (`macMood`), as the balance carries its runway's. */
 .load-figure {
   font-family: var(--mono);
   font-size: var(--fs-sm);
@@ -1828,10 +1829,21 @@ kbd {
 .load-figure[data-severity="critical"] {
   color: var(--danger);
 }
-.load-free {
+/* Memory, beside the share: dimmer than it while nothing is wrong, since the
+   processors are what the chip leads with. */
+.load-free:not([data-severity="warning"]):not([data-severity="critical"]) {
   color: var(--dim);
 }
-:root[data-narrow] .load-free {
+/* The dial wears the worse of the two figures' colours, which on a phone is
+   the only place the memory's shows. */
+.load-mark[data-severity="warning"] {
+  color: var(--working);
+}
+.load-mark[data-severity="critical"] {
+  color: var(--danger);
+}
+:root[data-narrow] .load-free,
+:root[data-narrow] .mac-spark-chip {
   display: none;
 }
 .load-waiting {
@@ -1848,8 +1860,214 @@ kbd {
 .sb-load .sb-usage-chip {
   gap: 5px;
 }
+/* Wider than the allowances' and, since it lists who is using the Mac, as
+   tall as it needs up to the window: it scrolls inside itself past that. */
 .sb-load .usage-pop {
-  width: 320px;
+  width: 340px;
+  max-height: calc(100vh - var(--bar-h, 28px) - 24px);
+  overflow-y: auto;
+}
+
+/* The last three minutes of the processors. One series on a fixed 0–100
+   scale, so it is drawn in the chrome's own greys: the colour on this chip
+   belongs to the figure, which is the part that means something. */
+.mac-spark-chip {
+  width: 36px;
+  height: 12px;
+  flex: none;
+  overflow: visible;
+}
+.mac-spark {
+  display: block;
+  width: 100%;
+  height: 36px;
+  margin-top: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.mac-spark-line {
+  fill: none;
+  stroke: var(--dim);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.mac-spark-area {
+  fill: var(--dim);
+  opacity: 0.18;
+}
+.mac-spark-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  vector-effect: non-scaling-stroke;
+}
+.mac-spark-at {
+  stroke: var(--text);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The popover's verdict: a word at the head's right, and a sentence under it. */
+.mac-word {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--dim);
+}
+.mac-word[data-severity="warning"] {
+  color: var(--working);
+}
+.mac-word[data-severity="critical"] {
+  color: var(--danger);
+}
+.mac-line {
+  padding: 0 12px;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--dim);
+}
+.mac-block {
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px;
+}
+.mac-figure {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  flex: none;
+}
+
+/* Memory, in Activity Monitor's parts. A chart's colours in their fixed order
+   (`--chart-*`), the cache in the neutral one since it is given back the
+   moment something asks, and what is free left as the track. The gap between
+   two parts is the popover's own ground. */
+.mac-mem {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  margin-top: 4px;
+}
+.mac-mem-part {
+  flex: 0 1 0;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--chrome-high);
+}
+.mac-mem-part[data-part="app"],
+.mac-dot[data-part="app"] {
+  background: var(--chart-1);
+}
+.mac-mem-part[data-part="wired"],
+.mac-dot[data-part="wired"] {
+  background: var(--chart-2);
+}
+.mac-mem-part[data-part="compressed"],
+.mac-dot[data-part="compressed"] {
+  background: var(--chart-3);
+}
+.mac-mem-part[data-part="cached"],
+.mac-dot[data-part="cached"] {
+  background: var(--chart-rest);
+  opacity: 0.6;
+}
+.mac-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.mac-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.mac-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  flex: none;
+}
+.mac-pressure[data-pressure="normal"] {
+  color: var(--dim);
+}
+.mac-pressure[data-pressure="warn"] {
+  color: var(--working);
+}
+.mac-pressure[data-pressure="critical"] {
+  color: var(--danger);
+}
+
+/* Who has it. The figure the list is in order of is the lit one; the bar
+   under a row is its share of the whole Mac, in the same grey as the
+   drawing above. */
+.mac-using-head {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.mac-seg {
+  padding: 1px;
+  flex: none;
+}
+.mac-seg .st-seg-btn {
+  padding: 1px 7px;
+  font-size: var(--fs-xs);
+}
+.mac-rows {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.mac-empty {
+  padding: 0;
+  margin-top: 6px;
+}
+.mac-row-name {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mac-row-where {
+  color: var(--dimmer);
+}
+.mac-row-figures {
+  display: inline-flex;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--dimmer);
+  flex: none;
+}
+.mac-row-on {
+  color: var(--text);
+}
+.mac-row-bar {
+  display: block;
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: var(--chrome-high);
+  overflow: hidden;
+}
+.mac-row-fill {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--dim);
+  transition: width 400ms ease-out;
 }
 
 /* The slot queue under a pane: what the agents in it hold and wait for. See

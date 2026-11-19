@@ -193,6 +193,20 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **The "This Mac" chip says what the Mac is using, not its load.** It used
+  to read "146 · 7 GB", and "load 146 on 12 cores" when opened, which nobody
+  could read. Now the bottom bar shows how much of the processors is in use,
+  with the last three minutes drawn beside it, and memory used of what there
+  is. Open it for a sentence on how the Mac is doing and why; memory by
+  apps, system, compressed and cached, with macOS's own pressure and what
+  has been pushed out to disk; and what is using it, by processor or by
+  memory — each kururu terminal by its card and workspace with the programs
+  under it, each booted simulator, and every other app. The load is still
+  there, in words: "about 12× more work than its 12 cores can run at once".
+  The colours mean what they did (amber, builds wait; red, tests too), and
+  now also turn for memory pressure. Kuru and `slot status` say the Mac the
+  same way.
+
 - **A message in Kuru's chat collapses by its header.** Each message's
   header line starts with a minus: click it, or anywhere on the header (the
   time, the empty space), and the message folds to one row under a plus;

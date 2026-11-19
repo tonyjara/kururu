@@ -16,6 +16,8 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { type WebSocket, WebSocketServer } from "ws";
 import { cardCode, cardPrompt } from "../../shared/board";
+import { agentLabel } from "../../shared/labels";
+import { macLine, type MacRoot, type ProcUse } from "../../shared/mac";
 import { remoteShellOf } from "../../shared/machines";
 import { countsAsAgent, type Profile } from "../../shared/model";
 import { claudeLastReply, parseRolloutListing } from "../../shared/sessions";
@@ -64,6 +66,7 @@ import {
   sendState,
   sleeper,
   slots,
+  mac,
   vault,
   snapshot,
   snapshots,
@@ -116,6 +119,7 @@ import { END_AFTER_MS } from "../../shared/automation";
 import { notifyGate } from "../../shared/notify";
 import { resumeCommand } from "../../shared/launchers";
 import { claudeTranscriptPath, readTail as readSessionTail } from "./sessions";
+import { MacMeter } from "./mac";
 import { Slots, writeSlotCommand } from "./slots";
 import { machineStore } from "./keychain";
 import { readAsksFile, Vault, writeAsksFile } from "./vaultstore";
@@ -356,6 +360,8 @@ function admitClient(ws: WebSocket, watcher: string | null, deltas: boolean): vo
   send(ws, { type: "secrets", secrets: secrets.view() });
   send(ws, { type: "openrouter", openrouter: openRouterSnapshot() });
   send(ws, { type: "slots", slots: slots.view() });
+  const using = mac.view();
+  if (using) send(ws, { type: "mac", mac: using });
   send(ws, { type: "vault-asks", asks: vault.asks() });
   send(ws, { type: "web", web: web.status() });
   send(ws, { type: "voice", voice: voice.status() });
@@ -404,6 +410,43 @@ function slotWhoOf(agentId: string): string | null {
   const agent = host.find(agentId);
   const name = agent?.titleOverride || agent?.title || null;
   return name ? name.replace(/\s+/g, " ").trim().slice(0, 40) : agentId;
+}
+
+/**
+ * Every live terminal as the "This Mac" chip names it (`mac.ts`): by its
+ * card's code when a card runs it, else by the title it was given or set
+ * itself, else by what it is running — never by a bare id, which nobody can
+ * place — and the workspace whose tab holds it.
+ */
+function macRoots(): MacRoot[] {
+  const roots: MacRoot[] = [];
+  for (const raw of host?.agents ?? []) {
+    if (raw.exited || !raw.pid) continue;
+    const agent = overlay(raw);
+    const who = slotWhoOf(agent.id);
+    roots.push({
+      pid: agent.pid,
+      agentId: agent.id,
+      name: who && who !== agent.id ? who : agentLabel(agent),
+      workspace: workspaces.placeOf(agent.id)?.workspace ?? null,
+    });
+  }
+  return roots;
+}
+
+/**
+ * Kururu's own processes that no app bundle names: this server, the runner
+ * over it, and the pty host, found as the terminals' parent and believed only
+ * when its command line says so (`hostPidOf` in `footprint.ts` argues why).
+ */
+function kururuPids(procs: ReadonlyMap<number, ProcUse>): Set<number> {
+  const own = new Set<number>([process.pid]);
+  if (process.ppid > 1 && /run\.mjs|Kururu runner/.test(procs.get(process.ppid)?.args ?? "")) own.add(process.ppid);
+  for (const agent of host?.agents ?? []) {
+    const parent = agent.pid ? procs.get(agent.pid)?.ppid : undefined;
+    if (parent && parent > 1 && /ptyhost/i.test(procs.get(parent)?.args ?? "")) own.add(parent);
+  }
+  return own;
 }
 
 /**
@@ -673,11 +716,22 @@ export async function attach(port: Port): Promise<void> {
     },
   }));
   sleeper.start();
+  provide("mac", new MacMeter({
+    roots: macRoots,
+    self: kururuPids,
+    watched: () => windows() > 0,
+    changed: (view) => broadcast({ type: "mac", mac: view }),
+  }));
   provide("slots", new Slots({
     agentAlive: (agentId) => host.isLive(agentId),
     whoOf: slotWhoOf,
     changed: (view) => broadcast({ type: "slots", slots: view }),
     watched: () => windows() > 0,
+    freeMb: () => mac.freeMb(),
+    machine: () => {
+      const using = mac.view();
+      return using ? macLine(using) : null;
+    },
     store,
   }));
   writeSlotCommand();

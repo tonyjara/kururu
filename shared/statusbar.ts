@@ -29,7 +29,7 @@ export const BAR_ITEMS: ReadonlyArray<{ id: BarItem; label: string; hint: string
   { id: "claude", label: "Claude", hint: "Your Claude plan's allowance, a ring a window." },
   { id: "codex", label: "Codex", hint: "Codex's allowance, as its last session recorded it." },
   { id: "agy", label: "Antigravity", hint: "Antigravity's quota, as agy last reported it." },
-  { id: "load", label: "This Mac", hint: "Load, free memory and the slot queue. Hiding it changes nothing behind it." },
+  { id: "load", label: "This Mac", hint: "Processors and memory in use, what is using them, and the slot queue. Hiding it changes nothing behind it." },
   { id: "machines", label: "Machines", hint: "Your other computers, in the colour of the worst load." },
   { id: "nodes", label: "Nodes", hint: "The other kururus, their workspaces and what needs you there." },
   { id: "openrouter", label: "OpenRouter", hint: "Your balance, once a key is set." },

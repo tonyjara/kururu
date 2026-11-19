@@ -51,6 +51,7 @@ import { WindowReloads } from "./reload";
 import { Secrets } from "./secrets";
 import type { Grid } from "./sizing";
 import { Sleeper } from "./sleep";
+import type { MacMeter } from "./mac";
 import type { Slots } from "./slots";
 import type { Vault } from "./vaultstore";
 import type { Automations } from "./automations";
@@ -207,6 +208,8 @@ export let screens!: OnScreen;
 export let sleeper!: Sleeper;
 /** The build and simulator queue agents share. See `slots.ts`. */
 export let slots!: Slots;
+/** What this Mac is using and who has it, for the bar's chip. See `mac.ts`. */
+export let mac!: MacMeter;
 /** The things this kururu does on a schedule, and the clock that fires them. See `automations.ts`. */
 export let automations: Automations | null = null;
 /** The database: boards, conversations and the voice's lists. Opened in `attach()`, before anything is served. See `store.ts`. */
@@ -831,6 +834,7 @@ interface Provided {
   screens: typeof screens;
   sleeper: typeof sleeper;
   slots: typeof slots;
+  mac: typeof mac;
   store: typeof store;
   usageReader: UsageReader | null;
   usageLaunches: Launches | null;
@@ -886,6 +890,9 @@ const assigners: { [K in keyof Provided]: (value: Provided[K]) => void } = {
   },
   slots: (value) => {
     slots = value;
+  },
+  mac: (value) => {
+    mac = value;
   },
   automations: (value) => {
     automations = value;

@@ -291,6 +291,12 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **A slot lease ends with the terminal it was taken in, and only the server holds
   the line** (`server/src/slots.ts`); `xcrun` only once a simulator is asked
   about. → [more](docs/invariants.md#the-slot-queue)
+- **The "This Mac" chip must not be one of the things it reports** — the
+  cores' share off `os.cpus()`, who has them off the sweep's own `ps`, memory
+  off the `vm_stat` the queue already ran; no `top`, no second `ps`, nothing
+  forked while no window is open (`server/src/mac.ts`). Its colour is the
+  queue's gates and the memory pressure, never a third rule. →
+  [slots](docs/slots.md#this-mac)
 - **While the talk key is hooked system-wide, the floating pill is the only voice
   client on this Mac** — a listen-only tap, and a key both saw fires once. →
   [more](docs/invariants.md#the-talk-key-everywhere)

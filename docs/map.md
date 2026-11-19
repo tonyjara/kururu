@@ -35,6 +35,7 @@ in this folder.
 | `kurusearch.ts` | What a search of Kuru's chat matches and which words it lights: exact or a typo away, every word of the query, on the words a line draws, ranges kept through accent folding. Pure, tested. See [voice](voice.md#the-drawer) |
 | `made.ts` | What an agent made: the paths in a reply, which of them are the deliverable (a document presented or changed alone, code presented and few), and the drawer's split of a reply into words and paths. Pure, tested. See [layout](layout.md#what-an-agent-made) |
 | `needs.ts` | What needs you across a profile's workspaces — an agent asking, one waiting ten minutes in the slot queue, a card in Review, a turn ended unseen, a card whose agent went — and the walk to the next. Pure, tested |
+| `mac.ts` | What this Mac is using, in words: the share of the cores (`cpuShare`), a load as work against cores (`loadWords`), `vm_stat` as Activity Monitor's parts, who a process is filed under — terminal, simulator, app (`groupConsumers`) — and the chip's colour and sentence (`macMood`) |
 | `slots.ts` | The slot queue's rule: the lanes and their settings, the state and its checks, who may take a lane now (`decide`, the load and memory gates), a project's simulator pool and what a waiter for one gets (`planSim`), `vm_stat` and `simctl` read, the window's `SlotsView`, the lines under a pane, and the brief a mobile workspace's card runs start with. Pure, tested. See [slots](slots.md) |
 | `notecards.ts` | The cards the menu bar offers to pop out as note windows: what needs you, by `needs.ts`, then the profile's board a column at a time. Pure, tested |
 | `channels.ts` | Other doors into that conversation — Telegram. The kinds and their marks, the settings, `judge` (the allow-list decision for one message), pairing codes, splitting a reply, `replySpoken`, the status a window draws; among nodes, the roster's copy of the settings, `routeOf`, the marks and the reply map. Pure, tested. See [channels](channels.md) |
@@ -134,6 +135,7 @@ in this folder.
 | `src/sizing.ts` | How big a terminal is when several panes have an opinion |
 | `src/cwd.ts` | Where a process *is*, not where it was spawned. One `lsof` — or one for many, for the Processes page's nvims |
 | `src/memory.ts` | What each terminal costs the machine, off `ps`. Rounded first |
+| `src/mac.ts` | The "This Mac" chip's reads: the cores' share off `os.cpus()`, memory off `vm_stat` and one `sysctl`, who is using both off the process sweep's own table, a simulator's name off its `device.plist`. Nothing forked while no window is open. See [slots](slots.md#this-mac) |
 | `src/footprint.ts` | Settings → Processes: each terminal's tree read with argv — agents, nvims, dev servers counted once each — and every nvim on the machine, placed in a tab or under an app. Processes are pid *and* start time. Only when the page asks (`/api/footprint`, types in `shared/footprint.ts`) |
 | `src/record.ts` | Rolling raw-stream tape per agent, for bugs you can't reproduce |
 | `src/transcript.ts` | How full a Claude Code window is, off its transcript. Ported |
