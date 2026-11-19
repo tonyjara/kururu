@@ -44,8 +44,10 @@
  * logo together run the chat's edge.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { countAgents, countSummary, countWords, groupCounts, type AgentCount, type AgentGroup, type CountedAgent } from "../../../shared/agentcount";
 import { adoptQuote, type CardQuote } from "../../../shared/kuru";
-import { mascotFor } from "../../../shared/model";
+import { agentLabel, agentSummary } from "../../../shared/labels";
+import { mascotFor, type AgentSnapshot, type MascotConfig } from "../../../shared/model";
 import { needsOf, type Need } from "../../../shared/needs";
 import { nodesNeedCount } from "../../../shared/nodes";
 import { qualify, type NodeNeed } from "../../../shared/remote";
@@ -56,7 +58,7 @@ import "../float.css";
 import { floatNow, useFloat, usePageZoom } from "../float";
 import { useInterface } from "../fonts";
 import { installInk } from "../ink";
-import { kuruLive, leaveKuruSearch, listenForGifts, openKuru, quoteInKuru, referCardIn, toggleKuru, useKuruDrawer, type KuruLive } from "../kuru";
+import { closeKuru, kuruLive, leaveKuruSearch, listenForGifts, openKuru, quoteInKuru, referCardIn, toggleKuru, useKuruDrawer, type KuruLive } from "../kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "../needs";
 import { arrangedNeeds, useNeedsView } from "../needsorder";
 import * as api from "../session";
@@ -67,7 +69,7 @@ import { Icon } from "./Icon";
 import { KuruDrawer } from "./KuruDrawer";
 import { NeedsDrawer } from "./NeedsDrawer";
 import { QuoteToKuru } from "./Quote";
-import { Mascot } from "./Status";
+import { Mascot, Status } from "./Status";
 
 /** The logo's window, a side, in an app that does not say: what it was before it was given more room around the mark. */
 const LOGO_WINDOW = 64;
@@ -83,6 +85,25 @@ const FOOT_PX = 48;
 const SAMPLE_MS = 45;
 /** A bar and the gap after it, in CSS pixels: how many bars a width holds. */
 const BAR_PITCH = 5;
+
+/**
+ * The logo's page and the chat's talking directly, for the one thing the
+ * logo asks of the chat that the main process has no word for: open on the
+ * Agents list. Both pages are one origin in one session, so a
+ * `BroadcastChannel` reaches across without a new message through the main
+ * process — which would have wanted a new Kururu.app for a page that is
+ * newer than the app, and the pages often are (`FloatState` has why). The
+ * chat answers; a chat that does not (one loaded before this, or none yet)
+ * gets the old press, and opens on whatever it was left on.
+ */
+const FLOAT_CHANNEL = "kururu-float";
+/** How long the logo waits for the chat to answer before pressing as it always did. */
+const ANSWER_MS = 400;
+type FloatWord = { type: "agents" } | { type: "agents-heard" };
+
+function floatChannel(): BroadcastChannel | null {
+  return typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(FLOAT_CHANNEL);
+}
 
 /**
  * **Neither page is hot-updated; each reloads instead**, for the reason the
@@ -150,7 +171,26 @@ export function FloatLogo() {
   const float = useFloat();
   const zoom = usePageZoom();
   const phase = useVoicePhase();
-  const held = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const held = useRef<{ x: number; y: number; moved: boolean; agents: boolean } | null>(null);
+
+  /** The chat's answer to "open on the Agents list", and the press it saves. */
+  const channel = useRef<BroadcastChannel | null>(null);
+  const unanswered = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const here = floatChannel();
+    channel.current = here;
+    if (!here) return;
+    here.onmessage = (event: MessageEvent<FloatWord>) => {
+      if (event.data?.type !== "agents-heard" || !unanswered.current) return;
+      clearTimeout(unanswered.current);
+      unanswered.current = null;
+    };
+    return () => {
+      here.close();
+      channel.current = null;
+      if (unanswered.current) clearTimeout(unanswered.current);
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.add("float-page", "float-logo-page");
@@ -170,14 +210,31 @@ export function FloatLogo() {
   // What needs you, here and on the other nodes: the chip's own sum.
   const needs = useMemo(() => (profile ? needsOf(profile, agents, longWaits(slots)) : null), [profile, agents, slots]);
   const count = (needs?.count ?? 0) + nodesNeedCount(nodes?.nodes ?? []);
+  const crew = useMemo(() => (profile && needs ? countAgents(profile, agents, needs, nodes?.nodes ?? []) : null), [profile, agents, needs, nodes]);
+  const busy = crew ? crew.working + crew.waiting : 0;
 
   const bridge = desktop()?.float;
+  /** The badge pressed: the chat opened on the Agents list, or put away if that is what it shows. */
+  const pressAgents = () => {
+    const here = channel.current;
+    if (!here) {
+      bridge?.press();
+      return;
+    }
+    here.postMessage({ type: "agents" } satisfies FloatWord);
+    if (unanswered.current) clearTimeout(unanswered.current);
+    unanswered.current = setTimeout(() => {
+      unanswered.current = null;
+      bridge?.press();
+    }, ANSWER_MS);
+  };
   const grab = (event: React.PointerEvent<HTMLButtonElement>) => {
     held.current = null;
     if (event.button !== 0) return;
     // Captured, so a drag faster than the window can follow still lands here.
     event.currentTarget.setPointerCapture(event.pointerId);
-    held.current = { x: event.clientX, y: event.clientY, moved: false };
+    const agents = event.target instanceof Element && event.target.closest(".float-logo-agents") !== null;
+    held.current = { x: event.clientX, y: event.clientY, moved: false, agents };
   };
   const drag = (event: React.PointerEvent<HTMLButtonElement>) => {
     const from = held.current;
@@ -195,13 +252,16 @@ export function FloatLogo() {
     held.current = null;
     if (!from) return;
     if (from.moved) bridge?.drag("end");
-    else if (event.type === "pointerup") bridge?.press();
+    else if (event.type === "pointerup") {
+      if (from.agents) pressAgents();
+      else bridge?.press();
+    }
   };
 
   // Thinking hops; the voice at work is the mascot at rest but alive; anything else is still.
   const moving = live === "thinking" || phase === "listening" || phase === "speaking";
   const clip = mascot ? (live === "thinking" ? mascot.working : (mascot.idle ?? mascot.working)) : null;
-  const label = `${logoSays(live, phase)}${count > 0 ? ` · ${count} ${count === 1 ? "thing needs" : "things need"} you` : ""} — ${float?.open ? "close" : "open"} the conversation, or drag to move`;
+  const label = `${logoSays(live, phase)}${count > 0 ? ` · ${count} ${count === 1 ? "thing needs" : "things need"} you` : ""}${busy > 0 && crew ? ` · agents: ${countWords({ ...crew, quiet: 0 })}` : ""} — ${float?.open ? "close" : "open"} the conversation, or drag to move`;
 
   // The window's own size, as the app says it: this page may be newer than the app, and the mark has to stand in the middle of the window that is there.
   const size = float?.logo ?? LOGO_WINDOW;
@@ -233,6 +293,17 @@ export function FloatLogo() {
             {count > 99 ? "99+" : count}
           </span>
         )}
+        {/* The agents at work, on the opposite corner and quieter than the
+            count above it: a number in the working ink, and beside it the
+            waiting in the blocked ink when there are any. Nothing at all
+            while nothing is going — a badge reading 0 is a badge to ignore.
+            Its own press opens the chat on the Agents list. */}
+        {crew && busy > 0 && (
+          <span className={`float-logo-agents ${crew.waiting > 0 ? "float-logo-agents-waiting" : ""}`} title={`${countSummary(crew)}\n\nClick for the list`}>
+            {crew.working > 0 && <span className="float-logo-agents-working">{crew.working > 99 ? "99+" : crew.working}</span>}
+            {crew.waiting > 0 && <span className="float-logo-agents-asking">{crew.waiting > 99 ? "99+" : crew.waiting}</span>}
+          </span>
+        )}
       </button>
     </div>
   );
@@ -261,6 +332,41 @@ export function FloatPanel() {
   const needsOpen = useNeedsDrawer();
   const open = float?.open === true;
   const bridge = desktop()?.float;
+
+  /**
+   * The Agents list, the chat's third view and its own: the window has a
+   * sidebar for this, so it is a page's state and not a store `App` shares.
+   * Opening Kuru's drawer or the Needs list — by a chip, by a gift, by the
+   * main process — puts it away, as those two put each other away.
+   */
+  const [agentsOpen, setAgentsOpen] = useState(false);
+  const openAgents = useCallback(() => {
+    closeKuru();
+    closeNeeds();
+    setAgentsOpen(true);
+  }, []);
+  useEffect(() => {
+    if (kuruDrawer.open || needsOpen) setAgentsOpen(false);
+  }, [kuruDrawer.open, needsOpen]);
+
+  /** The logo's badge, pressed: the list, shown — or the chat put away, if the list is what it is showing. */
+  const asked = useRef({ open, agentsOpen });
+  asked.current = { open, agentsOpen };
+  useEffect(() => {
+    const here = floatChannel();
+    if (!here) return;
+    here.onmessage = (event: MessageEvent<FloatWord>) => {
+      if (event.data?.type !== "agents") return;
+      here.postMessage({ type: "agents-heard" } satisfies FloatWord);
+      if (asked.current.open && asked.current.agentsOpen) {
+        bridge?.close();
+        return;
+      }
+      openAgents();
+      if (!asked.current.open) bridge?.show?.();
+    };
+    return () => here.close();
+  }, [bridge, openAgents]);
 
   useEffect(() => {
     document.documentElement.classList.add("float-page", "float-panel-page");
@@ -314,7 +420,7 @@ export function FloatPanel() {
   useEffect(() => {
     const just = open && !wasOpen.current;
     wasOpen.current = open;
-    if (!open || kuruDrawer.open || needsOpen) return;
+    if (!open || kuruDrawer.open || needsOpen || agentsOpen) return;
     if (just) {
       openKuru();
       return;
@@ -323,7 +429,7 @@ export function FloatPanel() {
     // other is two stores changing, and the moment between them has neither.
     const timer = setTimeout(() => bridge?.close(), 0);
     return () => clearTimeout(timer);
-  }, [open, kuruDrawer.open, needsOpen, bridge]);
+  }, [open, kuruDrawer.open, needsOpen, agentsOpen, bridge]);
 
   /**
    * Words put into the box while the chat is shut — the marks of a pen this
@@ -367,11 +473,11 @@ export function FloatPanel() {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (event.target instanceof HTMLElement && event.target.closest(".kuru-composer, .menu, .scrim, .quote-pop")) return;
       event.preventDefault();
-      if (needsOpen || !leaveKuruSearch()) bridge?.close();
+      if (needsOpen || agentsOpen || !leaveKuruSearch()) bridge?.close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bridge, needsOpen]);
+  }, [bridge, needsOpen, agentsOpen]);
 
   /**
    * A conversation read at its foot stays at its foot while the chat is made
@@ -393,7 +499,8 @@ export function FloatPanel() {
     });
     const onScroll = (event: Event) => {
       const el = event.target;
-      if (!(el instanceof HTMLElement) || !el.matches(".kuru-list")) return;
+      // The Agents list reads from its top, so it is not one of these.
+      if (!(el instanceof HTMLElement) || !el.matches(".kuru-list:not(.float-agents-list)")) return;
       fromFoot = el.scrollHeight - el.scrollTop - el.clientHeight;
       if (el === watched) return;
       watch.disconnect();
@@ -401,7 +508,7 @@ export function FloatPanel() {
       watch.observe(el);
     };
     // A list just drawn opens at its foot and has not scrolled yet.
-    const first = panel.querySelector(".kuru-list");
+    const first = panel.querySelector(".kuru-list:not(.float-agents-list)");
     if (first) {
       watched = first;
       watch.observe(first);
@@ -425,6 +532,7 @@ export function FloatPanel() {
   const { order } = useNeedsView(profile?.key ?? null);
   const queue = useMemo(() => (needs ? arrangedNeeds(needs, order) : null), [needs, order]);
   const linked = nodes?.nodes ?? [];
+  const crew = useMemo(() => (profile && needs ? countAgents(profile, agents, needs, linked) : null), [profile, agents, needs, linked]);
 
   /**
    * What is handed to Kuru in the window while this chat is open — a card's
@@ -518,6 +626,11 @@ export function FloatPanel() {
         open: needsOpen,
       }}
       onNeeds={toggleNeeds}
+      agents={crew ? { working: crew.working, waiting: crew.waiting, quiet: crew.quiet, open: agentsOpen } : undefined}
+      onAgents={() => {
+        if (!agentsOpen) openAgents();
+        else bridge?.close();
+      }}
     />
   ) : null;
 
@@ -591,6 +704,24 @@ export function FloatPanel() {
           onProfileCard={(cardId) => go(cardId)}
         />
       )}
+      {shown && ready && agentsOpen && !kuruDrawer.open && !needsOpen && crew && (
+        <FloatAgents
+          count={crew}
+          profile={profile}
+          mascots={snapshot.mascots}
+          chips={chips}
+          onClose={() => bridge?.close()}
+          onAgent={(group, agentId) => {
+            api.revealAgent(group.node ? qualify(group.node.id, agentId) : agentId);
+            go();
+          }}
+          onGroup={(group) => {
+            if (group.node && group.workspaceKey) api.showNodeWorkspace(group.node.id, group.workspaceKey);
+            else if (group.workspaceId) api.switchWorkspace(group.workspaceId);
+            go();
+          }}
+        />
+      )}
       {shown && !ready && <p className="float-panel-wait muted">Connecting to the kururu server…</p>}
       {/* A reply's words selected and quoted go into this page's own box. */}
       {shown && ready && <QuoteToKuru onQuote={(reference, quote) => quoteInKuru(reference, quote)} />}
@@ -599,6 +730,110 @@ export function FloatPanel() {
 }
 
 function nothing(): void {}
+
+/**
+ * The Agents list: every agent of the profile and of the nodes that are up,
+ * by workspace, each workspace's waiting first, then working, then done and
+ * idle — the logo's badge, spelt out. Drawn in the Needs drawer's clothes
+ * (`needs-ws`, `needs-row`, the sidebar's own `Status` mark), because it is
+ * the same kind of list in the same window, and a third look would be one
+ * too many. A row is the door to that agent's terminal, a heading to its
+ * workspace; both bring the window up. Nothing here sorts, folds or acts on
+ * an agent: it is for seeing, and the window is for doing.
+ */
+function FloatAgents({
+  count,
+  profile,
+  mascots,
+  chips,
+  onClose,
+  onAgent,
+  onGroup,
+}: {
+  count: AgentCount;
+  profile: { workspaces: { id: string; mascotId: string | null }[] };
+  mascots: Parameters<typeof mascotFor>[0];
+  chips: React.ReactNode;
+  onClose: () => void;
+  onAgent: (group: AgentGroup, agentId: string) => void;
+  onGroup: (group: AgentGroup) => void;
+}) {
+  const mascotOf = (group: AgentGroup): ReturnType<typeof mascotFor> =>
+    mascotFor(mascots, group.workspaceId ? (profile.workspaces.find((w) => w.id === group.workspaceId)?.mascotId ?? null) : null);
+  return (
+    <aside className="kuru-drawer needs-drawer float-agents" role="dialog" aria-label="Agents">
+      <header className="kuru-head">
+        {chips}
+        <span className="kuru-head-spacer" />
+        <button className="sidebar-close kuru-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
+          <Icon name="close" />
+        </button>
+      </header>
+      <ol className="kuru-list needs-list float-agents-list">
+        <li className="float-agents-sum" role="status">
+          {count.groups.length === 0 ? "No agents are open." : <AgentWords count={count} />}
+        </li>
+        {count.groups.map((group) => {
+          const mascot = mascotOf(group);
+          return (
+            <li key={group.key} className="needs-ws float-agents-ws">
+              <button
+                className="needs-ws-head"
+                onClick={() => onGroup(group)}
+                onMouseDown={(event) => event.preventDefault()}
+                title={`Go to ${group.node ? `${group.name} on ${group.node.name}` : group.name}`}
+              >
+                <span className="needs-ws-name">
+                  {group.node && <span className="float-agents-node">{group.node.name} · </span>}
+                  {group.name}
+                </span>
+                <AgentWords count={groupCounts(group)} />
+              </button>
+              <ul className="needs-rows">
+                {group.agents.map((row) => (
+                  <AgentRow key={row.id} row={row} mascot={mascot} onGo={() => onAgent(group, row.id)} />
+                ))}
+              </ul>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
+  );
+}
+
+/** "3 working · 1 waiting · 5 idle", each figure in its state's ink and the zeros left out. */
+function AgentWords({ count }: { count: { working: number; waiting: number; quiet: number } }) {
+  const parts = [
+    count.working ? <span key="w" className="float-agents-working">{count.working} working</span> : null,
+    count.waiting ? <span key="q" className="float-agents-waiting">{count.waiting} waiting on you</span> : null,
+    count.quiet ? <span key="i" className="float-agents-quiet">{count.quiet} done or idle</span> : null,
+  ].filter((part) => part !== null);
+  return (
+    <span className="float-agents-words">
+      {parts.flatMap((part, i) => (i === 0 ? [part] : [<span key={`s${i}`} className="float-agents-sep"> · </span>, part]))}
+    </span>
+  );
+}
+
+function AgentRow({ row, mascot, onGo }: { row: CountedAgent; mascot: MascotConfig; onGo: () => void }) {
+  // Another node's agent has no command line here; its name is the parts of `agentLabel` it does carry.
+  const agent = row.agent as AgentSnapshot;
+  const name = "command" in row.agent ? agentLabel(agent) : agent.titleOverride || agent.agent || agent.lastAgent || "agent";
+  const doing = agentSummary(agent);
+  return (
+    <li className={`needs-row float-agents-row float-agents-row-${row.state}`}>
+      <button className="needs-go" onClick={onGo} onMouseDown={(event) => event.preventDefault()} title="Go to its terminal">
+        <Status agent={agent} mascot={mascot} />
+        <span className="needs-what">
+          <span className="needs-title">{name}</span>
+          {doing && <span className="needs-why">{doing}</span>}
+        </span>
+        {row.state === "waiting" && <span className="float-agents-wants">waiting</span>}
+      </button>
+    </li>
+  );
+}
 
 /** Which of the chat's far edges a handle drags. */
 type Edge = "height" | "width" | "both";

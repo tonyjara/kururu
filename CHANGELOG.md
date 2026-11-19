@@ -15,6 +15,14 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **The floating Kuru shows your agents.** A small count on the logo's
+  lower corner says how many agents are working, in orange, and how many
+  are waiting on you, in yellow, beside it; it is gone while nothing is
+  going. Hover it for a line per workspace; click it for the Agents list
+  in the floating chat — working, waiting on you, and done or idle, by
+  workspace, the linked boxes' agents included — where a row takes you to
+  that agent's terminal and a heading to its workspace. The chat's header
+  has a chip for the list beside the Needs tray.
 - **Files in the vault.** A vault dialog can ask for a file — a certificate
   (.p12, .pfx, .pem), an Apple .p8, a service account's .json — instead of
   text: drop it on the field or press Choose file…, on the Mac or the

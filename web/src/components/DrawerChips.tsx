@@ -1,5 +1,6 @@
 /**
- * The two drawers' doors: what needs you, and Kuru.
+ * The two drawers' doors: what needs you, and Kuru — and in the floating
+ * Kuru's chat a third, its Agents list.
  *
  * A component of their own since 2026-10-18, because they stopped having one
  * home. They were the right half of the status bar, and the bar under the
@@ -14,6 +15,7 @@
  * A phone keeps them in the bar along the bottom, with the rest of what a
  * thumb reaches for — see `StatusBar.tsx`.
  */
+import { countWords } from "../../../shared/agentcount";
 import type { MascotConfig } from "../../../shared/model";
 import type { KuruLive } from "../kuru";
 import { InboxIcon } from "./NeedsDrawer";
@@ -38,11 +40,37 @@ export interface DrawerChipsProps {
    */
   needs: { count: number; workspaces: number; cards: number; open: boolean };
   onNeeds: () => void;
+  /**
+   * The agents at work and the ones waiting on you, and whether their list
+   * is up: a third chip, drawn only by the floating Kuru's chat, which has an
+   * Agents list (`Float.tsx`) where the window has its sidebar. Absent, there
+   * is no chip, which is what the window passes.
+   */
+  agents?: { working: number; waiting: number; quiet: number; open: boolean };
+  onAgents?: () => void;
 }
 
-export function DrawerChips({ kuru, onKuru, needs, onNeeds }: DrawerChipsProps) {
+export function DrawerChips({ kuru, onKuru, needs, onNeeds, agents, onAgents }: DrawerChipsProps) {
   return (
     <span className="drawer-chips">
+      {/* The agents: a dot and how many are working in the working ink, then
+          how many are waiting in the blocked ink when any are — the logo's
+          badge, as a door. Dim with nothing going, and still there, for the
+          reason the tray stays at zero. */}
+      {agents && onAgents && (
+        <button
+          className={`sb-agents ${agents.working + agents.waiting > 0 ? "sb-agents-some" : ""} ${agents.open ? "sb-agents-on" : ""}`}
+          onClick={onAgents}
+          onMouseDown={(event) => event.preventDefault()}
+          title={agentsTitle(agents)}
+          aria-label={agentsTitle(agents)}
+          aria-expanded={agents.open}
+        >
+          <span className="sb-agents-dot" aria-hidden="true" />
+          {agents.working > 0 && <span className="sb-agents-working">{agents.working}</span>}
+          {agents.waiting > 0 && <span className="sb-agents-waiting">{agents.waiting}</span>}
+        </button>
+      )}
       {/* What needs you: the tray, dim while nothing does; the blocked ink and
           a count while something does, since what it counts is mostly agents
           asking. No words since 2026-10-13 — the tray and its count are what
@@ -98,6 +126,11 @@ export function DrawerChips({ kuru, onKuru, needs, onNeeds }: DrawerChipsProps) 
       </button>
     </span>
   );
+}
+
+/** What the agents' chip says when hovered: the three counts, and which way the click goes. */
+function agentsTitle(agents: NonNullable<DrawerChipsProps["agents"]>): string {
+  return `Agents: ${countWords(agents)} — ${agents.open ? "close" : "open"} the list`;
 }
 
 /** What the chip says when hovered: how many, where, and which way the click goes. */

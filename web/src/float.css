@@ -148,6 +148,46 @@ html.float-logo-page #root {
   pointer-events: none;
 }
 
+/* The agents at work, on the corner below the count: quieter than it on
+   purpose — the chrome's ground with the hairline, the figures in their
+   states' inks, rather than a filled badge — since the count is what wants
+   you and this is what is going on. Small enough that two figures of two
+   digits stay inside the window's clear room. It takes its own press. */
+.float-logo-agents {
+  position: absolute;
+  bottom: -6px;
+  right: -7px;
+  height: 16px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 8px;
+  background: var(--chrome);
+  border: var(--border) solid var(--line);
+  box-shadow: 0 1px 3px color-mix(in srgb, black 35%, transparent);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  cursor: pointer;
+}
+.float-logo-agents-working {
+  color: var(--working);
+}
+.float-logo-agents-asking {
+  color: var(--blocked);
+}
+/* Both figures: a hairline between them, so "3 2" is not read as 32. */
+.float-logo-agents-working + .float-logo-agents-asking {
+  padding-left: 3px;
+  border-left: var(--border) solid var(--line);
+}
+.float-logo-agents:hover {
+  background: var(--chrome-high);
+}
+
 /* --------------------------------------------------------------------------
    The chat
    -------------------------------------------------------------------------- */
@@ -487,4 +527,96 @@ html.float-panel-page #root {
     animation: none;
     transition: none;
   }
+}
+
+/* --------------------------------------------------------------------------
+   The Agents list, and its chip in the chat's header
+   -------------------------------------------------------------------------- */
+
+/* Drawn to the Needs chip's height and corner (`.sb-needs` in styles.css):
+   a dot, and the figures in their states' inks. */
+.sb-agents {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-md);
+  color: var(--dimmer);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.sb-agents:hover,
+.sb-agents-on {
+  color: var(--text);
+  background: var(--chrome-high);
+}
+.sb-agents-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  background: var(--idle);
+}
+.sb-agents-some .sb-agents-dot {
+  background: var(--working);
+}
+.sb-agents-working {
+  color: var(--working);
+}
+.sb-agents-waiting {
+  color: var(--blocked);
+}
+
+.float-agents-sum {
+  padding: 2px 4px 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.float-agents-ws .needs-ws-head {
+  flex-wrap: wrap;
+  column-gap: 8px;
+  row-gap: 0;
+}
+.float-agents-node {
+  color: var(--dimmer);
+  font-weight: 500;
+}
+.float-agents-words {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--dimmer);
+  white-space: nowrap;
+}
+.float-agents-working {
+  color: var(--working);
+}
+.float-agents-waiting {
+  color: var(--blocked);
+}
+.float-agents-quiet {
+  color: var(--dim);
+}
+.float-agents-sep {
+  color: var(--dimmer);
+}
+/* A waiting row says so in words as well as in its mark: an agent that
+   finished a turn nobody saw wears the done ink, which alone reads as done. */
+.float-agents-wants {
+  flex: none;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--blocked) 16%, transparent);
+  color: var(--blocked);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+.float-agents-row-quiet .needs-title {
+  color: var(--dim);
 }
