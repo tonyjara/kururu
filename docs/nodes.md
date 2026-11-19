@@ -1112,10 +1112,8 @@ pane in front; a card with no terminal opens the node's board here with the
 card lit, once the workspace's snapshot says its qualified id; the
 workspace's head is `show-node-workspace`. A card's Done is phase 4's,
 above, and there is no row menu: every other move to Done is a question the
-node's board asks. `C-a o` walks this node's needs and then each node's
-(`nextNeedAcross` in `shared/remote.ts`), and steps on from the one under
-the keyboard, which on a remote pane is its qualified id. A node from
-before keeps its rows as links to its page. A reveal asked while the watch
+node's board asks. A node from before keeps its rows as links to its page.
+A reveal asked while the watch
 is still opening, which is the usual case for a click from the drawer or a
 notification, is kept (`NodeWatch.pending`) and sent to the child with its
 first snapshot, so the child's focus moves to the terminal and not only

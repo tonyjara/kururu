@@ -7,7 +7,7 @@
 import { describe, expect, it } from "bun:test";
 import { addCard, emptyBoard, emptyProfileBoard, moveCard, type Board } from "../../shared/board";
 import type { AgentSnapshot, Profile, Workspace } from "../../shared/model";
-import { allNeeds, needsOf } from "../../shared/needs";
+import { needsOf } from "../../shared/needs";
 import {
   arrange,
   arrangedNeeds,
@@ -187,11 +187,6 @@ describe("a profile's needs, arranged", () => {
     expect(arranged.workspaces[0]!.needs.map((n) => n.card?.id)).toEqual(["c2", "c1"]);
     expect(arranged.count).toBe(needs.count);
     expect(arranged.inWorkspaces).toBe(needs.inWorkspaces);
-  });
-
-  it("is the order Next walks", () => {
-    const arranged = arrangedNeeds(needs, { groups: ["wkw3", "wkw4"], cards: { wkw4: ["c2"] } });
-    expect(allNeeds(arranged).map((n) => n.card?.id ?? n.agent!.id)).toEqual(["a3", "c2", "c1", "a1"]);
   });
 });
 

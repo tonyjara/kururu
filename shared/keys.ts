@@ -55,7 +55,6 @@ export type Action =
   | "open-harness"
   | "search-kuru"
   | "open-needs"
-  | "next-need"
   | "settings"
   | "reload"
   | "restart-server"
@@ -116,7 +115,6 @@ export const ACTION_INFO: Record<Action, { label: string; group: ActionGroup }> 
   "open-harness": { label: "Kuru: the conversation drawer, open or shut", group: "panes" },
   "search-kuru": { label: "Kuru: search the conversation", group: "panes" },
   "open-needs": { label: "what needs you, across the workspaces: the drawer, open or shut", group: "panes" },
-  "next-need": { label: "go to the next thing that needs you", group: "panes" },
 
   "toggle-sidebar": { label: "toggle the sidebar", group: "window" },
   "toggle-files": { label: "toggle the file tree", group: "window" },
@@ -156,11 +154,10 @@ export const DEFAULT_KEYMAP: Record<string, Action> = {
   // Unbound in ghosttown, and `/` is what less, vim and tmux's own copy mode
   // have taught somebody to reach for to search what is on screen.
   "/": "search-kuru",
-  // Unbound in ghosttown. `i` for the inbox of things that need you, and `o`
-  // beside it to go on to the next of them — the pair is pressed together,
-  // and two keys under neighbouring fingers is what makes that a walk.
+  // Unbound in ghosttown. `i` for the inbox of things that need you. `o`
+  // beside it went to the next of them until 2026-11-18, with the drawer's
+  // Next button: nobody used the walk, and a row in the drawer is the door.
   i: "open-needs",
-  o: "next-need",
   "|": "split-right",
   "\\": "split-right",
   "%": "split-right",

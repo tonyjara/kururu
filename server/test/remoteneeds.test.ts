@@ -1,7 +1,6 @@
 /**
  * Another node's needs and notices on this window, and what Kuru may read of
- * it — phase 3 of `docs/plans/remote-workspaces.md`: the walk `C-a o` takes
- * across nodes, the edges a notice is raised on and the two sources they are
+ * it — phase 3 of `docs/plans/remote-workspaces.md`: the edges a notice is raised on and the two sources they are
  * read from, the reveal a watch still opening keeps for the child, and a
  * remote screen read for `read_agent` through the watch — the last two
  * against a stand-in child on a loopback socket, which speaks the frames a
@@ -15,8 +14,6 @@ import type { AgentSnapshot, AgentStatus, Profile, SessionSnapshot } from "../..
 import { nodesText, type NodeStatus, type NodeSummary, type SummaryAgent } from "../../shared/nodes";
 import { DEFAULT_NOTIFY } from "../../shared/notify";
 import {
-  nextNeedAcross,
-  nodeNeeds,
   qualify,
   snapshotAgents,
   statusEdges,
@@ -86,45 +83,6 @@ describe("the edges a notice is raised on", () => {
     expect(fromSnapshot.sort()).toEqual(["a1", "a2"]);
     const fromSummary = summaryAgents(summaryOf(key, [summaryAgent("a1", "working"), summaryAgent("a2", "idle")])).map((a) => a.agent.id);
     expect(fromSummary.sort()).toEqual(fromSnapshot);
-  });
-});
-
-describe("another node's needs, as doors", () => {
-  const { profile: local } = childProfile();
-  const here = needsOf({ ...local, harness: null }, [agent("a1", "blocked"), agent("a2", "idle")]);
-
-  it("lists only a linked node this window can open, in the drawer's order", () => {
-    const need = { kind: "asking" as const, agentId: "a7", cardId: null, title: "claude" };
-    const nodes = [
-      node(OMARCHY, "omarchy", summaryOf("k1", [], [need])),
-      node("n111111111111", "away", summaryOf("k2", [], [need]), "away"),
-      node(OLD, "old", { ...summaryOf("k3", [], [need]), watchable: undefined } as unknown as NodeSummary),
-    ];
-    expect(nodeNeeds(nodes)).toEqual([{ node: OMARCHY, workspaceKey: "k1", need }]);
-  });
-
-  it("C-a o walks this node's needs, then each node's, and steps on from the one under the keyboard", () => {
-    const asking = { kind: "asking" as const, agentId: "a7", cardId: null, title: "claude" };
-    const review = { kind: "review" as const, agentId: null, cardId: "c1", title: "Fix the login" };
-    const elsewhere = nodeNeeds([node(OMARCHY, "omarchy", summaryOf("k1", [], [asking, review]))]);
-    const at = { focusedAgentId: null as string | null, workspaceId: null, remote: null as { node: string; workspaceKey: string } | null, boardShowing: false };
-
-    // From nowhere in particular, the first: this node's own.
-    const first = nextNeedAcross(here, elsewhere, at);
-    expect(first && "here" in first && first.here.agent?.id).toBe("a1");
-    // From this node's last, onto the node's first.
-    const second = nextNeedAcross(here, elsewhere, { ...at, focusedAgentId: "a1" });
-    expect(second && "there" in second && second.there.need.agentId).toBe("a7");
-    // The node's agent is under the keyboard by its qualified id.
-    const third = nextNeedAcross(here, elsewhere, { ...at, focusedAgentId: qualify(OMARCHY, "a7") });
-    expect(third && "there" in third && third.there.need.cardId).toBe("c1");
-    // A card with no terminal is "here" while its board is showing on that workspace; then round to the start.
-    const fourth = nextNeedAcross(here, elsewhere, { ...at, remote: { node: OMARCHY, workspaceKey: "k1" }, boardShowing: true });
-    expect(fourth && "here" in fourth && fourth.here.agent?.id).toBe("a1");
-    // A bare a7 of this node's is not the node's a7.
-    const bare = nextNeedAcross(here, elsewhere, { ...at, focusedAgentId: "a7" });
-    expect(bare && "here" in bare).toBe(true);
-    expect(nextNeedAcross(needsOf({ ...local, harness: null }, []), [], at)).toBeNull();
   });
 });
 
@@ -293,11 +251,10 @@ describe("what Kuru is told", () => {
 });
 
 describe("the parent, seen from a child", () => {
-  it("is neither a door, a notice nor a screen to read, since nothing watches it", () => {
+  it("is neither a notice nor a screen to read, since nothing watches it", () => {
     const need = { kind: "asking" as const, agentId: "a7", cardId: null, title: "claude" };
     const { watchable: _w, ...parentSummary } = summaryOf("k1", [summaryAgent("a7", "blocked")], [need]);
     const parent = { ...node(OMARCHY, "mac", parentSummary as NodeSummary), parent: true };
-    expect(nodeNeeds([parent])).toEqual([]);
     expect(nodesText([parent]).join("\n")).not.toContain(qualify(OMARCHY, "a7"));
     const sent: ServerMessage[] = [];
     const notices = new NodeNotices({ clients: () => new Map([[{} as WebSocket, { watching: new Set<string>() }]]), send: (_ws, msg) => sent.push(msg), settings: () => DEFAULT_NOTIFY, name: () => "mac" });

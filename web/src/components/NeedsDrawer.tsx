@@ -46,13 +46,13 @@
  * them can be put in the order they will be taken: dragged with a mouse, or
  * moved from the menu a right-click or a held touch opens, which is the
  * phone's way. Folded is not dismissed — the tray still counts what is in
- * there, and Next still goes to it. What is kept and why, and what does not
+ * there. What is kept and why, and what does not
  * move, is `needsorder.ts`; this draws it.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { boardLanes, cardCode, NEEDS_COLUMN, type Card } from "../../../shared/board";
 import { cardPlace } from "../../../shared/kuru";
-import { allNeeds, type Need, type NeedKind, type ProfileNeeds, type WorkspaceNeeds } from "../../../shared/needs";
+import { type Need, type NeedKind, type ProfileNeeds, type WorkspaceNeeds } from "../../../shared/needs";
 import type { NodeStatus, SummaryAgent, SummaryNeed } from "../../../shared/nodes";
 import { mascotFor, type AgentSnapshot, type MascotSet, type Profile } from "../../../shared/model";
 import { useCardDone } from "../cardDone";
@@ -60,7 +60,7 @@ import { referItem } from "../kuru";
 import { noteItem } from "../notes";
 import { agentLabel, agentSummary } from "../labels";
 import { asAgent } from "../nodes";
-import { nodeNeeds, qualify, type NodeNeed } from "../../../shared/remote";
+import { qualify, type NodeNeed } from "../../../shared/remote";
 import { hueStyle } from "./NodeChip";
 import * as api from "../session";
 import { ago } from "./Board";
@@ -96,7 +96,6 @@ export function NeedsDrawer({
   onResetWidth,
   onGo,
   onGoNode,
-  onNext,
   onWorkspace,
   onBoard,
   onProfileCard,
@@ -124,8 +123,6 @@ export function NeedsDrawer({
   onGo: (need: Need) => void;
   /** The same for another node's need, in this window. */
   onGoNode: (need: NodeNeed) => void;
-  /** The next thing that needs you, from wherever the keyboard is. */
-  onNext: () => void;
   /** Go to a workspace, from its name. */
   onWorkspace: (workspaceId: string) => void;
   /** This card, on its board, in its workspace. */
@@ -174,9 +171,9 @@ export function NeedsDrawer({
 
   const waiting = needs.workspaces.filter((w) => w.band === "needs");
   const working = needs.workspaces.filter((w) => w.band === "working");
-  /* The waiting workspaces come already in the person's order, so that Next
-     walks what is drawn (`arrangedNeeds`, in `App`); this places Your board
-     among them, which is no workspace and so not in that walk. */
+  /* The waiting workspaces come already in the person's order
+     (`arrangedNeeds`, in `App`); this places Your board among them, which is
+     no workspace and so not in that order. */
   type Group = { key: string; w: WorkspaceNeeds | null };
   const groups = arrange<Group>(
     [...waiting.map((w) => ({ key: w.workspace.key, w })), ...(needs.cards.length ? [{ key: BOARD_GROUP, w: null }] : [])],
@@ -302,16 +299,6 @@ export function NeedsDrawer({
       <header className="kuru-head">
         {chips}
         <span className="kuru-head-spacer" />
-        <button
-          className="kuru-head-btn"
-          onClick={onNext}
-          onMouseDown={(event) => event.preventDefault()}
-          disabled={allNeeds(needs).length === 0 && nodeNeeds(nodes).length === 0}
-          title="Go to the next thing that needs you (C-a o)"
-        >
-          Next
-          <Icon name="caret" className="needs-next-caret" />
-        </button>
         <button className="sidebar-close kuru-close" onClick={onClose} aria-label="Close" title="Close (Esc)">
           <Icon name="close" />
         </button>

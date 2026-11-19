@@ -142,7 +142,7 @@ export function arrangeNeeds(needs: readonly Need[], saved: readonly string[] | 
 }
 
 /**
- * The profile's needs as the drawer draws them, and so as Next walks them:
+ * The profile's needs as the drawer draws them:
  * the waiting workspaces in the saved order, each with its cards arranged.
  * Only the `needs` band moves, into the places it held, so the Working
  * band keeps the sidebar's order — sorting is a thing done to the

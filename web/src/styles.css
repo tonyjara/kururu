@@ -7291,9 +7291,6 @@ button.kc {
    the side and a row per thing; Your board; and the ones working. See
    `NeedsDrawer.tsx`.
    -------------------------------------------------------------------------- */
-.needs-next-caret {
-  transform: rotate(-90deg);
-}
 .needs-list {
   gap: 12px;
 }

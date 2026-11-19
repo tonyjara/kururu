@@ -10,7 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import { addCard, emptyBoard, emptyProfileBoard, markNeeds, moveCard, NEEDS_COLUMN, noteRun, startRun, type Board, type Card } from "../../shared/board";
 import type { AgentSnapshot, Profile, Workspace } from "../../shared/model";
-import { allNeeds, doneRefusal, needsOf, nextNeed } from "../../shared/needs";
+import { doneRefusal, needsOf } from "../../shared/needs";
 
 function agent(id: string, over: Partial<AgentSnapshot> = {}): AgentSnapshot {
   return {
@@ -213,34 +213,6 @@ describe("the profile board's Needs you", () => {
     expect(needs.count).toBe(2);
     expect(needs.workspaces[0]!.band).toBe("quiet");
     expect(needsOf(profile([workspace("w1", [])]), []).cards).toEqual([]);
-  });
-
-  it("is not a stop on the walk, whose door would be a sheet that takes the keyboard", () => {
-    const needs = needsOf(profile([workspace("w1", [])], null, yours()), []);
-    expect(allNeeds(needs)).toEqual([]);
-    expect(nextNeed(needs, { focusedAgentId: null, workspaceId: null, boardShowing: false })).toBeNull();
-  });
-});
-
-describe("the walk", () => {
-  const p = profile([workspace("w1", ["a", "b"]), workspace("w2", [], cardOn("gone", "done"))]);
-  const needs = needsOf(p, [agent("a", { status: "blocked" }), agent("b", { status: "done", unread: true })]);
-
-  it("goes to the first when you are on none", () => {
-    expect(allNeeds(needs).map((n) => n.kind)).toEqual(["asking", "unseen", "review"]);
-    expect(nextNeed(needs, { focusedAgentId: null, workspaceId: "w1", boardShowing: false })?.agent?.id).toBe("a");
-  });
-
-  it("steps past the one you are on, and round to the first", () => {
-    expect(nextNeed(needs, { focusedAgentId: "a", workspaceId: "w1", boardShowing: false })?.agent?.id).toBe("b");
-    const last = nextNeed(needs, { focusedAgentId: "b", workspaceId: "w1", boardShowing: false });
-    expect(last?.card?.id).toBe("c1");
-    // On the card — its workspace showing its board — the walk wraps.
-    expect(nextNeed(needs, { focusedAgentId: null, workspaceId: "w2", boardShowing: true })?.agent?.id).toBe("a");
-  });
-
-  it("is nothing when nothing needs you", () => {
-    expect(nextNeed(needsOf(profile([workspace("w1", [])]), []), { focusedAgentId: null, workspaceId: null, boardShowing: false })).toBeNull();
   });
 });
 

@@ -716,11 +716,9 @@ a move (`Need.plainDone`: in Review, no worktree, no terminal left open) —
 every other move to Done is a question the board asks in its own dialog. The
 sidebar's workspace rows wear the agent rows' dot when their workspace is in
 the `needs` band. Nothing is dismissed by hand: a row leaves when its state
-does. `C-a i` opens the drawer; `C-a o` goes to the next need from the one the
-keyboard is on, round to the first — stepping from where you are rather than
-always to the first is what lets a prompt be left for later. The Needs you
-cards are not on that walk: their door is the profile's board, a sheet that
-takes the keyboard, and a walk into it would stop there.
+does. `C-a i` opens the drawer. Its header had a Next button and `C-a o`
+beside it, a walk to the next need from the one the keyboard was on; both
+went on 2026-11-18, unused — a row is the door.
 
 **A group folds, and the queue sorts — per device.** Every group in the
 drawer — a waiting workspace, Your board, another node's workspace — has a
@@ -744,8 +742,8 @@ lasts until it is looked at, its id is reassigned on a host restart, and a
 question holds a turn up. And Your board's cards are sorted by
 `move-profile-card` into the Needs you column itself, so the board and the
 drawer never disagree about the to-dos. `App` arranges the needs once
-(`arrangedNeeds`) and hands the same order to the drawer and to `C-a o`, so
-Next walks what is drawn; a folded group is still counted and still walked.
+(`arrangedNeeds`) and hands that order to the drawer; a folded group is
+still counted.
 "Sort groups as the sidebar does" and "Sort its cards as the board does",
 on a group's menu, forget the order.
 

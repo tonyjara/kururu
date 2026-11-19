@@ -285,6 +285,11 @@ shows, so it is written once and read in three places — see
 
 ### Removed
 
+- **Next in the Needs drawer, and `C-a o`.** The button in the drawer's
+  header and the key both went to the next thing that needs you; a row in
+  the drawer is the way to one now. `C-a i` still opens the drawer, Done
+  and ✕ are as they were, and a saved binding to the old action is
+  ignored.
 - **The speaker on each of Kuru's replies**, which was meant to say the
   reply again and no longer worked. Asking Kuru "what did I miss?" still
   plays the replies you missed, and the speaker in the box's foot (read

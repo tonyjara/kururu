@@ -89,10 +89,8 @@ export interface ProfileNeeds {
   /**
    * The cards in the profile board's Needs you, in the column's order —
    * yours to do, each marked with who put it there (`Card.needsBy`). Apart
-   * from `workspaces` because they are no workspace's, and apart from
-   * `allNeeds` and so from Next, because their door is the profile's board,
-   * a sheet that takes the keyboard: a walk that went into it would stop
-   * there. Counted, since the chip says how much is waiting on you.
+   * from `workspaces` because they are no workspace's: their door is the
+   * profile's board. Counted, since the chip says how much is waiting on you.
    */
   cards: Card[];
   /** How many things need you, which is what the chip says: the workspaces' and the cards'. */
@@ -216,28 +214,3 @@ function agentNeed(agent: AgentSnapshot, queued: ReadonlyMap<string, QueuedWait>
   return null;
 }
 
-/** Every need in the order the drawer walks them: workspace by workspace, as `needsOf` sorted them. */
-export function allNeeds(needs: ProfileNeeds): Need[] {
-  return needs.workspaces.flatMap((w) => w.needs);
-}
-
-/**
- * The need to go to next, from where you are: the one after the need you
- * are on, round to the first, or the first when you are on none. The
- * current need is the one whose terminal has the keyboard, or — for a card
- * with no terminal — whose workspace is on screen with its board showing.
- * Stepping from the one you are on rather than always going to the first
- * is what lets you leave one for later: a prompt you are not ready to
- * answer would otherwise be the only place Next ever went.
- */
-export function nextNeed(
-  needs: ProfileNeeds,
-  at: { focusedAgentId: string | null; workspaceId: string | null; boardShowing: boolean },
-): Need | null {
-  const all = allNeeds(needs);
-  if (all.length === 0) return null;
-  const here = all.findIndex((need) =>
-    need.agent ? need.agent.id === at.focusedAgentId : need.workspaceId === at.workspaceId && at.boardShowing,
-  );
-  return here === -1 ? all[0]! : all[(here + 1) % all.length]!;
-}

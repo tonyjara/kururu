@@ -48,7 +48,7 @@ import { adoptQuote, type CardQuote } from "../../../shared/kuru";
 import { mascotFor } from "../../../shared/model";
 import { needsOf, type Need } from "../../../shared/needs";
 import { nodesNeedCount } from "../../../shared/nodes";
-import { nextNeedAcross, nodeNeeds as nodeNeedsOf, qualify, type NodeNeed } from "../../../shared/remote";
+import { qualify, type NodeNeed } from "../../../shared/remote";
 import { longWaits } from "../../../shared/slots";
 import { DEFAULT_VOICE, type OutboxEntry } from "../../../shared/voice";
 import { desktop, type FloatState, type TalkGesture, type VoiceGlobalState } from "../desktop";
@@ -468,14 +468,6 @@ export function FloatPanel() {
     },
     [go],
   );
-  const goNext = useCallback(() => {
-    if (!queue) return;
-    // From nowhere in particular: the chat has no pane with the keyboard in it, so the walk starts at the top.
-    const next = nextNeedAcross(queue, nodeNeedsOf(linked), { focusedAgentId: null, workspaceId: null, remote: null, boardShowing: false });
-    if (!next) return;
-    if ("here" in next) goToNeed(next.here);
-    else goToNodeNeed(next.there);
-  }, [queue, linked, goToNeed, goToNodeNeed]);
 
   /** A file a reply named opens in the window's panes, by the drawer's own link; the window comes up to show it. */
   const onClick = (event: React.MouseEvent) => {
@@ -591,7 +583,6 @@ export function FloatPanel() {
           chips={chips}
           onGo={goToNeed}
           onGoNode={goToNodeNeed}
-          onNext={goNext}
           onWorkspace={(workspaceId) => {
             api.switchWorkspace(workspaceId);
             go();

@@ -24,7 +24,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  activeAgent,
   activeTerminal,
   terminalsOf,
   isBoardTab,
@@ -76,7 +75,7 @@ import { awaitNoteQuote, holdNoteQuotes } from "./notequote";
 import { locateCard } from "./notes";
 import { needsOf, type Need } from "../../shared/needs";
 import { longWaits } from "../../shared/slots";
-import { nextNeedAcross, nodeNeeds as nodeNeedsOf, parseRemote, qualify, workspacesAcross, type NodeNeed } from "../../shared/remote";
+import { parseRemote, qualify, workspacesAcross, type NodeNeed } from "../../shared/remote";
 import { nodesNeedCount, WATCH_READS, type NodesView } from "../../shared/nodes";
 import { visibleLaunchers } from "../../shared/launchers";
 import { showCardNext } from "./components/Board";
@@ -472,9 +471,8 @@ export function App() {
   const needs = useMemo(() => (profile ? needsOf(profile, agents, queued) : null), [profile, agents, queued]);
   /**
    * The same, in the order this device's drawer was sorted into
-   * (`needsorder.ts`) — what the drawer draws and so what Next walks, since
-   * a key that went somewhere other than the next row down would be a key
-   * nobody could predict. The counts are the same either way.
+   * (`needsorder.ts`), which is what the drawer draws. The counts are the
+   * same either way.
    */
   const { order: needsOrder } = useNeedsView(profile?.key ?? null);
   const queue = useMemo(() => (needs ? arrangedNeeds(needs, needsOrder) : null), [needs, needsOrder]);
@@ -536,20 +534,6 @@ export function App() {
     },
     [narrow],
   );
-  /** The next thing that needs you, here or on a node, from where the keyboard is — `nextNeedAcross`'s walk. */
-  const goNext = useCallback(() => {
-    if (!queue) return;
-    const pane = onScreen ? panes(onScreen.layout).find((p) => p.id === onScreen.focusedPaneId) : undefined;
-    const next = nextNeedAcross(queue, nodeNeedsOf(nodes?.nodes ?? []), {
-      focusedAgentId: focusedAgentOf(onScreen),
-      workspaceId: workspace?.id ?? null,
-      remote: remote ? { node: remote.node.id, workspaceKey: remote.workspaceKey } : null,
-      boardShowing: pane ? isBoardTab(activeAgent(pane)) : false,
-    });
-    if (!next) return;
-    if ("here" in next) goToNeed(next.here);
-    else goToNodeNeed(next.there);
-  }, [queue, nodes, onScreen, workspace, remote, goToNeed, goToNodeNeed]);
 
   useAppearance(snapshot);
 
@@ -834,8 +818,6 @@ export function App() {
           return searchInKuru();
         case "open-needs":
           return toggleNeeds();
-        case "next-need":
-          return goNext();
         case "toggle-sidebar":
           return setSidebarOpen((open) => !open);
         case "toggle-files":
@@ -995,7 +977,7 @@ export function App() {
           return setHelp((on) => !on);
       }
     },
-    [workspace, dashboard, onScreen, remote, nodes, profile, agents, paneAgents, promptNewProfile, confirmDeleteWorkspace, narrow, goNext],
+    [workspace, dashboard, onScreen, remote, nodes, profile, agents, paneAgents, promptNewProfile, confirmDeleteWorkspace, narrow],
   );
 
   /**
@@ -1628,7 +1610,6 @@ export function App() {
           chips={chips}
           onGo={goToNeed}
           onGoNode={goToNodeNeed}
-          onNext={goNext}
           onWorkspace={(workspaceId) => {
             api.switchWorkspace(workspaceId);
             if (narrow) closeNeeds();

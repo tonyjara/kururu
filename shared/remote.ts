@@ -44,7 +44,6 @@
 import { BOARD_TAB, docTab, isBoardTab, isDocTab, panes, parseDocTab, terminalsOf, type LayoutNode, type ReaderState } from "./layout";
 import type { MadeFile } from "./made";
 import type { AgentSnapshot, AgentStatus, Profile, Workspace } from "./model";
-import { allNeeds, type Need, type ProfileNeeds } from "./needs";
 import type { NodeStatus, NodeSummary, SummaryNeed } from "./nodes";
 import { isNotifyEvent, type NotifyEvent } from "./notify";
 import { WORKSPACE_COLORS, type WorkspaceColor } from "./model";
@@ -503,62 +502,13 @@ export function statusEdges(
 // Another node's needs, as doors into this window
 // ---------------------------------------------------------------------------
 
-/** One of another node's needs, where it is: what a row in the Needs drawer and `C-a o` go to. */
+/** One of another node's needs, where it is: what a row in the Needs drawer goes to. */
 export interface NodeNeed {
   node: string;
   workspaceKey: string;
   need: SummaryNeed;
 }
 
-/**
- * Every need of the nodes this window can open, in the drawer's order: by
- * rank, then as each node's own `needsOf` sorted them. A node that is away
- * has none — its last summary may list a question already answered — and
- * one from before remote workspaces has none here either, since this window
- * cannot go to it.
- */
-export function nodeNeeds(nodes: readonly Pick<NodeStatus, "id" | "state" | "summary">[]): NodeNeed[] {
-  const out: NodeNeed[] = [];
-  for (const node of nodes) {
-    if (node.state !== "up" || !node.summary?.watchable) continue;
-    for (const w of node.summary.workspaces) for (const need of w.needs) out.push({ node: node.id, workspaceKey: w.key, need });
-  }
-  return out;
-}
-
-/** A need of this node's or of another's: the one walk `C-a o` takes. */
-export type AnyNeed = { here: Need } | { there: NodeNeed };
-
-/**
- * `nextNeed`, across nodes: this node's needs first, as the drawer lists
- * them, then each node's. Where you are is the terminal with the keyboard —
- * qualified, while a remote workspace is on screen — or, for a card with no
- * terminal, the workspace on screen with its board showing.
- */
-export function nextNeedAcross(
-  needs: ProfileNeeds,
-  elsewhere: readonly NodeNeed[],
-  at: {
-    focusedAgentId: string | null;
-    workspaceId: string | null;
-    remote: { node: string; workspaceKey: string } | null;
-    boardShowing: boolean;
-  },
-): AnyNeed | null {
-  const all: AnyNeed[] = [...allNeeds(needs).map((here) => ({ here })), ...elsewhere.map((there) => ({ there }))];
-  if (all.length === 0) return null;
-  const current = all.findIndex((one) => {
-    if ("here" in one) {
-      const { agent, workspaceId } = one.here;
-      if (agent) return agent.id === at.focusedAgentId;
-      return !at.remote && workspaceId === at.workspaceId && at.boardShowing;
-    }
-    const { node, workspaceKey, need } = one.there;
-    if (need.agentId) return qualify(node, need.agentId) === at.focusedAgentId;
-    return at.remote?.node === node && at.remote.workspaceKey === workspaceKey && at.boardShowing;
-  });
-  return current === -1 ? all[0]! : all[(current + 1) % all.length]!;
-}
 
 // ---------------------------------------------------------------------------
 // Every workspace this window can be on, in the sidebar's order
