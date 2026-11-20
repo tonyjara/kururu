@@ -9,6 +9,7 @@
  * it has, and nothing for the ones somebody has unbound.
  */
 import { ACTION_GROUPS, ACTION_INFO, keysByAction, type Action } from "../../../shared/keys";
+import { hasPen } from "../ink";
 import { keyLabel, PREFIX_LABEL } from "../keys";
 
 export function HelpOverlay({
@@ -53,6 +54,15 @@ export function HelpOverlay({
           In a reader pane, <kbd>⌘+</kbd> and <kbd>⌘−</kbd> resize the text and <kbd>⌘0</kbd> puts it
           back — or the same keys without ⌘. Elsewhere ⌘+ still zooms the window.
         </p>
+        {/* The voice's keys are not the prefix's either, and the pair below
+            is the one nobody would find by pressing things: worth a line. */}
+        {hasPen() && (
+          <p className="dialog-hint">
+            The talk key and <kbd>⇧</kbd> together are the screen pen with no recording — from any app while the talk key works in
+            every app (Settings → Voice). Done on the pill, or the two keys again, puts the marks in Kuru's box. <kbd>⌃⌥⌘D</kbd> draws
+            while you talk.
+          </p>
+        )}
       </div>
     </div>
   );

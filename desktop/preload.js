@@ -241,7 +241,8 @@ if (isPicker) {
       pause: (on) => ipcRenderer.send("kururu:voice-pause", on === true),
       openInputMonitoring: () => ipcRenderer.send("kururu:voice-open-settings"),
       onKey: (listener) => {
-        const relay = (_event, gesture) => listener(String(gesture));
+        // A press the hook held back for Shift (`PEN_CHORD_MS`) says how late it is, in milliseconds.
+        const relay = (_event, gesture, late) => listener(String(gesture), Number.isFinite(late) ? Number(late) : 0);
         ipcRenderer.on("kururu:talk", relay);
         return () => ipcRenderer.removeListener("kururu:talk", relay);
       },

@@ -1031,3 +1031,162 @@ describe("the pill for the pen (TalkKey.forPen)", () => {
     talk.forPen(false);
   });
 });
+
+describe("the talk key with Shift is the pen alone (2026-11-20)", () => {
+  const PAGE = "http://127.0.0.1:7717";
+  /** A talk key with its panel up, whose pen answer is `takes`; the hook's lines are fed by hand. */
+  function keys(takes = true) {
+    windows.length = 0;
+    const talk = new TalkKey({ helperPath: join(dir, "no-hook"), preloadPath: "/app/preload.js", saved: { talkKeyEverywhere: true }, save: () => {} });
+    talk.setPage(PAGE);
+    talk.ensurePanel();
+    const pens = [];
+    talk.onPenKey = () => {
+      pens.push(performance.now());
+      return takes;
+    };
+    const panel = windows.find((w) => !w.destroyed);
+    const talked = () => panel.webContents.sent.filter(([channel]) => channel === "kururu:talk").map(([, ev, late]) => (late === undefined ? ev : [ev, late]));
+    const shifted = () => panel.webContents.sent.filter(([channel]) => channel === "kururu:shift");
+    let clock = 1000;
+    const shift = (down) => talk.fromShift({ ev: "shift", down, at: (clock += 10) });
+    return { talk, pens, talked, shifted, shift, done: () => talk.destroyPanel() };
+  }
+  const WAIT = 150;
+
+  it("Shift first: the pen, and the pill never hears the talk key", () => {
+    const { talk, pens, talked, shift, done } = keys();
+    shift(true);
+    talk.fromHelper("down");
+    expect(pens).toHaveLength(1);
+    talk.fromHelper("up");
+    shift(false);
+    expect(talked()).toEqual([]);
+    done();
+  });
+
+  it("the talk key first and Shift inside the wait: the pen, and no recording opened", async () => {
+    const { talk, pens, talked, shift, done } = keys();
+    talk.fromHelper("down");
+    await settle(40);
+    shift(true);
+    expect(pens).toHaveLength(1);
+    await settle(WAIT);
+    talk.fromHelper("up");
+    shift(false);
+    expect(talked()).toEqual([]);
+    done();
+  });
+
+  it("the talk key alone, held: the press goes on after the wait, saying how late it is, and its release after it", async () => {
+    const { talk, pens, talked, done } = keys();
+    talk.fromHelper("down");
+    expect(talked()).toEqual([]);
+    await settle(WAIT);
+    const sent = talked();
+    expect(sent).toHaveLength(1);
+    expect(sent[0][0]).toBe("down");
+    expect(sent[0][1]).toBeGreaterThanOrEqual(115);
+    talk.fromHelper("up");
+    expect(talked().at(-1)).toBe("up");
+    expect(pens).toHaveLength(0);
+    done();
+  });
+
+  it("a tap inside the wait is the press and then its release, at once", () => {
+    const { talk, pens, talked, done } = keys();
+    talk.fromHelper("down");
+    talk.fromHelper("up");
+    const sent = talked();
+    expect(sent.map((x) => (Array.isArray(x) ? x[0] : x))).toEqual(["down", "up"]);
+    expect(pens).toHaveLength(0);
+    done();
+  });
+
+  it("Shift after the wait is not the pen: the recording has started, and Shift is what it was during one", async () => {
+    const { talk, pens, talked, shifted, shift, done } = keys();
+    talk.fromHelper("down");
+    await settle(WAIT);
+    talk.report({ phase: "listening", width: 300, height: 40, key: "ControlRight" });
+    shift(true);
+    expect(pens).toHaveLength(0);
+    expect(shifted().map(([, e]) => e.ev)).toEqual(["down"]);
+    shift(false);
+    done();
+  });
+
+  it("while the pill records, the talk key goes on at once and Shift with it is not the pen", () => {
+    const { talk, pens, talked, shift, done } = keys();
+    talk.report({ phase: "listening", width: 300, height: 40, key: "ControlRight" });
+    shift(true);
+    talk.fromHelper("down");
+    expect(talked()).toEqual(["down"]);
+    expect(pens).toHaveLength(0);
+    shift(false);
+    done();
+  });
+
+  it("a shortcut inside the wait opens nothing, and its release is nobody's", () => {
+    const { talk, pens, talked, done } = keys();
+    talk.fromHelper("down");
+    talk.fromHelper("chord");
+    talk.fromHelper("up");
+    expect(talked()).toEqual([]);
+    expect(pens).toHaveLength(0);
+    done();
+  });
+
+  it("a Shift that typed a capital is not held alone: the talk key after it is a recording", async () => {
+    const { talk, pens, talked, shift, done } = keys();
+    shift(true);
+    talk.fromShift({ ev: "shift", chord: "key" });
+    talk.fromHelper("down");
+    await settle(WAIT);
+    expect(pens).toHaveLength(0);
+    expect(talked().map((x) => (Array.isArray(x) ? x[0] : x))).toEqual(["down"]);
+    done();
+  });
+
+  it("when the pen does not take it, the press is the pill's", () => {
+    const { talk, pens, talked, shift, done } = keys(false);
+    shift(true);
+    talk.fromHelper("down");
+    expect(pens).toHaveLength(1);
+    expect(talked()).toEqual(["down"]);
+    done();
+  });
+
+  it("a press held back when the hook goes is dropped, with no release for a clip that never opened", () => {
+    const { talk, talked, done } = keys();
+    talk.fromHelper("down");
+    talk.stopHelper();
+    expect(talked()).toEqual([]);
+    expect(talk.pendingDown).toBeNull();
+    done();
+  });
+});
+
+describe("a pen the talk key and Shift started", () => {
+  it("brings its box up on Done, and nobody else's", async () => {
+    const brought = [];
+    const { ink, main } = setup({ bringUp: (owner) => brought.push(owner) });
+    await ink.start({ voice: false, asker: main, key: true });
+    expect(ink.session.key).toBe(true);
+    ink.send(null);
+    expect(told(main, "send")).toHaveLength(1);
+    expect(brought).toEqual([main]);
+    ink.cancel(ink.session.id, null);
+
+    await ink.start({ voice: false, asker: main });
+    ink.send(null);
+    expect(brought).toHaveLength(1);
+    ink.cancel(ink.session.id, null);
+
+    await ink.start({ voice: true, key: true });
+    expect(ink.session.key).toBe(false);
+    ink.send(null);
+    expect(brought).toHaveLength(1);
+    ink.cancel(ink.session.id, null);
+    ink.dispose();
+  });
+});

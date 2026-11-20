@@ -91,7 +91,7 @@ function ScreenPen() {
       title="Screen pen"
       foot={
         <>
-          ⌃⌥⌘D draws on the screen while you talk; ⌃⌥⌘S takes a picture of the display under the pointer; ⌘Z with the pen down takes the last mark back. The applications below are never in a picture: their windows are left out and their titles are not read. A bundle id is in <Mono>osascript -e 'id of app "Name"'</Mono>.
+          ⌃⌥⌘D draws on the screen while you talk. The talk key and Shift together draw without talking, from any app while the talk key works in every app: nothing is recorded, and Done on the pill, or the two keys again, puts the marks in Kuru's box. ⌃⌥⌘S takes a picture of the display under the pointer; ⌘Z with the pen down takes the last mark back. The applications below are never in a picture: their windows are left out and their titles are not read. A bundle id is in <Mono>osascript -e 'id of app "Name"'</Mono>.
         </>
       }
     >
@@ -99,7 +99,7 @@ function ScreenPen() {
       {withVoice !== null && (
         <Toggle
           label="Draw with every recording"
-          hint="The talk key puts the pen down as it opens the microphone, and the recording ending lifts it. Off, the pen is only ⌃⌥⌘D, the pill's pen and the drawer's pencil."
+          hint="The talk key puts the pen down as it opens the microphone, and the recording ending lifts it. Off, the pen is only ⌃⌥⌘D, the pill's pen, the drawer's pencil and the talk key with Shift."
           on={withVoice}
           onChange={turn}
         />
@@ -120,7 +120,7 @@ function ScreenPen() {
 function globalLine(state: VoiceGlobalState): string {
   switch (state.status) {
     case "live":
-      return "On: hold the key in any app and the pill floats over it.";
+      return "On: hold the key in any app and the pill floats over it. With Shift, it is the screen pen and no recording.";
     case "starting":
       return "Starting the hook…";
     case "denied":

@@ -34,6 +34,18 @@
  * pill. Nothing else here changes — it is the same panel, the same page, the
  * one voice client — and with it off `place` is exactly what it was.
  *
+ * **The talk key with Shift is the pen alone** (the owner, 2026-11-20: "when
+ * I press the kururu talk key + shift at the same time it only activates the
+ * pen"): a screen pen session with no voice (`onPenKey`), whose marks go
+ * into Kuru's box on Done, and no recording at all — not one opened and
+ * dropped. Either key may come first. Shift already held alone when the
+ * talk key goes down decides it there. The talk key first is held back for
+ * `PEN_CHORD_MS` before the pill hears of it, and a Shift inside that is the
+ * pen; otherwise the press goes on, late by that much and saying so, so the
+ * page measures a tap or a hold from when the key really went down. Only
+ * from a pill that is not recording: while it listens, the talk key and
+ * Shift mean what they did (`web/src/shiftpen.ts`).
+ *
  * The helper's events never reach the main window. They are sent to the
  * panel's webContents and nowhere else, and the panel's reports are accepted
  * from that webContents and no other, so a served page in the window cannot
@@ -80,6 +92,15 @@ const KEY_ANSWER_MS = 1500;
  * when the key comes up, so the reload waits for the keys to stop.
  */
 const DEAF_RELOAD_MS = 15_000;
+/**
+ * How long the talk key's press waits for Shift before the pill hears it
+ * (`PEN_CHORD_MS`): two keys pressed "at the same time" land 20 to 80 ms
+ * apart, and this is the price every plain press pays for the pair, in a
+ * microphone opened that much later — never in a press misread, since the
+ * page is told how late it is. Not waited for while the pill is recording,
+ * where the press ends the clip and Shift is already the pen's.
+ */
+const PEN_CHORD_MS = 120;
 /** `pill.log` is moved aside at this size, as `lifecycle.log` is. */
 const LOG_MAX_BYTES = 256 * 1024;
 
@@ -274,6 +295,19 @@ class TalkKey extends EventEmitter {
     this.onDraw = null;
     /** A Shift press handed to the pill, whose release and chords follow it there whatever the phase is by then. */
     this.shiftSent = false;
+    /** When a Shift pressed alone went down, while it is held and nothing has been pressed with it; null otherwise. */
+    this.shiftAlone = null;
+    /** The talk key's press, held back for `PEN_CHORD_MS` in case Shift comes with it: when it went down, and the timer that sends it on. */
+    this.pendingDown = null;
+    /** The talk key's press was taken for the pen, or by a chord before the pill heard of it, and its release is nobody's. */
+    this.pressTaken = false;
+    /**
+     * The talk key and Shift together (`main.js`): a screen pen with no
+     * voice, or Done on the one that is on. False when it did not take the
+     * press — a recording's session is on — and the press is the pill's.
+     * @type {(() => boolean) | null}
+     */
+    this.onPenKey = null;
     /**
      * Where the panel goes while the floating Kuru is on (`float.js`): asked
      * with the panel's size on every `place`, and answering null while it is
@@ -407,6 +441,8 @@ class TalkKey extends EventEmitter {
     this.helper = child;
     this.helperHeld = false;
     this.shiftSent = false;
+    this.shiftAlone = null;
+    this.pressTaken = false;
     child.on("error", (err) => {
       console.error("kururu: the talk-key hook could not start —", err.message);
       if (this.helper === child) {
@@ -440,10 +476,15 @@ class TalkKey extends EventEmitter {
       this.helper = null;
       // A hold the hook was in the middle of ends with the hook: the clip
       // is sent rather than the microphone left open, as the window does
-      // when it loses focus mid-sentence.
+      // when it loses focus mid-sentence. A press the pill never heard of —
+      // held back, or the pen's — has no clip to send.
+      const heard = this.helperHeld && !this.pendingDown && !this.pressTaken;
+      this.dropPending();
+      this.pressTaken = false;
+      this.shiftAlone = null;
       if (this.helperHeld) {
         this.helperHeld = false;
-        this.toPanel("up");
+        if (heard) this.toPanel("up");
       }
       // And a hold-to-draw it was in the middle of puts the pen back, as
       // does a Shift held for the pen: its release will never come.
@@ -460,6 +501,7 @@ class TalkKey extends EventEmitter {
   }
 
   stopHelper() {
+    this.dropPending();
     const child = this.helper;
     if (!child) return;
     this.stoppingHelper = true;
@@ -496,14 +538,30 @@ class TalkKey extends EventEmitter {
         return;
       case "down":
         this.helperHeld = true;
+        this.pressTaken = false;
+        if (!this.paused && this.holdBack()) return;
         break;
       case "up":
         this.helperHeld = false;
+        if (this.pressTaken) {
+          this.pressTaken = false;
+          return;
+        }
+        // A tap inside the wait: the press goes on first, then its release.
+        this.sendPending();
         break;
       case "escape":
         if (this.escapeFilter?.()) return;
+        this.sendPending();
         break;
       case "chord":
+        if (this.pressTaken) return;
+        // A shortcut before the pill heard of the press: nothing for it to open and drop.
+        if (this.pendingDown) {
+          this.dropPending();
+          this.pressTaken = true;
+          return;
+        }
         break;
       default:
         return;
@@ -513,14 +571,56 @@ class TalkKey extends EventEmitter {
   }
 
   /**
+   * The talk key went down: true when the pill is not to hear of it now —
+   * Shift is already held alone, and the press was the pen's, or it is held
+   * back for `PEN_CHORD_MS` to see whether Shift comes with it. False sends
+   * it on as it always went: no pen to give, or a recording under way.
+   */
+  holdBack() {
+    if (!this.onPenKey || this.phase === "listening") return false;
+    if (this.shiftAlone !== null) {
+      if (!this.onPenKey()) return false;
+      this.pressTaken = true;
+      return true;
+    }
+    const at = performance.now();
+    this.pendingDown = { at, timer: setTimeout(() => this.sendPending(), PEN_CHORD_MS) };
+    return true;
+  }
+
+  /** The held-back press, on to the pill, saying how late it is so a tap is still a tap. */
+  sendPending() {
+    const pending = this.pendingDown;
+    if (!pending) return;
+    this.dropPending();
+    if (this.paused) return;
+    this.toPanel("down", performance.now() - pending.at);
+  }
+
+  dropPending() {
+    if (this.pendingDown) clearTimeout(this.pendingDown.timer);
+    this.pendingDown = null;
+  }
+
+  /**
    * Shift, from the hook, for the pen while recording (`web/src/shiftpen.ts`
    * decides what a press was). Every Shift in every application reaches
    * here, and only a press that went down while the pill was recording is
    * handed on: the rest of the time Shift is the applications', and the
    * page is not woken for every capital letter. A press handed on is
-   * followed to its release, recording or not by then.
+   * followed to its release, recording or not by then. Every press alone
+   * is followed here too, for the talk key's pair with it (`holdBack`).
    */
   fromShift(event) {
+    // Shift alone, followed whatever the pill is doing: with the talk key it is the pen (`holdBack`).
+    if (event.down === true) this.shiftAlone = Number.isFinite(event.at) ? performance.now() : null;
+    else if (event.down === false || event.chord) this.shiftAlone = null;
+    const pending = this.pendingDown;
+    if (event.down === true && pending && !this.paused && this.onPenKey) {
+      this.dropPending();
+      if (this.onPenKey()) this.pressTaken = true;
+      else this.toPanel("down", performance.now() - pending.at);
+    }
     const contents = this.panelContents();
     if (!contents || this.paused) {
       this.shiftSent = false;
@@ -901,10 +1001,12 @@ class TalkKey extends EventEmitter {
     return this.panel && !this.panel.isDestroyed() ? this.panel.webContents : null;
   }
 
-  toPanel(ev) {
+  /** A gesture to the pill's page; a press held back says by how many milliseconds, which a page from before it ignores. */
+  toPanel(ev, late = 0) {
     const contents = this.panelContents();
     if (!contents) return;
-    contents.send("kururu:talk", ev);
+    if (late > 0) contents.send("kururu:talk", ev, Math.round(late));
+    else contents.send("kururu:talk", ev);
     if (this.deafTimer) this.reloadDeafLater();
     if (ev === "down" || ev === "toggle") this.expectAnswer(contents);
   }

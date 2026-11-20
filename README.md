@@ -453,7 +453,9 @@ are — macOS asks once for **Input Monitoring** — and the pill floats over
 whatever you are in: listening, what was heard, Kuru's answer as it speaks.
 Drag it where you like; its ✕ is the same ✕. Hold, tap and Escape work as in
 the window; a key pressed with the talk key held is a shortcut for the app in
-front, and the clip is dropped. If macOS has not allowed the helper yet the
+front, and the clip is dropped. **The talk key with Shift** is the screen
+pen and no recording: draw on whatever is in front, then Done on the pill
+puts the marks in Kuru's box to write about. If macOS has not allowed the helper yet the
 window's own key keeps working, and **⌥Space** can toggle the microphone from
 anywhere without a permission, off by default.
 

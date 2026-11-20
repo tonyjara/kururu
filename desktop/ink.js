@@ -195,10 +195,12 @@ class Ink extends EventEmitter {
    * @param {() => boolean} [options.withVoice]  whether every recording starts with the pen down (Settings → Voice → Screen pen)
    * @param {(on: boolean) => void} [options.penPanel]  the pill shown for a session whose tools are not already in it, and let go after
    * @param {(contents: import("electron").WebContents) => number | null} [options.pencilFront]  how near the front a page's window is for a press on its pencil, lower nearer; null for one that is not in front
+   * @param {(owner: import("electron").WebContents) => void} [options.bringUp]  a session the talk key and Shift started was sent: the box its marks land in put where it can be seen
    * @param {boolean} options.debug
    */
-  constructor({ helperPath, pagePath, preloadPath, voiceClient, mainWindow, pill, denyList = () => DENY_DEFAULT, whatAt = null, withVoice = () => true, penPanel = () => {}, pencilFront = () => null, debug = false }) {
+  constructor({ helperPath, pagePath, preloadPath, voiceClient, mainWindow, pill, denyList = () => DENY_DEFAULT, whatAt = null, withVoice = () => true, penPanel = () => {}, pencilFront = () => null, bringUp = () => {}, debug = false }) {
     super();
+    this.bringUp = bringUp;
     this.helperPath = helperPath;
     this.pagePath = pagePath;
     this.preloadPath = preloadPath;
@@ -421,9 +423,13 @@ class Ink extends EventEmitter {
    * Recording not allowed — which is asked for here, the first time, with
    * the system's own prompt.
    *
-   * @param {{ voice: boolean, asker?: import("electron").WebContents | null }} options
+   * `key` is a session the talk key and Shift started (`TalkKey.onPenKey`),
+   * most likely over another application: its Done brings the box its marks
+   * land in up (`bringUp`), since there is no drawer open in front of it.
+   *
+   * @param {{ voice: boolean, asker?: import("electron").WebContents | null, key?: boolean }} options
    */
-  async start({ voice, asker = null }) {
+  async start({ voice, asker = null, key = false }) {
     if (this.session || this.starting) return this.state();
     const pressed = performance.now();
     const owner = voice ? this.voiceClient() : asker;
@@ -460,6 +466,7 @@ class Ink extends EventEmitter {
       this.session = {
         id: randomBytes(6).toString("hex"),
         voice,
+        key: key === true && !voice,
         owner,
         at: Date.now(),
         pen: true,
@@ -566,6 +573,7 @@ class Ink extends EventEmitter {
     penLog("start", {
       id: session.id,
       voice: session.voice,
+      ...(session.key ? { from: "talk key + Shift" } : {}),
       ms: ms(timing.pressed),
       access: timing.access,
       accessMs: timing.accessMs,
@@ -1154,6 +1162,7 @@ class Ink extends EventEmitter {
     if (from && from.id !== session.owner.id && !this.overlayOf(from) && !this.isOurs(from)) return;
     this.closeBurst();
     this.tellOwner(session.owner, { ev: "send", id: session.id, voice: session.voice });
+    if (session.key && !session.owner.isDestroyed()) this.bringUp(session.owner);
     clearTimeout(session.sendTimer);
     session.sendTimer = setTimeout(() => {
       if (this.session === session) this.cancel(session.id, "the page did not take the marks");

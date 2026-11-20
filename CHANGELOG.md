@@ -15,6 +15,14 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **The talk key and Shift draw without talking.** Pressed together, in
+  either order, from any app while the talk key works in every app, they
+  put the screen pen down with nothing recorded and nothing sent: draw,
+  then Done on the pill (or the two keys again) puts the marks in Kuru's
+  box — the floating chat's when it is on, the window's otherwise, brought
+  up for you — to write about and send. The plain talk key is as it was;
+  its microphone opens about a tenth of a second later, the time it waits
+  to see whether Shift is coming.
 - **The floating Kuru shows your agents.** A small count on the logo's
   lower corner says how many agents are working, in orange, and how many
   are waiting on you, in yellow, beside it; it is gone while nothing is

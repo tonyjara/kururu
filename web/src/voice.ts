@@ -208,11 +208,11 @@ export function voiceNow(): { phase: VoicePhase; hushed: boolean } {
  */
 let chordedHold = false;
 
-export function applyTalkGesture(gesture: TalkGesture): void {
+export function applyTalkGesture(gesture: TalkGesture, late = 0): void {
   switch (gesture) {
     case "down":
       chordedHold = false;
-      talkDown();
+      talkDown(late);
       return;
     case "up":
       if (chordedHold) {
@@ -758,15 +758,20 @@ function installOutbox(): () => void {
 // The key, and the button that is the same key for a thumb
 // ---------------------------------------------------------------------------
 
-/** The talk key or the mic button went down. */
-export function talkDown(): void {
+/**
+ * The talk key or the mic button went down — `late` milliseconds ago, for a
+ * press the hook held back to see whether Shift came with it (the pen alone,
+ * `desktop/talkkey.js`), so a tap or a hold is measured from the key and not
+ * from the wait.
+ */
+export function talkDown(late = 0): void {
   if (remote) {
     remote("down");
     return;
   }
   // The microphone is a comment's until its button comes up.
   if (dictating) return;
-  pressedAt = performance.now();
+  pressedAt = performance.now() - (Number.isFinite(late) && late > 0 && late < TAP_MS ? late : 0);
   pressConsumed = false;
   if ((recording || opening) && mode === "toggle") {
     // A toggled recording ends on the next press, and that press's release

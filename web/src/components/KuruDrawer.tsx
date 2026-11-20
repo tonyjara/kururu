@@ -2924,7 +2924,7 @@ function Composer({
                   ? `${penSaid} Press to put the marks in the box`
                   : ink.state.on
                     ? "The pen is with a recording; send it first"
-                    : "Draw on the screen, without talking — the marks come into this box for you to write about"
+                    : "Draw on the screen, without talking — the marks come into this box for you to write about (or the talk key and Shift, from any app)"
               }
               aria-label={penOn ? "Put the marks in the box" : "Draw on the screen"}
               aria-pressed={penOn}

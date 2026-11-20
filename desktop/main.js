@@ -201,6 +201,14 @@ const ink = new Ink({
   penPanel: (on) => talk.forPen(on),
   // The floating chat is over the window wherever both are; the window counts only while it has the keyboard.
   pencilFront: (contents) => (float.isPanel(contents) ? (float.panel?.isVisible() ? 0 : null) : win && !win.isDestroyed() && contents.id === win.webContents.id && win.isFocused() ? 1 : null),
+  // The talk key and Shift's Done: the floating chat opens itself for words
+  // that land in it while shut, and the window hands them to the chat when
+  // that is open (`kuruTarget`); otherwise the window, which is behind
+  // whatever was drawn on, comes up with them.
+  bringUp: (owner) => {
+    if (float.isPanel(owner) || float.open) return;
+    openWindow();
+  },
   debug: !PACKAGED,
 });
 
@@ -249,6 +257,31 @@ async function inkWhatAt(global, under) {
 talk.escapeFilter = () => ink.takeEscape();
 // The hook's second key: held during a session, the pen is down.
 talk.onDraw = (down) => ink.hold(down);
+/**
+ * The talk key and Shift together: the pen with no voice, as the drawer's
+ * pencil starts it, and pressed again its Done. The marks go into Kuru's
+ * box, the floating chat's while that is on and its page is there, the
+ * window's otherwise — never a chat page still loading, whose navigation
+ * would end the session it owns. With neither there is nowhere for the
+ * marks, and the press is let go rather than made a recording nobody asked
+ * for. False leaves the press to the pill: a recording's session is on.
+ */
+talk.onPenKey = () => {
+  const session = ink.session;
+  if (session) {
+    if (session.voice) return false;
+    ink.send(null);
+    return true;
+  }
+  const chat = float.enabled && float.panel && !float.panel.isDestroyed() && !float.panel.webContents.isLoading() ? float.panel.webContents : null;
+  const asker = chat ?? (win && !win.isDestroyed() ? win.webContents : null);
+  if (!asker) {
+    console.error("kururu: the talk key and Shift found no window for the marks");
+    return true;
+  }
+  void ink.start({ voice: false, asker, key: true });
+  return true;
+};
 
 /**
  * The cards popped out as windows over every application. Their pages come

@@ -609,6 +609,29 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   microphone in the tap grammar or keeps the one it has. The pencil beside
   the Kuru drawer's mic: a session with no voice, owned by the window. One
   session at a time.
+- **The talk key and Shift are the pen alone** (2026-11-20, the owner: "when
+  I press the kururu talk key + shift at the same time it only activates the
+  pen"). A session with no voice, as the pencil's (`TalkKey.onPenKey` →
+  `Ink.start({ voice: false, key: true })`), and no recording — not one
+  opened and dropped, which is what a chord with the talk key does. Either
+  key first: Shift already held alone when the talk key goes down decides
+  it on the spot; the talk key first is held back in `desktop/talkkey.js`
+  for `PEN_CHORD_MS` (120 ms) before the pill hears of it, and a Shift
+  inside that is the pen. Otherwise the press goes on late by that much,
+  saying so (`kururu:talk`'s second argument, `talkDown(late)`), so a tap
+  or a hold is measured from the key; a tap inside the wait is the press and
+  its release together, and a shortcut inside it opens nothing at all. Not
+  while the pill is listening: there the talk key ends the clip and Shift is
+  the recording's pen (below), as before. The marks belong to the floating
+  chat when it is on and its page is there, else the window; the keys
+  released change nothing, the pen ending as the pencil's does — Done, the
+  two keys again, ✕, Escape with the pen up — and its Done brings the box
+  up (`bringUp`): the chat opens itself for words that land while it is
+  shut, and the window comes forward unless the chat is open to take them.
+  It rides the pen's fast start (kept overlays, kept Screen Recording);
+  `pen.log`'s `start` line says `from: "talk key + Shift"`. The hook
+  (`--shift`) no longer counts a plain talk key's own press as a chord of
+  Shift's, so the pair works with a key that is not a modifier too.
 - **A press is drawable at once** (2026-11-19, the owner: "whenever I hit
   the pen, there's like a several seconds delay before I can draw
   sometimes"). The overlays are made a few seconds after the app starts and

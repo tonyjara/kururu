@@ -448,8 +448,13 @@ export interface DesktopVoice {
   /** The settings page is capturing a new key, so the hook should ignore the press. */
   pause(on: boolean): void;
   openInputMonitoring(): void;
-  /** The pill page only: the hook's events, delivered to no other page. */
-  onKey(listener: (gesture: TalkGesture) => void): () => void;
+  /**
+   * The pill page only: the hook's events, delivered to no other page. A
+   * press the hook held back to see whether Shift came with it (the pen
+   * alone, `desktop/talkkey.js`) comes with how late it is, in
+   * milliseconds; 0 for every other gesture, and from an app before it.
+   */
+  onKey(listener: (gesture: TalkGesture, late: number) => void): () => void;
   /** The pill page only. */
   report(state: PillReport): void;
   /**

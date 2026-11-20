@@ -43,9 +43,10 @@
 // or click while it is held. Shift is half of typing, so a press that began
 // with another modifier already down is not reported at all, and whether a
 // press was a tap, a hold or a capital letter is the pill page's to say
-// (`web/src/shiftpen.ts`), with the talk key's threshold. The talk key's
-// own modifier is not "another": Shift during a held talk key is still
-// Shift alone. Clicks are reported because Shift-click is a selection in
+// (`web/src/shiftpen.ts`), with the talk key's threshold. The talk key is
+// not "another": Shift during a held talk key is still Shift alone, and the
+// talk key pressed during a held Shift does not make it a chord — the two
+// together are the screen pen with no voice (`desktop/talkkey.js`). Clicks are reported because Shift-click is a selection in
 // the application in front — and because, once the pen is down, a click is
 // a stroke, which only the page can tell apart.
 
@@ -211,7 +212,9 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
                 shiftChord("key")
             }
         case .keyDown:
-            shiftChord("key")
+            // The talk key itself is not "another": Shift and the talk key
+            // together are the pen alone (`desktop/talkkey.js`), whichever kind of key it is.
+            if event.getIntegerValueField(.keyboardEventKeycode) != target.code { shiftChord("key") }
         default:
             break
         }
