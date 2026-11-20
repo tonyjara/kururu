@@ -31,6 +31,7 @@ import {
   defaultUse,
   durationWords,
   FILE_MAX,
+  HISTORY_KEPT,
   sizeWords,
   type AnswerValue,
   type AskFieldView,
@@ -38,6 +39,7 @@ import {
   type EnvTarget,
   type FieldOutcome,
   type FileFacts,
+  type ItemEvent,
   type UseAnswer,
   type UseRule,
   type VaultAsk,
@@ -62,6 +64,10 @@ const DONE_KEPT = 50;
 export const USE_ASK_MS = 5 * 60_000;
 /** "Allow for 15 minutes": per agent, per item, in memory. */
 export const LASTING_MS = 15 * 60_000;
+/** How long a capture's notice stays on the pages when nobody dismisses it. */
+export const NOTICE_MS = 24 * 3_600_000;
+/** And at most this many at once: the oldest goes first. */
+const NOTICES_KEPT = 20;
 
 interface ItemMeta {
   label: string;
@@ -73,7 +79,24 @@ interface ItemMeta {
   lastUse: { at: number; by: string } | null;
   /** A file item's name and size: its value is the file's base64. Absent for text. */
   file?: FileFacts | null;
+  /** How its value came to be kept, newest first, at most `HISTORY_KEPT`. */
+  history?: ItemEvent[];
 }
+
+/** An item's history with one more event at its head. */
+function withEvent(history: readonly ItemEvent[] | undefined, event: ItemEvent): ItemEvent[] {
+  return [event, ...(history ?? [])].slice(0, HISTORY_KEPT);
+}
+
+/** What `capture` is handed per item: its value, read off a command's output, and the label and rule it starts with. */
+export interface CapturedValue {
+  name: string;
+  label: string;
+  value: string;
+  use: UseRule | null;
+}
+
+type Notice = Extract<VaultAsk, { kind: "captured" }>;
 
 type Timer = unknown;
 
@@ -131,6 +154,15 @@ function adoptItems(raw: unknown): Map<string, ItemMeta> {
     const last = m.lastUse && typeof m.lastUse === "object" ? (m.lastUse as Record<string, unknown>) : null;
     const f = m.file && typeof m.file === "object" ? (m.file as Record<string, unknown>) : null;
     const file = f && typeof f.name === "string" && typeof f.size === "number" && Number.isFinite(f.size) ? { name: f.name, size: f.size } : null;
+    const history = Array.isArray(m.history)
+      ? m.history
+          .filter((e): e is ItemEvent => {
+            const v = e as Partial<ItemEvent> | null;
+            return Boolean(v) && typeof v!.at === "number" && Number.isFinite(v!.at) && typeof v!.by === "string" && (v!.how === "pasted" || v!.how === "captured" || v!.how === "converted");
+          })
+          .map((e) => ({ at: e.at, by: e.by, how: e.how, ...(typeof e.command === "string" ? { command: e.command } : {}) }))
+          .slice(0, HISTORY_KEPT)
+      : [];
     out.set(name, {
       label: typeof m.label === "string" ? m.label : name,
       use: m.use === "ask" ? "ask" : "free",
@@ -140,6 +172,7 @@ function adoptItems(raw: unknown): Map<string, ItemMeta> {
       by: typeof m.by === "string" ? m.by : "",
       lastUse: last && typeof last.by === "string" ? { at: num(last.at), by: last.by } : null,
       file,
+      history,
     });
   }
   return out;
@@ -150,6 +183,7 @@ export class Vault {
   private readonly open = new Map<string, OpenAsk>();
   private readonly finished = new Map<string, { at: number; outcomes: FieldOutcome[] }>();
   private readonly openUses = new Map<string, OpenUse>();
+  private readonly notices = new Map<string, { view: Notice; timer: Timer }>();
   /** `${agentId} ${name}` → until, from "Allow for 15 minutes". Gone with a restart, on purpose. */
   private readonly lasting = new Map<string, number>();
   private readonly now: () => number;
@@ -183,6 +217,13 @@ export class Vault {
         }
       }
     }
+    if (Array.isArray((r as { notices?: unknown }).notices)) {
+      for (const raw of (r as { notices: unknown[] }).notices) {
+        const v = raw as Notice;
+        if (!v || v.kind !== "captured" || typeof v.id !== "string" || typeof v.until !== "number" || !Number.isFinite(v.until) || v.until <= now || !Array.isArray(v.items)) continue;
+        this.postNotice({ kind: "captured", id: v.id, from: String(v.from ?? ""), items: v.items, command: String(v.command ?? ""), cwd: String(v.cwd ?? ""), at: Number.isFinite(v.at) ? v.at : now, until: v.until });
+      }
+    }
     if (!Array.isArray(r.open)) return;
     for (const raw of r.open) {
       const v = raw as OpenAsk["view"] & { openFor?: unknown };
@@ -200,6 +241,7 @@ export class Vault {
     const value = {
       v: 1,
       open: [...this.open.values()].map((a) => ({ ...a.view, openFor: a.openFor })),
+      notices: [...this.notices.values()].map((n) => n.view),
       finished: [...this.finished].map(([id, f]) => ({ id, at: f.at, outcomes: f.outcomes })),
     };
     try {
@@ -231,9 +273,9 @@ export class Vault {
     (this.deps.log ?? ((l) => console.log(l)))(`kururu: vault: ${line}`);
   }
 
-  /** The open asks, as every page is sent them: a command waiting first, since something is held up on it. */
+  /** The open asks, as every page is sent them: a command waiting first, since something is held up on it, and a notice last, since nothing is. */
   asks(): VaultAsk[] {
-    return [...[...this.openUses.values()].map((u) => u.view), ...[...this.open.values()].map((a) => a.view)];
+    return [...[...this.openUses.values()].map((u) => u.view), ...[...this.open.values()].map((a) => a.view), ...[...this.notices.values()].map((n) => n.view)];
   }
 
   private announce(): void {
@@ -245,7 +287,7 @@ export class Vault {
   list(): VaultItemView[] {
     return [...this.items]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, m]) => ({ name, label: m.label, use: m.use, file: m.file ?? null, store: this.deps.store.kind, env: m.env, createdAt: m.createdAt, updatedAt: m.updatedAt, by: m.by, lastUse: m.lastUse }));
+      .map(([name, m]) => ({ name, label: m.label, use: m.use, file: m.file ?? null, store: this.deps.store.kind, env: m.env, createdAt: m.createdAt, updatedAt: m.updatedAt, by: m.by, lastUse: m.lastUse, history: m.history ?? [] }));
   }
 
   item(name: string): VaultItemView | null {
@@ -394,6 +436,7 @@ export class Vault {
         by: open.view.from,
         lastUse: had?.lastUse ?? null,
         file: answered.kind === "file" ? { name: answered.name, size: answered.size } : null,
+        history: withEvent(had?.history, { at: now, by: open.view.from, how: "pasted" }),
       };
       let envFailed: string | null = null;
       if (field.env) {
@@ -436,22 +479,47 @@ export class Vault {
     const now = this.now();
     for (const [key, until] of this.lasting) if (until <= now) this.lasting.delete(key);
     if (run.agentId && asking.every((i) => this.lasting.has(`${run.agentId} ${i.name}`))) return Promise.resolve("lasting");
+    note(`waiting for the owner to allow ${asking.map((i) => i.name).join(", ")} (up to ${USE_ASK_MS / 60_000} minutes)`);
+    return this.openUse({ ...run, items: asking, lasting: run.agentId !== null, replace: false }, signal);
+  }
+
+  /**
+   * Whether a `vault capture` may put what its command prints over items
+   * already kept. Always the owner's to say, every time — no "for 15
+   * minutes", since a replaced key is gone — and asked before the command
+   * runs, so a key that can be shown only once is not made and then
+   * dropped. `owner` or `denied`, as `approve`.
+   */
+  confirmReplace(
+    run: { by: string; agentId: string | null; items: { name: string; label: string }[]; command: string; cwd: string },
+    note: (line: string) => void,
+    signal?: AbortSignal,
+  ): Promise<Approval> {
+    note(`${run.items.map((i) => i.name).join(", ")} ${run.items.length === 1 ? "is" : "are"} kept already: waiting for the owner to allow replacing ${run.items.length === 1 ? "it" : "them"} (up to ${USE_ASK_MS / 60_000} minutes). Nothing runs until then.`);
+    return this.openUse({ ...run, lasting: false, replace: true }, signal);
+  }
+
+  /** The dialog a command waits on, until the owner answers, five minutes pass, or the caller goes. */
+  private openUse(
+    run: { by: string; agentId: string | null; items: { name: string; label: string }[]; command: string; cwd: string; lasting: boolean; replace: boolean },
+    signal?: AbortSignal,
+  ): Promise<Approval> {
     const id = randomUUID().slice(0, 8);
     return new Promise<Approval>((resolve) => {
       const view: OpenUse["view"] = {
         kind: "use",
         id,
         from: run.by,
-        items: asking.map((i) => ({ name: i.name, label: i.label })),
+        items: run.items.map((i) => ({ name: i.name, label: i.label })),
         command: run.command,
         cwd: run.cwd,
-        lasting: run.agentId !== null,
-        until: now + USE_ASK_MS,
+        lasting: run.lasting,
+        until: this.now() + USE_ASK_MS,
+        ...(run.replace ? { replace: true } : {}),
       };
       const timer = this.setTimer(() => this.endUse(id, "denied", "nobody answered in time"), USE_ASK_MS);
-      this.openUses.set(id, { view, agentId: run.agentId, names: asking.map((i) => i.name), timer, resolve });
-      note(`waiting for the owner to allow ${asking.map((i) => i.name).join(", ")} (up to ${USE_ASK_MS / 60_000} minutes)`);
-      this.log(`${run.by} asks to use ${view.items.map((i) => i.name).join(", ")} (${id})`);
+      this.openUses.set(id, { view, agentId: run.agentId, names: view.items.map((i) => i.name), timer, resolve });
+      this.log(`${run.by} asks to ${run.replace ? "replace" : "use"} ${view.items.map((i) => i.name).join(", ")} (${id})`);
       signal?.addEventListener("abort", () => this.endUse(id, "denied", "the caller went away"), { once: true });
       this.announce();
     });
@@ -467,15 +535,88 @@ export class Vault {
     open.resolve(approval);
   }
 
-  /** The owner's answer to a command waiting to use items. */
+  /** The owner's answer to a command waiting to use items — or "seen" to a capture's notice, which any answer dismisses. */
   allow(id: string, answer: UseAnswer): void {
+    const notice = this.notices.get(id);
+    if (notice) {
+      this.notices.delete(id);
+      this.clearTimer(notice.timer);
+      this.announce();
+      return;
+    }
     const open = this.openUses.get(id);
     if (!open) throw new Error("That ask is closed: it was answered elsewhere, ran out of time, or its command was stopped.");
-    if (answer === "lasting" && open.agentId) {
+    if (answer === "lasting" && open.agentId && !open.view.replace) {
       const until = this.now() + LASTING_MS;
       for (const name of open.names) this.lasting.set(`${open.agentId} ${name}`, until);
     }
     this.endUse(id, answer === "deny" ? "denied" : "owner", answer === "deny" ? "the owner pressed Deny" : answer === "lasting" ? "the owner allowed it for 15 minutes" : "the owner allowed it once");
+  }
+
+  /** Whether an item by this name is kept. */
+  has(name: string): boolean {
+    return this.items.has(name);
+  }
+
+  /**
+   * Values read off a command's output by `vault capture`
+   * (`vaultcapture.ts`), kept as a pasted one is, each with a line in its
+   * history saying it was captured, by whom and with what command. An item
+   * already kept is replaced only when it is in `replace`, which the owner
+   * allowed before the command ran; one that appeared while it ran is
+   * refused. Every item kept puts one notice on the pages. Never throws, and
+   * no outcome carries a value.
+   */
+  async capture(values: readonly CapturedValue[], source: { by: string; command: string; cwd: string }, replace: ReadonlySet<string>): Promise<{ name: string; outcome: "saved" | "failed"; why?: string }[]> {
+    const outcomes: { name: string; outcome: "saved" | "failed"; why?: string }[] = [];
+    for (const v of values) {
+      const had = this.items.get(v.name);
+      if (had && !replace.has(v.name)) {
+        outcomes.push({ name: v.name, outcome: "failed", why: "it was kept by somebody else while the command ran, and replacing it was not asked for" });
+        continue;
+      }
+      try {
+        await this.deps.store.put(v.name, v.value);
+      } catch (err) {
+        outcomes.push({ name: v.name, outcome: "failed", why: err instanceof Error ? err.message : "the store refused it" });
+        continue;
+      }
+      const now = this.now();
+      this.items.set(v.name, {
+        label: v.label,
+        use: had?.use ?? (v.use === "ask" ? "ask" : defaultUse(v.name, v.label)),
+        env: had?.env ?? [],
+        createdAt: had?.createdAt || now,
+        updatedAt: now,
+        by: source.by,
+        lastUse: had?.lastUse ?? null,
+        file: null,
+        history: withEvent(had?.history, { at: now, by: source.by, how: "captured", command: source.command }),
+      });
+      outcomes.push({ name: v.name, outcome: "saved" });
+    }
+    const saved = outcomes.filter((o) => o.outcome === "saved").map((o) => o.name);
+    if (saved.length) {
+      this.persist();
+      const at = this.now();
+      this.postNotice({ kind: "captured", id: randomUUID().slice(0, 8), from: source.by, items: saved.map((name) => ({ name, label: this.items.get(name)?.label ?? name })), command: source.command, cwd: source.cwd, at, until: at + NOTICE_MS });
+      this.announce();
+    }
+    this.log(`${source.by} captured ${outcomes.map((o) => `${o.name} ${o.outcome}`).join(", ") || "nothing"}`);
+    return outcomes;
+  }
+
+  /** A notice up, with its timer; the oldest goes when there are too many. Announced by the caller. */
+  private postNotice(view: Notice): void {
+    const timer = this.setTimer(() => {
+      if (this.notices.delete(view.id)) this.announce();
+    }, Math.max(0, view.until - this.now()));
+    this.notices.set(view.id, { view, timer });
+    while (this.notices.size > NOTICES_KEPT) {
+      const [oldest, n] = this.notices.entries().next().value!;
+      this.clearTimer(n.timer);
+      this.notices.delete(oldest);
+    }
   }
 
   /** A file item's name and size, or null for text or no such item. */
@@ -505,6 +646,7 @@ export class Vault {
     if (b64 !== value) await this.deps.store.put(name, b64);
     meta.file = { name: clean, size };
     meta.updatedAt = this.now();
+    meta.history = withEvent(meta.history, { at: meta.updatedAt, by, how: "converted" });
     this.persist();
     this.log(`${by} made ${name} a file (${clean}, ${sizeWords(size)})`);
     return this.item(name)!;

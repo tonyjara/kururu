@@ -15,6 +15,16 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Agents can keep a key a command makes without seeing it.** `vault
+  capture` runs a command such as `aws iam create-access-key` itself and
+  keeps what it prints in the vault — the fields you name, read as JSON —
+  so the key never reaches the agent's screen, its transcript or a file.
+  The agent hears which items were kept and, if it asks, the parts that
+  are not secret, such as the key's id. Replacing a key already kept asks
+  you first, before the command runs; every capture puts a notice on your
+  screens saying who kept what, from which command, and the item says so
+  in Settings → Vault.
+
 - **The talk key and Shift draw without talking.** Pressed together, in
   either order, from any app while the talk key works in every app, they
   put the screen pen down with nothing recorded and nothing sent: draw,

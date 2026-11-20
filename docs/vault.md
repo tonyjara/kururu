@@ -234,6 +234,79 @@ vault run --askpass deck/sudo -- sudo -A systemctl restart thing
   process that sets another agent's id is believed, which matters as much
   as the threat model says the Keychain does.
 
+## Keeping what a command makes: `vault capture`
+
+Some keys are not pasted by the owner but printed by a program, once:
+`aws iam create-access-key` shows a secret access key in its output and
+never again. An agent that runs it in its own shell has the key on its
+screen and in its transcript. So the server runs it instead, as it runs
+`vault run`'s, and keeps what it prints (the owner, 2026-11-20, for
+Kaipago's SES keys):
+
+```sh
+vault capture kaipago/ses \
+  --json-path AccessKey.SecretAccessKey=secret \
+  --json-path AccessKey.AccessKeyId=id \
+  --print AccessKey.AccessKeyId \
+  --label "Kaipago SES sender" \
+  -- aws iam create-access-key --user-name kaipago-ses --output json
+```
+
+keeps `kaipago/ses/secret` and `kaipago/ses/id`, prints
+`AccessKey.AccessKeyId=AKIA…` on stdout and nothing else, and says on
+stderr which items were kept. `server/src/vaultcapture.ts`, through
+`POST /api/vault/capture` (loopback only).
+
+- **What is kept.** Without `--json-path`, the whole of stdout, trimmed, as
+  ITEM. With it, stdout is read as JSON and each `PATH` (`a.b`, `a[0].b`)
+  is kept as `ITEM/PART`, or as ITEM when there is no `=PART`; a number
+  or a boolean as it prints, an object as its JSON. At most eight, each at
+  most `VALUE_MAX`; stdout past a megabyte ends the command and keeps
+  nothing. `--label` names them (`Kaipago SES sender · AccessKey.…`),
+  `--use ask` makes a new one ask before each use; a replaced item keeps
+  its rule.
+- **What the caller sees.** Never stdout, not even masked: it is read
+  whole, kept, and dropped. `--print PATH` shows a field that is not
+  secret (an id, an ARN, a region) on stdout, after everything was kept,
+  and is refused for a path that reads as one (`secret`, `password`,
+  `token`, `private`, `credential`, `signing`). The command's stderr is
+  held until it ends and then shown masked with everything stdout held —
+  all of it, each line, each string in its JSON — since an error that
+  quotes the request is the usual way a key leaks, and the values are not
+  known before stdout is. Over-masking costs a word in an error message.
+- **When it fails.** A command that exits non-zero keeps nothing and the
+  CLI exits with its code, its masked stderr above. A command that
+  succeeded has made its key, so when a `--json-path` is missing none of
+  the fields is kept and **the whole output is kept as ITEM instead**,
+  when that name is free; the caller hears which paths were missing and
+  the keys that were beside them, never a value, and exits 1. If ITEM is
+  taken too, it is told the key must be deleted or rotated at its source.
+- **Replacing asks first.** An item already kept is replaced only when
+  the owner allows it, in the same dialog as an approval, titled *Replace
+  a secret?*, with **Replace** and **Deny** and no fifteen-minute
+  allowance — asked *before* the command runs, because a key made and
+  then refused would be lost. Unanswered in five minutes, or denied,
+  nothing runs (exit 77). An item that appeared while the command ran is
+  not replaced either.
+- **What is written down.** The item's history (`history` in
+  `vault.json`, newest ten) gets `captured`, who, when and the command,
+  masked; a pasted value gets `pasted` and `vault convert` `converted`.
+  `vault list` and Settings → Vault say *captured … by … from …*. The use
+  log gets a line with `kind: "capture"`. And every page gets a notice,
+  *Kept from a command*, with who, the command, where and the items: a
+  `captured` entry among the vault's asks, kept across restarts for a day
+  or until **OK** on any page.
+- **Afterwards** the items are ordinary: `vault run --secret
+  kaipago/ses/secret=AWS_SECRET_ACCESS_KEY -- …`.
+- **There is no `vault put`** reading a value from stdin. It would put the
+  value in a pipeline the agent wrote — one `tee` or typo from the screen —
+  and in the CLI's process, which never holds one. A pipeline goes after
+  `--` as `sh -c '…'`. The command's stdin is closed.
+
+The rule for agents, in `vault --help`, `ask_secret`'s description and the
+owner's agent briefs: **a secret a command creates goes through `vault
+capture`, never to the screen or a file.**
+
 ## Approval
 
 Each item is `free` or `ask` (`UseRule`). An item starts at `ask` when its
@@ -304,7 +377,12 @@ the Keychain on a Mac, service `kururu-config`, account `<file>:<field>`
 
 ## Tests
 
-`server/test/vaultitems.test.ts` drives an ask from open to answer with a
+`server/test/vaultcapture.test.ts` runs real `sh -c` stand-ins for the AWS
+CLI through a real `Vault` with its store in memory and greps everything
+that left — the caller's events, the use log, `vault.json`, the pages, the
+log lines — for the made-up key; it covers a missing path, a failed
+command's stderr, a replace denied and allowed, and an item that appeared
+mid-run. `server/test/vaultitems.test.ts` drives an ask from open to answer with a
 store in memory and a scratch home, a file field and `convertToFile`
 included, and greps everything that left the vault
 — what pages were sent, the log, `vault.json`, the caller's answer — for the

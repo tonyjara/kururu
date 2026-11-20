@@ -397,6 +397,11 @@ export class VaultRuns {
     return this.deps.valueOf(t.name).catch(() => null);
   }
 
+  /** A line in the use log, for a capture (`vaultcapture.ts`), which runs a command of its own. */
+  record(use: VaultUse): void {
+    this.write(use);
+  }
+
   private write(use: VaultUse): void {
     const path = this.deps.logPath();
     try {

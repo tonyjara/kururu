@@ -1,7 +1,7 @@
 /**
  * The vault for programs on this Mac: `vault ask`, `vault list`, `vault
- * run`, `vault convert` and the askpass `vault run --askpass` points sudo at
- * (`server/src/vault-cli.ts`).
+ * run`, `vault capture`, `vault convert` and the askpass `vault run
+ * --askpass` points sudo at (`server/src/vault-cli.ts`).
  *
  * Programs on this Mac only — loopback, no `Origin`, nothing a proxy added
  * (`localCaller`, as `/mcp/web` is) — and behind the gate as well, which on a
@@ -22,6 +22,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { cardCode } from "../../../shared/board";
 import { adoptAskRequest, itemLine, outcomeLines, validItemName } from "../../../shared/vaultitems";
 import { harness, host, vault, vaultRuns, workspaces } from "../context";
+import { adoptCaptureRequest, runCapture } from "../vaultcapture";
 import { adoptRunRequest, type RunEvent } from "../vaultrun";
 import { localCaller } from "../web/chain";
 import { json, readJsonBody } from "./respond";
@@ -167,6 +168,49 @@ export const vaultRoutes: Route[] = [
         if (!res.writableEnded && !hangup.signal.aborted) res.write(`${JSON.stringify(ev)}\n`);
       };
       await vaultRuns.run(run, callerName(agentOf(body)), emit, hangup.signal);
+      if (!res.writableEnded) res.end();
+    },
+  },
+
+  /**
+   * `vault capture`: a command run as `run` runs one, its stdout kept as
+   * items and never sent back (`vaultcapture.ts`). The same JSON lines as a
+   * run's — notes, the masked stderr, the fields asked to be printed, the
+   * exit — and hanging up ends the command, as it does a run's.
+   */
+  {
+    path: "/api/vault/capture",
+    method: "POST",
+    handle: async (req, res) => {
+      if (refuseRemote(req, res)) return;
+      let body: Record<string, unknown>;
+      try {
+        const raw = await readJsonBody(req, 512 * 1024);
+        body = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+      } catch {
+        json(res, { error: "that was not JSON" }, 400);
+        return;
+      }
+      const capture = adoptCaptureRequest(body);
+      if ("error" in capture) {
+        json(res, { error: capture.error }, 400);
+        return;
+      }
+      const hangup = new AbortController();
+      res.on("close", () => {
+        if (!res.writableFinished) hangup.abort();
+      });
+      res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
+      const emit = (ev: RunEvent) => {
+        if (!res.writableEnded && !hangup.signal.aborted) res.write(`${JSON.stringify(ev)}\n`);
+      };
+      await runCapture(capture, callerName(agentOf(body)), emit, hangup.signal, {
+        has: (name) => vault.has(name),
+        labelOf: (name) => vault.item(name)?.label ?? null,
+        confirmReplace: (run, note, signal) => vault.confirmReplace(run, note, signal),
+        keep: (values, source, replace) => vault.capture(values, source, replace),
+        record: (use) => vaultRuns.record(use),
+      });
       if (!res.writableEnded) res.end();
     },
   },

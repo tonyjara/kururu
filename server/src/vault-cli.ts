@@ -6,6 +6,11 @@
  * `list` prints names, and `run` sends the command to the server, which runs
  * it with the items in its environment — or a file item as a temporary
  * file, its path in the environment — and streams its output back masked.
+ * `capture` is `run` the other way round: the server runs a command that
+ * makes a secret and keeps what it prints, and the caller hears what was
+ * kept. There is no `vault put` reading a value from stdin, because that
+ * would be a value in this process and in a pipeline the agent wrote; a
+ * pipeline that is needed goes after `--` as `sh -c '…'`.
  * A CLI that fetched a value and handed it to a command would make a fetch
  * the interface, and anything that can run this can run a fetch and print it.
  *
@@ -86,6 +91,33 @@ const HELP = `vault — keep secrets out of transcripts.
       vault run --askpass deck/sudo -- sudo -A systemctl restart thing
       Every run is logged: who, which items, the command, where, when.
 
+  vault capture ITEM [--json-path PATH[=PART]]… [--print PATH]… [--label TEXT] [--use ask] -- COMMAND [ARGS…]
+      For a secret a command makes — an access key, a token a CLI mints:
+      the server runs COMMAND, keeps what it prints on stdout in the vault,
+      and never shows it to you. Without --json-path the whole of stdout
+      (trimmed) is the item ITEM. With --json-path the output is read as
+      JSON and each PATH (AccessKey.SecretAccessKey, Items[0].Key) is kept
+      as ITEM/PART, or as ITEM when there is no =PART:
+        vault capture kaipago/ses \\
+          --json-path AccessKey.SecretAccessKey=secret \\
+          --json-path AccessKey.AccessKeyId=id \\
+          --print AccessKey.AccessKeyId \\
+          --label "Kaipago SES sender" \\
+          -- aws iam create-access-key --user-name kaipago-ses --output json
+      keeps kaipago/ses/secret and kaipago/ses/id, and prints only
+      AccessKey.AccessKeyId=… on stdout. --print is for what is not secret
+      (an id, an ARN, a region) and refuses a path that reads as one. You
+      are told on stderr which items were kept; stdout is never shown, and
+      the command's stderr is shown with everything stdout held masked.
+      If a PATH is missing from output the command made, none is kept and
+      the whole output is kept as ITEM instead (when that name is free), so
+      a key that is shown once is not lost. Replacing an item already kept
+      waits for the owner to allow it, before COMMAND runs (exit 77 if they
+      do not). The command's stdin is closed; for a pipeline, sh -c '…'.
+      Use the items like any other: vault run --secret kaipago/ses/secret=…
+      Exit 0 when everything was kept, the command's code when it failed
+      (nothing kept), 1 when it ran but not everything could be kept.
+
   vault list
       The vault's items: name, label, whether it is a file (its name and
       size), whether a use asks the owner first, the env files each was
@@ -105,7 +137,8 @@ const HELP = `vault — keep secrets out of transcripts.
 
 Never print, echo or cat a secret, read it from the Keychain yourself, or
 ask the owner to paste one into a chat: ask with \`vault ask\`, use it with
-\`vault run\`. Exit codes: 0 done, 1 not everything was saved, 2 a usage
+\`vault run\`. A secret a command creates goes through \`vault capture\`,
+never to the screen or a file. Exit codes: 0 done, 1 not everything was saved, 2 a usage
 error or a refusal, 3 an ask nobody answered in time, 6 no kururu
 server, 77 not allowed; a run otherwise
 exits with its command's code.
@@ -325,12 +358,26 @@ async function runCommand(args: string[]): Promise<void> {
   const argv = args.slice(i + 1);
   if (args[i] !== "--" || !argv.length) die("put the command after --: vault run --secret ITEM=VAR -- command args");
   if (!secrets.length && !files.length && !askpass) die("name an item: --secret ITEM=VAR, --file ITEM=VAR or --askpass ITEM");
+  await streamCommand("/api/vault/run", { argv, cwd: process.cwd(), env: callerEnv(), secrets, files, askpass, agentId });
+}
+
+/** This process's environment, which the command is run with. */
+function callerEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") env[k] = v;
-  const payload = JSON.stringify({ argv, cwd: process.cwd(), env, secrets, files, askpass, agentId });
+  return env;
+}
+
+/**
+ * A command the server runs, `run`'s or `capture`'s: its JSON lines turned
+ * back into stdout, stderr and kururu's notes, and this process exiting with
+ * the code the last line says.
+ */
+async function streamCommand(path: string, body: unknown): Promise<void> {
+  const payload = JSON.stringify(body);
   await new Promise<void>((resolve) => {
     const req = request(
-      { host: "127.0.0.1", port, path: "/api/vault/run", method: "POST", headers: { ...tokenHeaders(), "content-type": "application/json", "content-length": Buffer.byteLength(payload) } },
+      { host: "127.0.0.1", port, path, method: "POST", headers: { ...tokenHeaders(), "content-type": "application/json", "content-length": Buffer.byteLength(payload) } },
       (res) => {
         if ((res.statusCode ?? 0) >= 400) {
           const chunks: Buffer[] = [];
@@ -394,6 +441,38 @@ async function runCommand(args: string[]): Promise<void> {
   });
 }
 
+/**
+ * `capture ITEM [--json-path PATH[=PART]]… [--print PATH]… [--label TEXT]
+ * [--use ask] -- COMMAND`: the flags up to `--`, the command after it. The
+ * value never comes here: the server runs the command and keeps its output.
+ */
+async function captureCommand(args: string[]): Promise<void> {
+  const [item, ...rest] = args;
+  if (!item || item.startsWith("-")) die("name the item first: vault capture kaipago/ses --json-path AccessKey.SecretAccessKey=secret -- aws iam create-access-key …");
+  const paths: { path: string; part: string | null }[] = [];
+  const print: string[] = [];
+  let label: string | null = null;
+  let use: string | null = null;
+  let i = 0;
+  for (; i < rest.length; i += 1) {
+    const flag = rest[i]!;
+    if (flag === "--") break;
+    const value = rest[i + 1];
+    if (value === undefined) die(`${flag} needs a value`);
+    i += 1;
+    if (flag === "--json-path") {
+      const at = value.lastIndexOf("=");
+      paths.push(at < 0 ? { path: value, part: null } : { path: value.slice(0, at), part: value.slice(at + 1) });
+    } else if (flag === "--print") print.push(value);
+    else if (flag === "--label") label = value;
+    else if (flag === "--use") use = value;
+    else die(`unknown flag ${flag}; see vault --help`);
+  }
+  const argv = rest.slice(i + 1);
+  if (rest[i] !== "--" || !argv.length) die("put the command after --: vault capture ITEM -- command args");
+  await streamCommand("/api/vault/capture", { argv, cwd: process.cwd(), env: callerEnv(), item, paths, print, label, use, agentId });
+}
+
 /** `convert ITEM --to-file NAME`: the item's line after, never its value. */
 async function convertCommand(args: string[]): Promise<void> {
   const [name, flag, file, ...rest] = args;
@@ -446,6 +525,7 @@ async function main(): Promise<void> {
   }
   if (command === "ask") return askCommand(rest);
   if (command === "run") return runCommand(rest);
+  if (command === "capture") return captureCommand(rest);
   if (command === "askpass") return askpassCommand();
   if (command === "to-files") return toFilesCommand();
   if (command === "convert") return convertCommand(rest);

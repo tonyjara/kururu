@@ -142,7 +142,7 @@ function Kept({ readOnly }: { readOnly: boolean }) {
         title="Kept in the vault"
         lead={
           <>
-            What you pasted into the vault's dialog, kept in {where}. Agents use an item with <Mono>vault run</Mono>, which gives the command the value and the agent only its output, masked.
+            What you pasted into the vault's dialog, and what agents kept from a command that made a key (<Mono>vault capture</Mono>), kept in {where}. Agents use an item with <Mono>vault run</Mono>, which gives the command the value and the agent only its output, masked.
           </>
         }
         foot="An item that asks opens a dialog each time a command would use it: Allow once, Allow for 15 minutes, or Deny. Removing an item leaves any env file it was written to as it is. Anything running as you can still read the Keychain directly; see docs/vault.md."
@@ -155,7 +155,9 @@ function Kept({ readOnly }: { readOnly: boolean }) {
               item.file ? kindWords(item.file) : null,
               item.env.length ? `also in ${item.env.map((e) => `${e.variable} in ${e.file}`).join(", ")}` : null,
               item.lastUse ? `last used ${when(item.lastUse.at)} by ${item.lastUse.by}` : "never used",
-              `saved ${when(item.updatedAt)}${item.by ? ` for ${item.by}` : ""}`,
+              item.history?.[0]?.how === "captured"
+                ? `captured ${when(item.updatedAt)}${item.by ? ` by ${item.by}` : ""} from ${item.history[0].command ?? "a command"}`
+                : `saved ${when(item.updatedAt)}${item.by ? ` for ${item.by}` : ""}`,
             ].filter(Boolean);
             return (
               <Readout
@@ -189,7 +191,7 @@ function Kept({ readOnly }: { readOnly: boolean }) {
           })
         )}
       </Group>
-      <Group title="Recent uses" foot="Every command run with a vault item, newest first, the last fifty: who, which items, the command as it was written, where, and how it ended. No value is kept, and a value typed into a command is masked here too.">
+      <Group title="Recent uses" foot="Every command run with a vault item or captured into one, newest first, the last fifty: who, which items, the command as it was written, where, and how it ended. No value is kept, and a value typed into a command is masked here too.">
         {page.uses.length === 0 ? (
           <Empty>No command has used the vault yet.</Empty>
         ) : (
@@ -201,11 +203,11 @@ function Kept({ readOnly }: { readOnly: boolean }) {
                   {use.by} · {use.names.join(", ")}
                 </>
               }
-              value={use.approved === "denied" ? "Not run" : use.code === null ? "Ended" : `Exit ${use.code}`}
+              value={use.approved === "denied" ? "Not run" : use.code === null ? "Ended" : use.kind === "capture" ? (use.code === 0 ? "Kept" : `Exit ${use.code}`) : `Exit ${use.code}`}
               tone={use.approved === "denied" ? "off" : use.code === 0 ? "ok" : "bad"}
               hint={
                 <>
-                  {when(use.at)} · {APPROVED[use.approved]} · <Mono>{use.command}</Mono> in {use.cwd}
+                  {when(use.at)} · {use.kind === "capture" ? (use.approved === "owner" ? "captured, replacing with your leave" : use.approved === "denied" ? "capture not allowed to replace" : "captured") : APPROVED[use.approved]} · <Mono>{use.command}</Mono> in {use.cwd}
                 </>
               }
             />

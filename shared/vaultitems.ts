@@ -282,6 +282,30 @@ export type VaultAsk =
       /** Whether "for 15 minutes" is offered: only to a caller that is an agent kururu knows. */
       lasting: boolean;
       until: number;
+      /**
+       * A `vault capture` that would put a new value over items already
+       * kept: asked before the command runs, since the command may make a
+       * key that can be shown only once. Answered Allow once or Deny.
+       */
+      replace?: boolean;
+    }
+  | {
+      /**
+       * A notice, not a question: a command's output was kept in the vault
+       * (`vault capture`), and the owner is told who did it and with what,
+       * as they would have seen the dialog had it been pasted. Dismissed by
+       * the `vault-allow` a page already sends, from any page, for all.
+       */
+      kind: "captured";
+      id: string;
+      from: string;
+      items: { name: string; label: string }[];
+      /** The command, clipped and masked. */
+      command: string;
+      cwd: string;
+      at: number;
+      /** When it goes by itself if nobody dismisses it. */
+      until: number;
     };
 
 /**
@@ -313,6 +337,21 @@ export interface FileFacts {
   size: number;
 }
 
+/**
+ * How an item's value came to be kept, newest first in its history: pasted
+ * into the dialog, captured from a command's output (`vault capture`, with
+ * the command as written, masked), or made a file by `vault convert`.
+ */
+export interface ItemEvent {
+  at: number;
+  by: string;
+  how: "pasted" | "captured" | "converted";
+  command?: string;
+}
+
+/** How many of those an item keeps. */
+export const HISTORY_KEPT = 10;
+
 /** An item as Settings and `list_secrets` show it: never a value. */
 export interface VaultItemView {
   name: string;
@@ -329,6 +368,8 @@ export interface VaultItemView {
   /** Who asked for it to be saved, last. */
   by: string;
   lastUse: { at: number; by: string } | null;
+  /** How its value came to be kept, newest first. Absent for an item kept before 2026-11-20. */
+  history?: ItemEvent[];
 }
 
 /**
@@ -353,7 +394,9 @@ export function itemLine(item: VaultItemView): string {
   const env = item.env.map((e) => `${e.variable} in ${e.file}`).join(", ");
   const used = item.lastUse ? `, last used ${new Date(item.lastUse.at).toISOString().slice(0, 16).replace("T", " ")} by ${item.lastUse.by}` : "";
   const file = item.file ? `${kindWords(item.file)}; ` : "";
-  return `${item.name} — ${item.label} (${file}${item.use === "ask" ? "asks before each use" : "free to use"}${env ? `; also written to ${env}` : ""}${used})`;
+  const last = item.history?.[0];
+  const captured = last?.how === "captured" ? `, captured ${new Date(last.at).toISOString().slice(0, 16).replace("T", " ")} by ${last.by}` : "";
+  return `${item.name} — ${item.label} (${file}${item.use === "ask" ? "asks before each use" : "free to use"}${env ? `; also written to ${env}` : ""}${captured}${used})`;
 }
 
 /**
@@ -460,6 +503,8 @@ export interface VaultUse {
   /** The command's exit code, or null when it never ran or was ended. */
   code: number | null;
   ms: number;
+  /** A `vault capture`: the items are what its output was kept as, not what it was given. Absent for a run. */
+  kind?: "capture";
 }
 
 /** Settings → Vault's own sections: what is kept, and what was used. */
