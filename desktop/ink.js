@@ -19,14 +19,33 @@
  * itself (`finish`), so a clip and its ink end together whichever ended
  * first: the talk key, the pill's Send or Done.
  *
- * **The overlays exist only while a session does**, one per display, made at
- * the start and closed at the end. A transparent window over every display
- * all day, for a feature used a minute at a time, is a window server
- * compositing nothing for hours and one more click-through window that can
- * go wrong; a stuck one is a Mac where nothing can be clicked. So every way
- * out closes them: Done, ✕, the shortcut, the owner's own end,
- * the owner's page going away (the watchdog), an overlay's renderer dying,
- * and a send the owner never answers.
+ * **The overlays are on the screen only while a session is**, one per
+ * display, and every way out takes them off it: Done, ✕, the shortcut, the
+ * owner's own end, the owner's page going away (the watchdog), an overlay's
+ * renderer dying, and a send the owner never answers. A stuck one is a Mac
+ * where nothing can be clicked. They are made once, though, and kept hidden
+ * between sessions (`warm`, `kept`): hidden is ordered out, which the window
+ * server composites nothing for and the mouse never reaches, and each way
+ * out lets the mouse through before it hides one. They used to be made at
+ * every press and closed at every end, and a press then waited for a new
+ * window and a new renderer to load before a stroke could land — 90 to
+ * 270 ms in a quiet test at load 60 to 90, and seconds on a Mac with its
+ * memory pushed out to swap (the owner, 2026-11-19: "whenever I hit the pen,
+ * there's like a several seconds delay before I can draw sometimes"). The
+ * price is one sleeping renderer per display for the life of the app, about
+ * 90 MB. A display coming, going or changing shape makes them again.
+ *
+ * **Screen Recording is asked once, not at every press.** The helper answers
+ * one request at a time, in order, and the marks a session just sent are
+ * inked there after it ends; a press soon after Send waited behind those
+ * pictures for the helper to say what it had said every time before — 1.8 s
+ * behind four marks at load 80. So a "granted" is kept (from the helper's
+ * first line, and from every answer), a press with it puts the pen down at
+ * once, and the helper is asked again behind the work: a "denied" then ends
+ * the pen, not the recording, with the same refusal as before. Only a press
+ * with no answer kept waits for one. Every start writes how long the pen took
+ * to be drawable to `pen.log`, and any answer from the helper slower than a
+ * second is written there too, with how many were ahead of it.
  *
  * **One still per burst, at its first pen-down**, of that display only, with
  * kururu's overlays and the pill left out by the helper's filter. What is
@@ -85,10 +104,11 @@ const { BrowserWindow, globalShortcut, screen, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const { EventEmitter } = require("node:events");
-const { existsSync, mkdtempSync, readFileSync, rmSync } = require("node:fs");
+const { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createInterface } = require("node:readline");
+const { stateDir } = require("./runner");
 const { neverActivates, staysUp } = require("./stays");
 const { BURST_GAP_MS, FRAME_LONG_EDGE, MARKS_MAX, cropRect, pencilHit, pointOf, rectOf, strokesBox, windowNumberOf } = require("./inkshape");
 
@@ -114,6 +134,43 @@ const SEND_ANSWER_MS = 15_000;
 const HELPER_ANSWER_MS = 8_000;
 /** Where macOS keeps the switch the helper needs. */
 const SCREEN_RECORDING = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+/** What a press says when Screen Recording is off, whether the helper said so before the pen went down or after. */
+const NO_SCREEN_RECORDING = "Kururu may not take pictures of the screen yet. Turn it on in System Settings → Privacy & Security → Screen Recording, then press the pen again.";
+/** An answer from the helper slower than this is written to `pen.log`, with how many were ahead of it. */
+const SLOW_HELPER_MS = 1000;
+/** How long the displays get to settle after a change before the kept overlays are made again for them. */
+const DISPLAY_SETTLE_MS = 800;
+/** How long an ended session's overlays stay ordered in, transparent and letting the mouse through, for their pages to paint blank. */
+const HIDE_AFTER_MS = 100;
+/** `pen.log` is moved aside at this size, as `pill.log` is. */
+const LOG_MAX_BYTES = 256 * 1024;
+
+/**
+ * One line of `pen.log`: how long each press took to put a pen on the
+ * screen, and the helper when it was slow. "There's a delay sometimes" is
+ * a thing nobody can see after it has passed; this is where it is kept.
+ */
+function penLog(what, fields = {}) {
+  try {
+    const file = path.join(stateDir(), "pen.log");
+    mkdirSync(path.dirname(file), { recursive: true });
+    if (existsSync(file) && statSync(file).size > LOG_MAX_BYTES) renameSync(file, `${file}.1`);
+    appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), what, ...fields })}\n`);
+  } catch {
+    // The log is for afterwards; it is not a reason to fail now.
+  }
+}
+
+/** The 1-minute load average, for the log: a slow press on a busy Mac reads differently from one on a quiet Mac. */
+const loadNow = () => Math.round(os.loadavg()[0] ?? 0);
+
+/** Milliseconds, rounded to one place, for the log. */
+const ms = (since) => Math.round((performance.now() - since) * 10) / 10;
+
+/** Whether a kept overlay was made for a display as it is now. */
+function sameBounds(a, b) {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
 
 /** A window's number as the window server knows it. */
 function windowNumber(win) {
@@ -163,6 +220,20 @@ class Ink extends EventEmitter {
     /** @type {Map<number, (answer: any) => void>} */
     this.waiting = new Map();
     this.watchingDisplays = false;
+    /** What `watchDisplays` listens with, taken off again by `dispose`. @type {(() => void) | null} */
+    this.displaysChanged = null;
+    /**
+     * The overlays, made once and kept hidden between sessions, by display:
+     * `loaded` once its page can draw, `bounds` the display's when it was made.
+     * @type {Map<number, { win: import("electron").BrowserWindow, bounds: { x: number, y: number, width: number, height: number }, loaded: boolean }>}
+     */
+    this.kept = new Map();
+    /** The kept overlays made again once the displays have settled after a change with no session on. */
+    this.rewarmTimer = null;
+    /** The overlays of a session that ended, ordered out once their pages have painted blank (`takeDown`). */
+    this.hideTimer = null;
+    /** The helper's last word on Screen Recording — "granted", "denied" — or null for none from this helper. */
+    this.screenAccess = null;
     this.lastEscapeAt = 0;
     this.registered = false;
     /** A start waiting on the helper's word about Screen Recording; a second press then is the same start. */
@@ -194,10 +265,20 @@ class Ink extends EventEmitter {
     }
   }
 
-  /** The windows of the pen itself — every overlay — which hear the state on their own channel. */
+  /**
+   * The windows of the pen itself — every overlay, kept hidden or on the
+   * screen — which hear the state on their own channel: a hidden one hears
+   * its session end, and clears its ink before it is next shown.
+   */
   penWindows() {
-    const s = this.session;
-    return s ? [...s.overlays.values()].filter((w) => !w.isDestroyed()) : [];
+    return [...this.overlays().values()];
+  }
+
+  /** The overlays that are there, by display. */
+  overlays() {
+    const out = new Map();
+    for (const [id, entry] of this.kept) if (!entry.win.isDestroyed()) out.set(id, entry.win);
+    return out;
   }
 
   /** The owner, every overlay and every other window hear what the session is now: the drawer's pencil and the pill's tools draw from it. */
@@ -249,7 +330,13 @@ class Ink extends EventEmitter {
       } catch {
         return;
       }
-      if (this.helper !== child || !answer || typeof answer.seq !== "number") return;
+      if (this.helper !== child || !answer) return;
+      // The helper's first line says what it found Screen Recording to be, before anything was asked.
+      if (answer.ready === true && typeof answer.screen === "string") {
+        this.screenAccess = answer.screen;
+        return;
+      }
+      if (typeof answer.seq !== "number") return;
       const resolve = this.waiting.get(answer.seq);
       if (!resolve) return;
       this.waiting.delete(answer.seq);
@@ -265,6 +352,7 @@ class Ink extends EventEmitter {
   /** The helper went: every answer it owed is a failure, and a session that needed it is let go, so no overlay outlives it. */
   helperGone() {
     this.helper = null;
+    this.screenAccess = null;
     for (const resolve of this.waiting.values()) resolve({ ok: false, error: "the helper went" });
     this.waiting.clear();
     if (this.session) this.cancel(this.session.id, "the screen pen's helper stopped");
@@ -273,6 +361,7 @@ class Ink extends EventEmitter {
   stopHelper() {
     const child = this.helper;
     this.helper = null;
+    this.screenAccess = null;
     for (const resolve of this.waiting.values()) resolve({ ok: false, error: "the helper was stopped" });
     this.waiting.clear();
     if (!child) return;
@@ -290,17 +379,26 @@ class Ink extends EventEmitter {
     }
   }
 
-  /** One request, answered or failed within `HELPER_ANSWER_MS`. */
+  /**
+   * One request, answered or failed within `HELPER_ANSWER_MS`. An answer
+   * about Screen Recording is kept (`screenAccess`), and a slow one of any
+   * kind is written down with how many were ahead of it.
+   */
   ask(request) {
     const child = this.ensureHelper();
     if (!child) return Promise.resolve({ ok: false, error: "missing" });
     const seq = ++this.helperSeq;
+    const sent = performance.now();
+    const ahead = this.waiting.size;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (this.waiting.delete(seq)) resolve({ ok: false, error: "the helper did not answer" });
       }, HELPER_ANSWER_MS);
       this.waiting.set(seq, (answer) => {
         clearTimeout(timer);
+        const took = ms(sent);
+        if (took > SLOW_HELPER_MS) penLog("slow helper", { op: request.op, ms: took, ahead, load: loadNow() });
+        if ((request.op === "access" || request.op === "ask") && this.helper === child && typeof answer?.screen === "string") this.screenAccess = answer.screen;
         resolve(answer);
       });
       try {
@@ -327,6 +425,7 @@ class Ink extends EventEmitter {
    */
   async start({ voice, asker = null }) {
     if (this.session || this.starting) return this.state();
+    const pressed = performance.now();
     const owner = voice ? this.voiceClient() : asker;
     if (!owner || owner.isDestroyed()) {
       console.error("kururu: the screen pen has no page to send to: no window and no pill");
@@ -338,16 +437,19 @@ class Ink extends EventEmitter {
         this.tellOwner(owner, { ev: "refused", voice, why: "This build has no screen pen: its helper was not built (it needs Xcode)." });
         return this.state();
       }
-      let access = await this.ask({ op: "access" });
-      if (access.screen !== "granted") access = await this.ask({ op: "ask" });
-      if (access.screen !== "granted") {
-        // A helper that asked before the switch was flipped may keep the old
-        // answer; the next session starts a fresh one.
-        this.stopHelper();
-        void shell.openExternal(SCREEN_RECORDING);
-        this.tellOwner(owner, { ev: "refused", voice, why: "Kururu may not take pictures of the screen yet. Turn it on in System Settings → Privacy & Security → Screen Recording, then press the pen again." });
-        return this.state();
+      // A "granted" this helper already said is taken at its word, and asked
+      // again behind whatever the helper is doing (`confirmAccess`); only a
+      // press with none kept waits for the answer.
+      const kept = this.helper !== null && this.screenAccess === "granted";
+      if (!kept) {
+        let access = await this.ask({ op: "access" });
+        if (access.screen !== "granted") access = await this.ask({ op: "ask" });
+        if (access.screen !== "granted") {
+          this.refuse(owner, voice);
+          return this.state();
+        }
       }
+      const accessMs = ms(pressed);
       const dir = mkdtempSync(path.join(os.tmpdir(), "kururu-ink-"));
       let home = null;
       try {
@@ -363,8 +465,14 @@ class Ink extends EventEmitter {
         pen: true,
         dir,
         home,
-        /** @type {Map<number, import("electron").BrowserWindow>} */
-        overlays: new Map(),
+        /**
+         * The press, for `pen.log`: when it came, whether Screen Recording was
+         * taken as kept or asked, how many overlays had to be made, the
+         * displays whose overlay is not up yet, and whether the first stroke
+         * has been written down.
+         * @type {{ pressed: number, access: string, accessMs: number, made: number, waiting: Set<number>, logged: boolean, stroke: boolean } | null}
+         */
+        timing: null,
         bursts: [],
         open: null,
         sendTimer: null,
@@ -383,22 +491,88 @@ class Ink extends EventEmitter {
         /** The tools are beside the floating pill's meter, since it owns the session; otherwise in its draw-only form. */
         inPill: this.pillOwns(voice, owner),
       };
+      const session = this.session;
       this.watchOwner(owner);
       this.watchDisplays();
-      // The pill before the overlays, so a panel made for the session is
-      // there to be put above them; it shows itself once its page says it
-      // is drawing.
+      // The overlays first, since they are what the press is waiting for:
+      // kept ones are shown now, with the session's state sent ahead of
+      // them, and one still loading shows itself when its page is ready.
+      const made = this.ensureOverlays();
+      session.timing = { pressed, access: kept ? "kept" : "asked", accessMs, made, waiting: new Set(this.overlays().keys()), logged: false, stroke: false };
+      for (const [id, entry] of this.kept) if (entry.loaded) this.reveal(id, entry);
+      // Then the pill, a level above them whenever it is made or shown
+      // (`raisePill`); it shows itself once its page says it is drawing.
       this.askPanel(true);
-      this.makeOverlays();
       this.raisePill(true);
       this.registerEscape(true);
       this.registerSnap(true);
-      this.tellOwner(owner, { ev: "start", id: this.session.id, voice });
+      this.tellOwner(owner, { ev: "start", id: session.id, voice });
       this.changed();
+      if (kept) this.confirmAccess(session);
       return this.state();
     } finally {
       this.starting = false;
     }
+  }
+
+  /**
+   * Screen Recording off: the owner told why, System Settings opened at the
+   * switch, and the helper let go — one that asked before the switch was
+   * flipped may keep the old answer, and the next press starts a fresh one.
+   */
+  refuse(owner, voice) {
+    this.stopHelper();
+    void shell.openExternal(SCREEN_RECORDING);
+    this.tellOwner(owner, { ev: "refused", voice, why: NO_SCREEN_RECORDING });
+  }
+
+  /**
+   * The helper asked again, behind its work, about the "granted" a session
+   * was started on. Turned off since — which macOS does not do to a running
+   * app on its own — the pen ends and the owner hears the refusal; with a
+   * voice the recording goes on without it, as a clip whose pen was never
+   * there. No answer at all is not a refusal: a busy helper keeps the pen.
+   */
+  confirmAccess(session) {
+    void this.ask({ op: "access" }).then((answer) => {
+      if (answer?.screen !== "denied" || this.session !== session) return;
+      penLog("access withdrawn", { id: session.id });
+      this.cancel(session.id, null);
+      this.refuse(session.owner, session.voice);
+    });
+  }
+
+  /**
+   * A kept overlay put on the screen for the session that is on: the
+   * session's state first, so its page has the pen down before any click
+   * can reach it, then the mouse taken and the window shown without taking
+   * the keyboard. The press is written to `pen.log` once every display's is
+   * up.
+   */
+  reveal(displayId, entry) {
+    const session = this.session;
+    const win = entry.win;
+    if (!session || session.ending || win.isDestroyed()) return;
+    win.webContents.send("ink:state", this.state());
+    // macOS keeps a window under the menu bar unless told otherwise after it exists, and again after it was ordered out.
+    win.setBounds(entry.bounds);
+    win.setIgnoreMouseEvents(!session.pen);
+    win.setOpacity(1);
+    win.showInactive();
+    this.raisePill(true);
+    const timing = session.timing;
+    if (!timing || timing.logged || !timing.waiting.delete(displayId) || timing.waiting.size) return;
+    timing.logged = true;
+    penLog("start", {
+      id: session.id,
+      voice: session.voice,
+      ms: ms(timing.pressed),
+      access: timing.access,
+      accessMs: timing.accessMs,
+      overlays: timing.made ? `${timing.made} made` : "kept",
+      displays: this.kept.size,
+      load: loadNow(),
+    });
   }
 
   /** Whether the floating pill's page owns a session, and so draws its tools: a recording while the pill is the voice client. */
@@ -433,83 +607,124 @@ class Ink extends EventEmitter {
     };
   }
 
-  makeOverlays() {
-    const session = this.session;
-    if (!session) return;
-    for (const win of session.overlays.values()) if (!win.isDestroyed()) win.destroy();
-    session.overlays.clear();
+  /**
+   * The overlays kept ready while the app runs, hidden: made shortly after
+   * it starts, so the first press does not wait for them either (main calls
+   * this), and with the helper started, whose first line says whether
+   * Screen Recording is on. Nothing in a build without the helper.
+   */
+  warm() {
+    if (!existsSync(this.helperPath)) return;
+    this.ensureHelper();
+    this.watchDisplays();
+    if (!this.session) this.ensureOverlays();
+  }
+
+  /**
+   * One overlay per display as the displays are now: a kept one whose
+   * display has not changed is used as it is, any other made, and one for a
+   * display that went destroyed. Returns how many were made.
+   */
+  ensureOverlays() {
     const displays = screen.getAllDisplays();
-    if (!displays.some((d) => d.id === session.home)) session.home = screen.getPrimaryDisplay().id;
-    for (const display of displays) {
-      const { x, y, width, height } = display.bounds;
-      const win = new BrowserWindow({
-        x,
-        y,
-        width,
-        height,
-        show: false,
-        frame: false,
-        transparent: true,
-        hasShadow: false,
-        resizable: false,
-        movable: false,
-        minimizable: false,
-        maximizable: false,
-        fullscreenable: false,
-        skipTaskbar: true,
-        // Never the key window, so the keyboard stays where it was; a
-        // non-activating panel still takes the mouse, as the pill's ✕ shows.
-        focusable: false,
-        acceptFirstMouse: true,
-        enableLargerThanScreen: true,
-        alwaysOnTop: true,
-        type: "panel",
-        webPreferences: {
-          preload: this.preloadPath,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-          backgroundThrottling: false,
-        },
-      });
-      // Over the menu bar and every app's floating windows; the pill is
-      // raised to the same level after, so its buttons stay over the ink.
-      // A stroke over another app leaves that app in front (`stays.js`).
-      neverActivates(win);
-      win.setAlwaysOnTop(true, "screen-saver");
-      // Without the accessory transform, which left the window unable to hide with the app (`stays.js`).
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-      // The pen draws on whatever is on the screen, kururu hidden or not (`stays.js`).
-      staysUp(win);
-      // Made at the bounds, and set there again: macOS keeps a new window
-      // under the menu bar unless it is told otherwise after it exists.
-      win.setBounds(display.bounds);
-      win.setIgnoreMouseEvents(!session.pen);
-      win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-      win.webContents.on("will-navigate", (event) => event.preventDefault());
-      if (this.debug) win.webContents.on("console-message", (event, ...legacy) => console.log(`kururu ink: ${event?.message ?? legacy[1]}`));
-      // An overlay whose page went is a window that may still take the
-      // mouse with nothing in it to give it back: the session ends.
-      win.webContents.on("render-process-gone", () => {
-        if (this.session === session) this.cancel(session.id, "the pen's overlay stopped");
-      });
-      win.webContents.once("did-finish-load", () => {
-        if (this.session !== session || win.isDestroyed()) return;
-        win.webContents.send("ink:state", this.state());
-        win.showInactive();
-        this.raisePill(true);
-      });
-      void win.loadFile(this.pagePath, { query: { display: String(display.id) } });
-      session.overlays.set(display.id, win);
+    const session = this.session;
+    if (session && !displays.some((d) => d.id === session.home)) session.home = screen.getPrimaryDisplay().id;
+    for (const [id, entry] of this.kept) {
+      const display = displays.find((d) => d.id === id);
+      if (entry.win.isDestroyed() || !display || !sameBounds(display.bounds, entry.bounds)) {
+        if (!entry.win.isDestroyed()) entry.win.destroy();
+        this.kept.delete(id);
+      }
     }
+    let made = 0;
+    for (const display of displays) {
+      if (this.kept.has(display.id)) continue;
+      this.makeOverlay(display);
+      made++;
+    }
+    return made;
+  }
+
+  /** Every kept overlay closed, for displays that changed or an app that is going. */
+  dropOverlays() {
+    for (const { win } of this.kept.values()) if (!win.isDestroyed()) win.destroy();
+    this.kept.clear();
+  }
+
+  /** One display's overlay, made hidden and letting the mouse through; shown by `reveal` while a session is on. */
+  makeOverlay(display) {
+    const { x, y, width, height } = display.bounds;
+    const win = new BrowserWindow({
+      x,
+      y,
+      width,
+      height,
+      show: false,
+      frame: false,
+      transparent: true,
+      hasShadow: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      // Never the key window, so the keyboard stays where it was; a
+      // non-activating panel still takes the mouse, as the pill's ✕ shows.
+      focusable: false,
+      acceptFirstMouse: true,
+      enableLargerThanScreen: true,
+      alwaysOnTop: true,
+      type: "panel",
+      webPreferences: {
+        preload: this.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: false,
+      },
+    });
+    const entry = { win, bounds: { ...display.bounds }, loaded: false };
+    // Over the menu bar and every app's floating windows; the pill is
+    // raised a level above while a session is on, so its buttons stay over
+    // the ink. A stroke over another app leaves that app in front (`stays.js`).
+    neverActivates(win);
+    win.setAlwaysOnTop(true, "screen-saver");
+    // Without the accessory transform, which left the window unable to hide with the app (`stays.js`).
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    // The pen draws on whatever is on the screen, kururu hidden or not (`stays.js`).
+    staysUp(win);
+    // Made at the bounds, and set there again: macOS keeps a new window
+    // under the menu bar unless it is told otherwise after it exists.
+    win.setBounds(display.bounds);
+    win.setIgnoreMouseEvents(true);
+    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    win.webContents.on("will-navigate", (event) => event.preventDefault());
+    if (this.debug) win.webContents.on("console-message", (event, ...legacy) => console.log(`kururu ink: ${event?.message ?? legacy[1]}`));
+    // An overlay whose page went is a window that may still take the
+    // mouse with nothing in it to give it back: the session ends, and the
+    // next press makes it again.
+    win.webContents.on("render-process-gone", () => {
+      if (this.kept.get(display.id) === entry) this.kept.delete(display.id);
+      if (!win.isDestroyed()) win.destroy();
+      if (this.session) this.cancel(this.session.id, "the pen's overlay stopped");
+    });
+    win.webContents.once("did-finish-load", () => {
+      if (win.isDestroyed() || this.kept.get(display.id) !== entry) return;
+      entry.loaded = true;
+      win.webContents.send("ink:state", this.state());
+      if (this.session) this.reveal(display.id, entry);
+    });
+    void win.loadFile(this.pagePath, { query: { display: String(display.id) } });
+    this.kept.set(display.id, entry);
   }
 
   /** The overlay a page message came from, and its display, or null for any other sender. */
   overlayOf(sender) {
     const session = this.session;
     if (!session) return null;
-    for (const [displayId, win] of session.overlays) {
-      if (!win.isDestroyed() && win.webContents.id === sender.id) {
+    for (const [displayId, win] of this.overlays()) {
+      if (win.webContents.id === sender.id) {
         const display = screen.getAllDisplays().find((d) => d.id === displayId);
         return display ? { win, display } : null;
       }
@@ -571,9 +786,7 @@ class Ink extends EventEmitter {
     if (!session || session.ending) return;
     session.pen = on;
     session.away = !on && away === true && session.voice;
-    for (const win of session.overlays.values()) {
-      if (!win.isDestroyed()) win.setIgnoreMouseEvents(!session.pen);
-    }
+    for (const win of this.overlays().values()) win.setIgnoreMouseEvents(!session.pen);
     this.registerEscape(session.pen);
     if (!session.pen) this.closeBurst();
     this.changed();
@@ -658,6 +871,11 @@ class Ink extends EventEmitter {
     const p = pointOf(raw?.point);
     const t = Number(raw?.t);
     if (!session || !at || !p || !Number.isFinite(t) || !session.pen || session.ending) return;
+    if (session.timing && !session.timing.stroke) {
+      // The press to the first stroke main heard: the pen's time and the hand's together, the hand's being most of it.
+      session.timing.stroke = true;
+      penLog("first stroke", { id: session.id, ms: ms(session.timing.pressed) });
+    }
     if (!session.voice && this.onPencil({ x: at.display.bounds.x + p[0], y: at.display.bounds.y + p[1] })) {
       // Done, once: the overlay's dot under the press goes with the overlay.
       if (!session.sendTimer) this.send(null);
@@ -858,7 +1076,7 @@ class Ink extends EventEmitter {
     void Promise.resolve(burst.done).finally(() => {
       for (const file of burst.files ?? []) rmSync(file, { force: true });
     });
-    const overlay = session.overlays.get(burst.display);
+    const overlay = this.overlays().get(burst.display);
     if (overlay && !overlay.isDestroyed() && !burst.snap) overlay.webContents.send("ink:undo");
     this.changed();
   }
@@ -881,7 +1099,7 @@ class Ink extends EventEmitter {
       display = screen.getPrimaryDisplay();
       point = { x: display.bounds.x + display.bounds.width / 2, y: display.bounds.y + display.bounds.height / 2 };
     }
-    const overlay = session.overlays.get(display.id);
+    const overlay = this.overlays().get(display.id);
     if (session.bursts.length >= MARKS_MAX) {
       if (overlay && !overlay.isDestroyed()) overlay.webContents.send("ink:full", MARKS_MAX);
       return;
@@ -1060,13 +1278,31 @@ class Ink extends EventEmitter {
     this.end(session);
   }
 
-  /** The overlays down and the keys given back — first, before anything that might wait. */
+  /**
+   * The overlays off the screen and the keys given back — first, before
+   * anything that might wait. Each lets the mouse through and goes fully
+   * transparent at once, is told the session is over so its page paints
+   * itself blank, and is ordered out a beat later (`HIDE_AFTER_MS`): a window
+   * ordered out with ink on it can show that ink again for a frame when it
+   * is next shown, before its page has drawn anything new. Kept for the next
+   * press; a press within the beat is left alone.
+   */
   takeDown() {
     const session = this.session;
     if (!session) return;
     for (const burst of session.bursts) clearTimeout(burst.closer);
-    for (const win of session.overlays.values()) if (!win.isDestroyed()) win.destroy();
-    session.overlays.clear();
+    const off = { ...this.state(), on: false, id: null, pen: false };
+    for (const win of this.overlays().values()) {
+      win.setIgnoreMouseEvents(true);
+      win.setOpacity(0);
+      win.webContents.send("ink:state", off);
+    }
+    clearTimeout(this.hideTimer);
+    this.hideTimer = setTimeout(() => {
+      this.hideTimer = null;
+      if (this.session && this.session !== session) return;
+      for (const win of this.overlays().values()) win.hide();
+    }, HIDE_AFTER_MS);
     this.registerEscape(false);
     this.registerSnap(false);
     this.raisePill(false);
@@ -1085,15 +1321,32 @@ class Ink extends EventEmitter {
     this.changed();
   }
 
-  /** A display came, went or changed shape: the overlays are made again for what there is now. The ink on them was fading anyway. */
+  /**
+   * A display came, went or changed shape: the overlays are made again for
+   * what there is now — at once during a session, whose ink on them was
+   * fading anyway, and otherwise once the displays have settled, since
+   * macOS goes on rearranging for a while after the first event.
+   */
   watchDisplays() {
     if (this.watchingDisplays) return;
     this.watchingDisplays = true;
     const again = () => {
-      if (!this.session || this.session.ending) return;
-      this.closeBurst();
-      this.makeOverlays();
+      clearTimeout(this.rewarmTimer);
+      this.rewarmTimer = null;
+      if (this.session) {
+        if (this.session.ending) return;
+        this.closeBurst();
+        this.dropOverlays();
+        this.ensureOverlays();
+        return;
+      }
+      this.dropOverlays();
+      this.rewarmTimer = setTimeout(() => {
+        this.rewarmTimer = null;
+        if (!this.session && existsSync(this.helperPath)) this.ensureOverlays();
+      }, DISPLAY_SETTLE_MS);
     };
+    this.displaysChanged = again;
     screen.on("display-added", again);
     screen.on("display-removed", again);
     screen.on("display-metrics-changed", again);
@@ -1101,6 +1354,19 @@ class Ink extends EventEmitter {
 
   dispose() {
     if (this.session) this.cancel(this.session.id, null);
+    clearTimeout(this.rewarmTimer);
+    this.rewarmTimer = null;
+    clearTimeout(this.hideTimer);
+    this.hideTimer = null;
+    const again = this.displaysChanged;
+    if (again) {
+      screen.removeListener("display-added", again);
+      screen.removeListener("display-removed", again);
+      screen.removeListener("display-metrics-changed", again);
+    }
+    this.displaysChanged = null;
+    this.watchingDisplays = false;
+    this.dropOverlays();
     if (this.registered) globalShortcut.unregister(SHORTCUT);
     this.registered = false;
     this.stopHelper();

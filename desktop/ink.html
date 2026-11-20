@@ -6,8 +6,9 @@
     <title>Kururu pen</title>
     <!--
       The screen pen's overlay (docs/plans/screen-annotate.md): one of these
-      per display, transparent, over everything, while a session is on. It
-      draws the ink as it is drawn, for no lag, and tells the main process
+      per display, transparent, over everything, while a session is on, and
+      kept hidden between sessions so a press never waits for it to load
+      (`ink.js`); it starts each session blank. It draws the ink as it is drawn, for no lag, and tells the main process
       each stroke (`ink.js` keeps them and takes the pictures); it fades a
       burst three seconds after its pen last lifted, since its picture is
       taken and old ink over a screen that moved on misleads. The tools are
@@ -217,7 +218,22 @@
         requestAnimationFrame(() => requestAnimationFrame(() => flash.classList.remove("on")));
       });
 
+      /** The session this page last drew for: kept hidden between sessions, it starts each one blank. */
+      let session = null;
+
       bridge.onState((state) => {
+        const now = state.on === true ? state.id : null;
+        if (now !== session) {
+          // Painted at once rather than at a frame: a hidden window has none
+          // to wait for, and the next session must not show the last one's ink.
+          session = now;
+          bursts.length = 0;
+          drawing = null;
+          pending = [];
+          toast.hidden = true;
+          if (frame) cancelAnimationFrame(frame);
+          paint();
+        }
         // The pen lifted or put down again starts a new mark in main, so here too.
         if ((state.pen === true) !== pen && bursts.length) bursts[bursts.length - 1].closed = true;
         pen = state.pen === true;

@@ -609,6 +609,20 @@ its reasons are [the plan](plans/screen-annotate.md); this is how it works.
   microphone in the tap grammar or keeps the one it has. The pencil beside
   the Kuru drawer's mic: a session with no voice, owned by the window. One
   session at a time.
+- **A press is drawable at once** (2026-11-19, the owner: "whenever I hit
+  the pen, there's like a several seconds delay before I can draw
+  sometimes"). The overlays are made a few seconds after the app starts and
+  kept hidden between sessions (`Ink.warm`, `kept`), so a press shows them
+  rather than waiting for a window and a renderer to load, and each starts
+  blank. The helper's "granted" for Screen Recording is kept and taken at its
+  word, and the helper is asked again behind its work: it answers one
+  request at a time, and a press soon after a Send used to wait behind the
+  last session's pictures — 1.4 s behind four marks on a quiet Mac, 1.8 s at
+  load 80. A "denied" then ends the pen and not the recording. Every press is
+  a `start` line in `~/.local/state/kururu/pen.log` with how long it took, how
+  Screen Recording was settled (`kept` or `asked`) and whether any overlay
+  had to be made; the first stroke is a line of its own, and any helper
+  answer over a second is written with how many requests were ahead of it.
 - **During.** An overlay over every display (`desktop/ink.js`,
   `desktop/ink.html`) and a red edge while the pen is down. **The tools are
   only ever in the floating pill** — pen on and off, red, blue, the

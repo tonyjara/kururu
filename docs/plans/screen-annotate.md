@@ -63,9 +63,12 @@ written to them.
 - **The words are already timed.** `yap`, which hears every clip today, takes
   `--json --word-timestamps` and gives each word its start and end (below). The
   server calls it with `--txt` and throws the times away.
-- **The overlay exists only while a session is on**, one transparent panel per
-  display, made at the start and closed at the end. Not a window that sits over
-  every display for the life of the app.
+- **The overlay is on the screen only while a session is on**, one
+  transparent panel per display. *Amended 2026-11-19:* it was made at the
+  start and closed at the end, and a press then waited for a window and a
+  renderer to load — up to seconds on a Mac under load. It is made once and
+  kept hidden (ordered out, letting the mouse through) between sessions; see
+  `desktop/ink.js` and [voice](../voice.md#the-screen-pen).
 - **A small Swift helper does the two things Electron cannot do well**: a
   still of one display excluding given windows, and "which app and window is
   under this point" with its title. It is `talkkey`'s pattern: a bare Mach-O,

@@ -330,6 +330,15 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **The screen pen is ready the moment you press it.** Pressing the pen
+  could leave you waiting before you could draw — about a tenth of a second
+  every time, and over a second, sometimes several on a busy Mac, when you
+  pressed it soon after sending a drawing, while the last one's pictures
+  were still being made. The pen's overlays are now made once and kept out
+  of sight between drawings, and Screen Recording is no longer checked
+  again before every press, so the pen is down in a couple of milliseconds
+  either way. Every press is timed in `~/.local/state/kururu/pen.log`, so a
+  slow one can be looked into afterwards.
 - **A build you serve on this Mac is in Dev servers.** A Nuxt or other Nitro
   build started with `node .output/server/index.mjs`, `next start`, `astro
   preview`, `nuxt preview` and `remix-serve` were never listed, so a

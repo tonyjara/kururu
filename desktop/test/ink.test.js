@@ -61,6 +61,9 @@ class FakeWindow {
   setIgnoreMouseEvents(on) {
     this.ignore = on;
   }
+  setOpacity(opacity) {
+    this.opacity = opacity;
+  }
   loadFile(file, { query }) {
     this.file = file;
     this.query = query;
@@ -139,6 +142,7 @@ mock.module("electron", () => ({
     getCursorScreenPoint: () => ({ x: 100, y: 100 }),
     getDisplayNearestPoint: () => DISPLAYS[0],
     on: (event, fn) => screenEvents.on(event, fn),
+    removeListener: (event, fn) => screenEvents.removeListener(event, fn),
   },
   shell: { openExternal: (url) => opened.push(url) },
 }));
@@ -158,6 +162,9 @@ const HELPER = `#!/usr/bin/env node
 const fs = require("node:fs");
 const lines = require("node:readline").createInterface({ input: process.stdin });
 const log = process.env.INK_LOG;
+const slow = Number(process.env.SLOW_MS || "0");
+// The real helper's first line: what it found Screen Recording to be.
+process.stdout.write(JSON.stringify({ ready: true, screen: process.env.READY_SCREEN || process.env.ACCESS || "granted" }) + "\\n");
 lines.on("line", (line) => {
   const req = JSON.parse(line);
   if (log) fs.appendFileSync(log, line + "\\n");
@@ -174,7 +181,9 @@ lines.on("line", (line) => {
     if (req.frame) fs.writeFileSync(req.frame.path, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
     out = { ok: true, crop: { width: 1, height: 1 }, frame: { width: 1, height: 1 } };
   }
-  process.stdout.write(JSON.stringify({ ...out, seq: req.seq }) + "\\n");
+  const answer = () => process.stdout.write(JSON.stringify({ ...out, seq: req.seq }) + "\\n");
+  if (slow) setTimeout(answer, slow);
+  else answer();
 });
 `;
 
@@ -198,6 +207,8 @@ function setup(extra = {}) {
   delete process.env.ACCESS;
   delete process.env.SECURE;
   delete process.env.NOTHING_ABOVE;
+  delete process.env.SLOW_MS;
+  delete process.env.READY_SCREEN;
   const owner = new FakeContents();
   const main = new FakeContents();
   const ink = new Ink({
@@ -216,6 +227,12 @@ const overlays = () => windows.filter((w) => !w.destroyed && w.file === "/app/in
 
 const live = () => overlays();
 const anyWindow = () => windows.filter((w) => !w.destroyed);
+/**
+ * What a way out must leave: no overlay that can be seen — hidden, or fully
+ * transparent for the beat before it is — and none that would take the
+ * mouse if it were. Kept for the next press is fine.
+ */
+const up = () => windows.filter((w) => !w.destroyed && ((w.shown && w.opacity !== 0) || w.ignore !== true));
 const told = (contents, ev) => contents.sent.filter(([channel, event]) => channel === "kururu:ink" && event.ev === ev);
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -263,7 +280,7 @@ describe("a session", () => {
     draw(ink, two, [[50, 50], [60, 60]], at + 1500);
     expect(ink.session.bursts).toHaveLength(2);
     const bundle = await ink.finish(owner, ink.session.id);
-    expect(anyWindow()).toHaveLength(0);
+    expect(up()).toHaveLength(0);
     expect(bundle.kind).toBe("screen");
     expect(bundle.marks).toHaveLength(2);
     const [first, second] = bundle.marks;
@@ -301,7 +318,7 @@ describe("a session", () => {
     expect(await ink.finish(new FakeContents(), ink.session.id)).toBeNull();
     expect(live()).toHaveLength(2);
     expect(await ink.finish(owner, ink.session.id)).toBeNull();
-    expect(anyWindow()).toHaveLength(0);
+    expect(up()).toHaveLength(0);
     ink.dispose();
   });
 
@@ -373,7 +390,7 @@ describe("every way out leaves no overlay", () => {
   it("✕", async () => {
     await ink.start({ voice: true });
     ink.drop(live()[0].webContents);
-    expect(anyWindow()).toHaveLength(0);
+    expect(up()).toHaveLength(0);
     expect(told(owner, "cancel")).toHaveLength(1);
     expect(shortcuts.has("Escape")).toBe(false);
     ink.dispose();
@@ -390,7 +407,7 @@ describe("every way out leaves no overlay", () => {
         owner.emit(event, { isMainFrame: true, isSameDocument: false });
       }
       else owner.emit(event, {}, {});
-      expect(anyWindow()).toHaveLength(0);
+      expect(up()).toHaveLength(0);
       expect(ink.session).toBeNull();
       ink.dispose();
     }
@@ -399,7 +416,7 @@ describe("every way out leaves no overlay", () => {
   it("an overlay's page dying", async () => {
     await ink.start({ voice: true });
     live()[1].webContents.emit("render-process-gone", {}, {});
-    expect(anyWindow()).toHaveLength(0);
+    expect(up()).toHaveLength(0);
     ink.dispose();
   });
 
@@ -407,7 +424,7 @@ describe("every way out leaves no overlay", () => {
     await ink.start({ voice: true });
     ink.helper.kill("SIGKILL");
     await settle(100);
-    expect(anyWindow()).toHaveLength(0);
+    expect(up()).toHaveLength(0);
     expect(told(owner, "cancel").at(-1)[1].why).toContain("helper");
     ink.dispose();
   });
@@ -418,6 +435,158 @@ describe("every way out leaves no overlay", () => {
     expect(live()).toHaveLength(2);
     ink.dispose();
     expect(anyWindow()).toHaveLength(0);
+  });
+});
+
+describe("a press puts the pen down at once (2026-11-19)", () => {
+  const penLog = () => {
+    try {
+      return require("node:fs").readFileSync(join(stateDir, "pen.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    } catch {
+      return [];
+    }
+  };
+  const until = async (check) => {
+    for (let i = 0; i < 200 && !check(); i++) await settle(10);
+  };
+
+  it("warms: the overlays made before any press, hidden and letting the mouse through, and the helper started", async () => {
+    const { ink } = setup();
+    ink.warm();
+    expect(live()).toHaveLength(2);
+    expect(up()).toHaveLength(0);
+    expect(ink.helper).not.toBeNull();
+    await until(() => ink.screenAccess === "granted");
+    expect(ink.screenAccess).toBe("granted");
+    ink.dispose();
+    expect(anyWindow()).toHaveLength(0);
+  });
+
+  it("keeps the overlays between sessions: a second press makes no window and shows them before it returns", async () => {
+    const { ink, owner } = setup();
+    await ink.start({ voice: true });
+    await settle();
+    const first = live();
+    await ink.finish(owner, ink.session.id);
+    expect(up()).toHaveLength(0);
+    // Transparent and letting the mouse through at once, ordered out a beat later, once their pages have painted blank.
+    expect(first.every((w) => w.opacity === 0 && w.ignore === true)).toBe(true);
+    await settle(150);
+    expect(first.every((w) => !w.shown)).toBe(true);
+    // Kept, and told the session ended, which clears their ink.
+    expect(live()).toEqual(first);
+    expect(first.every((w) => w.webContents.sent.at(-1)[0] === "ink:state" && w.webContents.sent.at(-1)[1].on === false)).toBe(true);
+    const made = windows.length;
+    await ink.start({ voice: true });
+    expect(windows.length).toBe(made);
+    expect(live().every((w) => w.shown && w.ignore === false)).toBe(true);
+    // The new session's state went to each before it was shown.
+    const id = ink.session.id;
+    expect(first.every((w) => w.webContents.sent.some(([channel, state]) => channel === "ink:state" && state.id === id))).toBe(true);
+    ink.dispose();
+  });
+
+  it("a press within the beat after an end is left on the screen", async () => {
+    const { ink, owner } = setup();
+    await ink.start({ voice: true });
+    await settle();
+    await ink.finish(owner, ink.session.id);
+    await ink.start({ voice: true });
+    await settle(150);
+    expect(live().every((w) => w.shown && w.opacity === 1 && w.ignore === false)).toBe(true);
+    ink.dispose();
+  });
+
+  it("does not wait on a busy helper once it has said Screen Recording is on", async () => {
+    const { ink } = setup();
+    process.env.SLOW_MS = "400";
+    ink.warm();
+    await until(() => ink.screenAccess === "granted");
+    await settle();
+    const pressed = performance.now();
+    await ink.start({ voice: true });
+    expect(performance.now() - pressed).toBeLessThan(100);
+    expect(ink.session).not.toBeNull();
+    expect(live().every((w) => w.shown)).toBe(true);
+    ink.dispose();
+  });
+
+  it("asks again behind the work, and a denial then ends the pen with the refusal but not the recording", async () => {
+    const { ink, owner } = setup();
+    process.env.ACCESS = "denied";
+    process.env.READY_SCREEN = "granted";
+    ink.warm();
+    await until(() => ink.screenAccess === "granted");
+    await ink.start({ voice: true });
+    expect(ink.session).not.toBeNull();
+    await until(() => ink.session === null);
+    expect(ink.session).toBeNull();
+    expect(up()).toHaveLength(0);
+    expect(told(owner, "refused")[0][1].why).toContain("Screen Recording");
+    // Told nothing that would drop what was said with it.
+    expect(told(owner, "cancel")).toHaveLength(0);
+    expect(opened[0]).toContain("Privacy_ScreenCapture");
+    // The helper that said "granted" is let go, and with it the word.
+    expect(ink.screenAccess).toBeNull();
+    ink.dispose();
+  });
+
+  it("writes how long each press took to pen.log, the first stroke, and a slow helper with how many were ahead", async () => {
+    const { ink } = setup();
+    const before = penLog().length;
+    await ink.start({ voice: true });
+    await settle();
+    draw(ink, live()[0], [[10, 10], [20, 20]], ink.session.at + 50);
+    draw(ink, live()[0], [[30, 30], [40, 40]], ink.session.at + 2000);
+    const lines = penLog().slice(before);
+    const start = lines.find((l) => l.what === "start");
+    expect(start).toMatchObject({ id: ink.session.id, voice: true, access: "asked", overlays: "2 made", displays: 2 });
+    expect(Number.isFinite(start.ms)).toBe(true);
+    expect(lines.filter((l) => l.what === "first stroke")).toHaveLength(1);
+    ink.dispose();
+
+    const again = setup().ink;
+    process.env.SLOW_MS = "1100";
+    again.warm();
+    await until(() => again.screenAccess === "granted");
+    await settle();
+    const mark = penLog().length;
+    await again.start({ voice: true });
+    expect(penLog().slice(mark).find((l) => l.what === "start")).toMatchObject({ access: "kept", overlays: "kept" });
+    // Only this helper's access: the log is one file, and the first Ink's lookups may still be finishing.
+    const slow = () => penLog().slice(mark).find((l) => l.what === "slow helper" && l.op === "access");
+    await until(() => Boolean(slow()));
+    expect(slow()).toMatchObject({ op: "access", ahead: 0 });
+    again.dispose();
+  });
+
+  it("makes them again once the displays settle after a change with no session on", async () => {
+    const { ink } = setup();
+    ink.warm();
+    // This Ink's own: every test's that was not disposed hears the same events.
+    const mine = () => [...ink.overlays().values()];
+    const before = mine();
+    expect(before).toHaveLength(2);
+    screenEvents.emit("display-metrics-changed");
+    expect(mine()).toHaveLength(0);
+    await settle(900);
+    expect(mine()).toHaveLength(2);
+    expect(mine().some((w) => before.includes(w))).toBe(false);
+    expect(mine().every((w) => !w.shown && w.ignore === true)).toBe(true);
+    ink.dispose();
+  });
+
+  it("an overlay whose page died between sessions is gone, and the next press makes it again", async () => {
+    const { ink } = setup();
+    ink.warm();
+    const [dead] = live();
+    dead.webContents.emit("render-process-gone", {}, {});
+    expect(live()).toHaveLength(1);
+    await ink.start({ voice: true });
+    await settle();
+    expect(live()).toHaveLength(2);
+    expect(live().every((w) => w.shown)).toBe(true);
+    ink.dispose();
   });
 });
 
@@ -633,7 +802,7 @@ describe("phase 2: the pen made pleasant", () => {
     const second = await ink.finish(owner, id);
     expect(second.marks).toHaveLength(1);
     expect(second.marks[0].t0).toBe(5000);
-    expect(anyWindow()).toHaveLength(0);
+    expect(up()).toHaveLength(0);
     ink.dispose();
   });
 });
@@ -695,7 +864,7 @@ describe("the tools", () => {
     await ink.start({ voice: false, asker: owner });
     ink.drop(pill.webContents);
     expect(told(owner, "cancel")).toHaveLength(1);
-    expect(anyWindow()).toHaveLength(0);
+    expect(up()).toHaveLength(0);
     ink.dispose();
   });
 

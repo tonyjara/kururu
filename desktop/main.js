@@ -184,6 +184,8 @@ const talk = new TalkKey({
  * Kuru box the marks go into. `KURURU_GLANCE` points an isolated instance at
  * another build of the helper, or at nothing.
  */
+/** How long after the app is ready the pen's overlays are made, hidden, for the first press (`Ink.warm`). */
+const INK_WARM_MS = 4000;
 const ink = new Ink({
   helperPath:
     process.env.KURURU_GLANCE || (PACKAGED ? path.join(process.resourcesPath, "server", "glance") : path.join(__dirname, "dist", "glance")),
@@ -1507,6 +1509,10 @@ app.whenReady().then(async () => {
   });
   runner.startProbing();
   ink.register();
+  // The pen's overlays and its helper made ready, hidden, so a press puts
+  // the pen down at once rather than waiting for a window and a renderer to
+  // load (`Ink.warm`) — after the window's own start, which matters more.
+  setTimeout(() => ink.warm(), INK_WARM_MS);
 
   // The hook and the pill come up with the app if they were on when it last quit.
   if (talk.enabled || talk.altSpace) {

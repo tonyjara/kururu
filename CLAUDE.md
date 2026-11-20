@@ -123,7 +123,9 @@ beside it is the mirror git pushes. See [data](docs/data.md).
 `lifecycle.log` is there too: every server start, stop, restart and crash, and
 why. It is the answer to "why did the window just reconnect", and
 `bun run status` prints its end. `pill.log` beside it is the same for the
-floating pill: every place it was put, why, and the displays it chose between.
+floating pill: every place it was put, why, and the displays it chose between;
+`pen.log` is the screen pen's: how long each press took to be drawable, and
+the helper whenever it was slow.
 
 Anything that writes config, installs a style, or acts as a second real client
 goes in an **isolated instance** — see
