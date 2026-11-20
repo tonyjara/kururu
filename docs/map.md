@@ -251,6 +251,7 @@ in this folder.
 | `src/needsorder.ts` | The Needs drawer's folds and the order its groups and cards were sorted into, per device and per profile; what Next walks. Pure but for the store, tested |
 | `src/notes.ts` | Cards popped out as notes: each note's box, fold and whether it is open, per device and per profile; fitting a box into the window, a drag and a resize held to the edges and the floor; finding a note's card wherever in the profile it went; in the desktop app, sending a card to the bridge to be a window of its own. Pure but for the store, tested. See [layout](layout.md#notes) |
 | `src/mascot.ts` | Loads a sheet once per URL and reports its size |
+| `src/mascotpick.ts` | The workspace's mascot picker without its DOM: which mascots a few typed letters keep, best first, and where an arrow key goes in its grid. Pure, tested |
 | `src/mermaid.ts` | The one thing the reader draws itself — a diagram needs a DOM |
 | `src/labels.ts` | How the window draws the answers `shared/labels.ts` decides |
 | `src/docs.ts` | The document list, reduced to the three decisions it makes |
@@ -278,6 +279,7 @@ for a pooled emulator; owns none) · `Sidebar.tsx` · `Automations.tsx` (the sid
 `Search.tsx` (the search over every board and the conversations, and the deleted cards, in the profile board's sheet; a card hit is a door to the card) ·
 `ProfileBoard.tsx` (the profile's own cards, the Dashboard's first fixed tab; its own and no other's) · `Dashboard.tsx` (what each of the Dashboard's fixed tabs draws, one entry per tab) ·
 `ColorPicker.tsx` (a column's colour, from the profile board) ·
+`MascotPicker.tsx` (a workspace's mascot, from its sidebar row: a find box over a grid of badges, capped to the window and scrolling inside it) ·
 `Notes.tsx` (cards popped out as notes over the window, dragged, resized, folded, edited in place; the card is the snapshot's; `NoteInside` is a note's inside, also a note window's) ·
 `NotePage.tsx` (`/?note=`: a card popped out as a desktop window of its own, over every app) ·
 `Float.tsx` (the floating Kuru: `/?float=logo` is the logo over every app, `/?float=panel` the chat behind it — `KuruDrawer` and `NeedsDrawer` themselves, mounted only while it is open — and `FloatWave` is the voice as a waveform, drawn by the pill's page beside the logo) ·

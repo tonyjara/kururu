@@ -59,7 +59,7 @@ import type {
   Profile,
   Workspace,
 } from "../../../shared/model";
-import { defaultMascot, mascotFor, workspaceUnits } from "../../../shared/model";
+import { mascotFor, workspaceUnits } from "../../../shared/model";
 import type { DevServer, GitAction, RepoGit } from "../../../shared/wire";
 import type { MachineStatus } from "../../../shared/machines";
 import { agentItems } from "../agentmenu";
@@ -70,7 +70,8 @@ import { useLongPress } from "../longpress";
 import { devServerUrl, metroAddress, previewLabel, projectLinks, type NamedRoot } from "../preview";
 import * as api from "../session";
 import { useKururu } from "../session";
-import { Menu, Popover, type MenuItem } from "./Menu";
+import { MascotPicker } from "./MascotPicker";
+import { Menu, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
@@ -1540,65 +1541,6 @@ function WorkspaceMascot({ mascots, mascotId }: { mascots: MascotSet; mascotId: 
 /** The mascot a workspace picked for itself, or nothing — never the default. */
 function ownMascot(mascots: MascotSet, mascotId: string | null): MascotSet["list"][number] | undefined {
   return mascotId === null ? undefined : mascots.list.find((m) => m.id === mascotId);
-}
-
-/**
- * Which mascot this workspace's agents wear.
- *
- * Each one is drawn animating rather than named, for the same reason the colour
- * picker is swatches: you are choosing between pictures, and "Michi" means
- * nothing until you have seen it hop. The working clip is the one shown, since
- * that is the state you are actually looking for in a sidebar.
- *
- * "Default" is an option in the list rather than a way of dismissing it, the way
- * "No colour" is — following the default is a choice with consequences, namely
- * that changing the default later changes this workspace too, and a control that
- * only said how to *stop* following would hide that.
- */
-function MascotPicker({
-  at,
-  mascots,
-  current,
-  onPick,
-  onClose,
-}: {
-  at: { x: number; y: number };
-  mascots: MascotSet;
-  current: string | null;
-  onPick: (mascotId: string | null) => void;
-  onClose: () => void;
-}) {
-  const fallback = defaultMascot(mascots);
-  return (
-    <Popover at={at} onClose={onClose} className="picker picker-mascots" role="listbox">
-      <button
-        role="option"
-        aria-selected={current === null}
-        className={`mascot-option ${current === null ? "mascot-option-on" : ""}`}
-        onClick={() => onPick(null)}
-      >
-        <span className="status status-working mascot-chip" role="img" aria-hidden>
-          <Mascot config={fallback} clip={fallback.working} />
-        </span>
-        <span className="mascot-name">Default</span>
-        <span className="set-note">{fallback.name}</span>
-      </button>
-      {mascots.list.map((one) => (
-        <button
-          key={one.id}
-          role="option"
-          aria-selected={current === one.id}
-          className={`mascot-option ${current === one.id ? "mascot-option-on" : ""}`}
-          onClick={() => onPick(one.id)}
-        >
-          <span className="status status-working mascot-chip" role="img" aria-hidden>
-            <Mascot config={one} clip={one.working} />
-          </span>
-          <span className="mascot-name">{one.name}</span>
-        </button>
-      ))}
-    </Popover>
-  );
 }
 
 /**

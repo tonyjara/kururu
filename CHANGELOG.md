@@ -348,6 +348,13 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **The mascot picker fits the window again.** A workspace's Mascot… was
+  one long column, which with thirty mascots ran off the bottom of the
+  window, and the wheel closed it instead of scrolling it. It is now a grid
+  of badges five across with a box to type a name into: it is never taller
+  than the window, the wheel scrolls it, it opens on the mascot you have
+  with that one in view, and the arrows walk the grid and Enter picks.
+
 - **The screen pen is ready the moment you press it.** Pressing the pen
   could leave you waiting before you could draw — about a tenth of a second
   every time, and over a second, sometimes several on a busy Mac, when you

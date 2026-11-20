@@ -9077,26 +9077,30 @@ a.st-btn {
    track reads as a hole punched in the chrome. */
 .st-body::-webkit-scrollbar,
 .st-nav::-webkit-scrollbar,
-.st-sheet-wrap::-webkit-scrollbar {
+.st-sheet-wrap::-webkit-scrollbar,
+.mascot-list::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 .st-body::-webkit-scrollbar-track,
 .st-nav::-webkit-scrollbar-track,
 .st-sheet-wrap::-webkit-scrollbar-track,
+.mascot-list::-webkit-scrollbar-track,
 .st-body::-webkit-scrollbar-corner,
 .st-sheet-wrap::-webkit-scrollbar-corner {
   background: transparent;
 }
 .st-body::-webkit-scrollbar-thumb,
 .st-nav::-webkit-scrollbar-thumb,
-.st-sheet-wrap::-webkit-scrollbar-thumb {
+.st-sheet-wrap::-webkit-scrollbar-thumb,
+.mascot-list::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: var(--radius-md);
 }
 .st-body::-webkit-scrollbar-thumb:hover,
 .st-nav::-webkit-scrollbar-thumb:hover,
-.st-sheet-wrap::-webkit-scrollbar-thumb:hover {
+.st-sheet-wrap::-webkit-scrollbar-thumb:hover,
+.mascot-list::-webkit-scrollbar-thumb:hover {
   background: var(--dimmer);
 }
 
@@ -9223,14 +9227,97 @@ a.st-btn {
 
 /* --- the workspace's mascot ---------------------------------------------- */
 
-/* Wider than the colour grid, because these are rows with names on them rather
-   than swatches — you are picking between pictures, but the names are how you
-   remember which is which. */
+/* A box to type a name into over a grid of badges, the badge over its name —
+   you are picking between pictures, but the names are how you remember which
+   is which. Capped to the window, the find box staying put while the list
+   under it scrolls; see `MascotPicker.tsx` for why it stopped being a column. */
 .picker-mascots {
-  min-width: 170px;
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  max-height: min(460px, calc(100vh - 8px));
+  max-height: min(460px, calc(100dvh - 8px));
+}
+
+.mascot-find {
+  flex: none;
+  margin: 0 0 2px;
+  padding: 5px 6px;
+  border: var(--border) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+}
+.mascot-find::placeholder {
+  color: var(--dimmer);
+}
+.mascot-find:focus {
+  outline: none;
+  border-color: var(--line-high);
+}
+
+.mascot-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* A wheel that reaches the end stops here rather than moving the page. */
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mascot-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 64px);
   gap: 2px;
+}
+@media (max-width: 420px) {
+  .mascot-grid {
+    grid-template-columns: repeat(4, 64px);
+  }
+}
+
+.mascot-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 2px 4px;
+  border: var(--border) solid transparent;
+  border-radius: var(--radius-lg);
+  background: none;
+  color: var(--text);
+}
+.mascot-tile .mascot-chip {
+  --status-size: 28px;
+}
+.mascot-tile-name {
+  max-width: 100%;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mascot-tile:hover,
+.mascot-cursor {
+  background: var(--chrome-high);
+}
+.mascot-tile:hover .mascot-tile-name,
+.mascot-cursor .mascot-tile-name,
+.mascot-tile.mascot-option-on .mascot-tile-name {
+  color: var(--text);
+}
+
+.mascot-none {
+  margin: 0;
+  padding: 8px 6px;
+  font-size: var(--fs-base);
+  color: var(--dim);
 }
 
 .mascot-option {

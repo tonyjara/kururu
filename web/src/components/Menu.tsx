@@ -568,7 +568,12 @@ export function Popover({
         event.preventDefault();
         onClose();
       }}
-      onWheel={closeOnScroll ? onClose : undefined}
+      // The comment above promised the backdrop's half and nothing kept it:
+      // with `closeOnScroll` off no wheel closed the box at all. The box's
+      // own wheel bubbles here too, so it is told apart by where it began.
+      onWheel={(event) => {
+        if (closeOnScroll || !box.current?.contains(event.target as Node)) onClose();
+      }}
     >
       <div
         ref={box}
