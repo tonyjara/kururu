@@ -1247,10 +1247,18 @@ the windows over a full-screen app, and a display plugged in or pulled.
 - **The packaged app's copy of the voice stack** is only what Node loads:
   `electron-builder.yml` copies `kokoro-js` without its browser bundle,
   transformers' two node builds, `onnxruntime-node`'s Darwin binaries and
-  `sharp` with its own two dependencies — never `onnxruntime-web`, which the
-  node build compiles out. Up to 0.5.0 the DMG shipped `sharp` without
-  `detect-libc` and `semver`, so Kokoro never loaded in the app ("Cannot find
-  module 'detect-libc'") and the voice was always `say`. Checked on
+  `sharp` with its own three dependencies (`@img/colour` rides with the
+  `@img` copy) — never `onnxruntime-web`, which the node build compiles out.
+  Up to 0.5.0 the DMG shipped `sharp` without `detect-libc` and `semver`, so
+  Kokoro never loaded in the app ("Cannot find module 'detect-libc'") and the
+  voice was always `say`. The `sharp` is not the one transformers 3 asks for:
+  the root `package.json` overrides its `^0.34` with 0.35, because the
+  libvips, libheif and librsvg fixes `bun audit` reports are only there, and
+  kokoro-js 1.2.1, the latest, still wants transformers 3. Transformers
+  imports `sharp` at load and calls it only for images, which Kokoro never
+  makes; with 0.35.5 the built `kokoro.mjs` loaded the model offline and
+  spoke a sentence under Node 24 and under the app's Electron (2026-11-23).
+  Drop the override when kokoro-js moves to a transformers that wants 0.35. Checked on
   2026-11-02 in a signed arm64 build (notarization skipped): the packaged
   `kokoro.mjs`, forked from the app's helper as the server forks it, loaded
   the model offline in 0.7 s and spoke a sentence. A failure to start or

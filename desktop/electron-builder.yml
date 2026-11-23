@@ -141,7 +141,8 @@ extraResources:
       - bin/napi-v3/darwin/**
   - from: ../node_modules/sharp
     to: node_modules/sharp
-  # sharp's own two dependencies. Without them transformers' node build
+  # sharp's own dependencies (the third, @img/colour, is in the @img copy
+  # below). Without them transformers' node build
   # throws at import ("Cannot find module 'detect-libc'"), and every DMG up to
   # 0.5.0 shipped without them, so Kokoro never loaded there and the voice was
   # always `say`. The semver is sharp's nested copy, which a bun install puts

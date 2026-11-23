@@ -42,5 +42,8 @@
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "sharp": "^0.35.5"
   }
 }
