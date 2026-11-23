@@ -215,6 +215,7 @@ in this folder.
 | `status.mjs` | The daemon has no face; this is it. Socket + `/api/agents`, then the end of `lifecycle.log` |
 | `reload-window.mjs` | An agent's ⌘R: asks the server, waits, prints what happened, and asks again across a server restart |
 | `kill-hosts.mjs` | Finds hosts by socket, asks, SIGTERMs |
+| `ptys.mjs` | How many ptys a process holds (`lsof` on macOS, `/proc` on Linux), the machine's limit, and the "out of terminals" words. `status.mjs` imports it plain and the host through `ptys.d.mts` |
 | `sockowner.mjs` | Who holds a unix socket: `lsof` on macOS, `ss` on Linux. The tools import it plain and the server through `sockowner.d.mts` |
 | `localtoken.mjs` | The token kururu's own callers present, for a server that wants it on loopback too: `KURURU_TOKEN`, then `access.json` |
 

@@ -47,6 +47,10 @@ import type { AgentReport, AgentSnapshot, PtyKind } from "../../shared/model";
  *   1  everything before the handshake carried one
  *   2  `create` takes `env`; `hello` answers with `version` and `protocol`
  *   3  `text`, an agent's screen as rows of text; backlogs are cached
+ *   4  nothing new on the wire: node-pty 1.2, which gives a terminal's pty
+ *      back when it ends (1.1.0 kept one per terminal until the Mac had none
+ *      left, `ptys.mjs`), and a spawn refused for want of one says so. Bumped
+ *      so a host still leaking is reported as owing a restart
  *
  * A feature checks the number it arrived in (`HOST_SINCE`), never whether the
  * host is current. Bumping this makes every older host not current, and a
@@ -55,7 +59,7 @@ import type { AgentReport, AgentSnapshot, PtyKind } from "../../shared/model";
  * that applied `env` perfectly well. `current` is for saying a restart is
  * owed, which it then is.
  */
-export const HOST_PROTOCOL = 3;
+export const HOST_PROTOCOL = 4;
 
 /** The protocol each thing an older host lacks arrived in. */
 export const HOST_SINCE = {

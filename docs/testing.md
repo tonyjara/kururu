@@ -27,6 +27,12 @@ dependency, since Shiki's wasm has to load), and the pane tree in `web/test`,
 including that a number arriving from a client cannot enter the tree unless it is
 one, and `grid`, which holds the clamp-floor refusal.
 
+`server/test/ptys.test.ts` is the one that spawns real ptys, because the bug it
+holds was in a dependency's native code: it runs node-pty under `node` (in bun its
+read stream never ends) with `sleep`, `sh -i` and nothing else, ends them the
+four ways kururu does, and checks the process holds no more `/dev/ptmx` than it
+started with. node-pty 1.1.0 fails it.
+
 `web/test/usage-palette.test.ts` reads the stylesheet's `:root` and holds the
 chart colours there to what `shared/chartcolor.ts` works out, and to being told
 apart. Nothing else checks the look: the hex and px lint and the contrast floors

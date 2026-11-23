@@ -348,6 +348,16 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **Kururu no longer runs out of terminals.** Every agent, card and shell
+  it ever started kept one of the Mac's 511 ptys for as long as the pty
+  host ran, so after enough of them nothing new would start, and the error
+  said only "posix_spawnp failed". The leak was in node-pty 1.1.0, and
+  kururu now uses node-pty 1.2, which gives a pty back when its terminal
+  ends. If a machine does run out, the error now says "out of terminals"
+  and who is holding them, and `bun run status` shows the host's ptys
+  against its running terminals. Takes effect once the pty host is
+  restarted, which ends every agent; Settings → About says it is owed.
+
 - **The mascot picker fits the window again.** A workspace's Mascot… was
   one long column, which with thirty mascots ran off the bottom of the
   window, and the wheel closed it instead of scrolling it. It is now a grid

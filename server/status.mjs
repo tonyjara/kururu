@@ -27,6 +27,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { tokenHeaders } from "./localtoken.mjs";
+import { leaking, ptyLimit, ptysHeld } from "./ptys.mjs";
 import { socketHolders } from "./sockowner.mjs";
 
 const PORT = process.env.KURURU_PORT ?? 7717;
@@ -270,6 +271,24 @@ const listed = await ask("/api/agents");
 const agents = listed?.agents ?? [];
 const live = agents.filter((agent) => !agent.exited);
 row("agents", `${agents.length}`, `${live.length} running, ${agents.length - live.length} exited`);
+
+// What the host holds of the machine's ptys, against what it runs: one each.
+// node-pty 1.1.0 kept one for every terminal ever started, and the first sign
+// was the 511th spawn failing — this is the line that would have said so a
+// week before. Only for this machine's own server, since `live` is the
+// server's count and the host is this machine's.
+if (pid && !remote) {
+  const held = ptysHeld(pid);
+  const limit = ptyLimit();
+  if (held !== null) {
+    const of = limit === null ? `${held}` : `${held} of ${limit}`;
+    if (leaking(held, live.length)) {
+      row("ptys", down(of), `more than its ${live.length} running terminals need — a leak; restarting the host frees them, which ends every agent`);
+    } else {
+      row("ptys", of, "held by the pty host, one per running terminal");
+    }
+  }
+}
 
 if (agents.length) {
   console.log();

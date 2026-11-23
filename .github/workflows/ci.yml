@@ -8,8 +8,8 @@
 #
 # Electron's download is skipped on both. Nothing under test imports it, and
 # a child never installs it; `desktop/brand.mjs` steps aside when there is no
-# bundle to stamp. node-pty has no Linux prebuild, so on Ubuntu its install
-# script compiles it with node-gyp, which the runner's toolchain covers.
+# bundle to stamp. node-pty 1.2 ships Linux prebuilds; were one missing, its
+# install script would compile it with node-gyp, which the runner covers.
 name: ci
 
 on:

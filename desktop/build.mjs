@@ -139,10 +139,10 @@ await bundle("server/src/kokoro.ts", "dist/kokoro.mjs");
  * Cheap to fix, invisible to diagnose, and it comes back on every reinstall,
  * which is why it lives in the build rather than in a README.
  *
- * The Linux directories are there for a node-pty that ships them, and
- * `build/Release` for one compiled on the machine, which is every Linux today:
- * node-pty 1.1.0 has no Linux prebuild, and its install script builds it with
- * node-gyp. A helper that is not there is a platform that does not use one.
+ * The Linux directories are for node-pty 1.2's Linux prebuilds, and
+ * `build/Release` for one compiled on the machine, which is what 1.1.0's
+ * install script did on every Linux. A helper that is not there is a platform
+ * that does not use one.
  */
 const helpers = [
   ...["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"].map((dir) => join("prebuilds", dir, "spawn-helper")),

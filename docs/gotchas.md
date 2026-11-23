@@ -128,6 +128,16 @@ Observed once: three `../ghosttown` daemons had grown to 11 GB, 11 GB and 3.5 GB
 100 MB of RSS and hid it) and saturated swap. **That is ghosttown's to fix, not
 kururu's** — it has been raised with the user rather than edited across.
 
+**"posix_spawnp failed" on every new agent or shell can mean the Mac is out
+of ptys** (`kern.tty.ptmx_max`, 511, shared by every terminal on it). On
+2026-11-23 the pty host held all 511 with four agents running, because
+node-pty 1.1.0 kept a `/dev/ptmx` and a tty for every terminal it had ever
+started; 1.2 closes both, and `server/test/ptys.test.ts` fails on a version
+that does not. A host on 1.2 says "out of terminals" instead and names who
+holds them; `bun run status` prints the host's `ptys` against its running
+terminals, one each, and `lsof /dev/ptmx` counts every holder. Only a host
+restart gives back what a host leaked, and it ends every agent.
+
 ## A black window is a symptom with several causes
 
 Flat `--bg` with nothing on it is what you get from a React root that unmounted, a

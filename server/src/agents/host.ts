@@ -20,6 +20,7 @@
  */
 import { spawn, type IPty } from "node-pty";
 import { homedir } from "node:os";
+import { canOpenPty, outOfTerminals, ptyLimit, ptysHeld } from "../../ptys.mjs";
 import { countsAsAgent } from "../../../shared/model";
 import type { AgentReport, AgentSnapshot, PtyKind } from "../../../shared/model";
 import { DEFAULT_AGENT_COMMANDS, findAgents, readProcTable } from "./procs";
@@ -157,7 +158,7 @@ export class AgentHost {
     // is interactive because its stdio is a pty and zsh can see that.
     const args = kind === "shell" && !options.command ? ["-l"] : ["-l", "-c", command];
 
-    const pty = spawn(shell, args, {
+    const pty = this.spawnPty(shell, args, {
       name: "xterm-256color",
       cols: screenSize.cols,
       rows: screenSize.rows,
@@ -233,6 +234,30 @@ export class AgentHost {
     this.agents.set(id, agent);
     this.onChange();
     return this.toSnapshot(agent);
+  }
+
+  /**
+   * node-pty's spawn, with its one useless error made useful.
+   *
+   * It says "posix_spawnp failed" for every way a spawn can fail, and on
+   * 2026-11-23 the way was a Mac with no pty left (a leak in node-pty 1.1.0,
+   * see `ptys.mjs`): every agent, card and shell refused with words that named
+   * a function. So a failure asks the one question that tells that case apart
+   * — can a pty be had at all — and only then says something else. Anything
+   * else keeps node-pty's own words, which are the best there are for it.
+   */
+  private spawnPty(...args: Parameters<typeof spawn>): IPty {
+    try {
+      return spawn(...args);
+    } catch (err) {
+      const said = err instanceof Error ? err.message : String(err);
+      if (canOpenPty()) throw err;
+      const live = [...this.agents.values()].filter((agent) => !agent.exited).length;
+      const words = outOfTerminals({ limit: ptyLimit(), held: ptysHeld(), live, mac: process.platform === "darwin" });
+      // The host is a daemon, and its log is the only place its side shows up.
+      console.error(`kururu pty host: ${words} (node-pty: ${said})`);
+      throw new Error(words);
+    }
   }
 
   /** Type at an agent. Throws rather than silently dropping into a dead pty. */
