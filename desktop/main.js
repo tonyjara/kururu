@@ -74,8 +74,10 @@ const PRELOAD = path.join(__dirname, "preload.js");
  */
 if (process.env.KURURU_USER_DATA) app.setPath("userData", process.env.KURURU_USER_DATA);
 
+/** @type {Electron.BrowserWindow | null} */
 let win = null;
 /** The server the window is showing, as an origin. Null while the picker is up. */
+/** @type {string | null} */
 let connected = null;
 
 // ---------------------------------------------------------------------------
@@ -114,6 +116,7 @@ app.on("second-instance", () => openWindow());
  * Asked once, from the user's own shell, with a marker so that whatever an
  * interactive profile prints on the way up is not mistaken for the answer.
  */
+/** @type {string | null} */
 let cachedPath = null;
 
 function loginPath() {
@@ -242,6 +245,7 @@ async function inkWhatAt(global, under) {
     const b = w.getContentBounds();
     return global.x >= b.x && global.y >= b.y && global.x < b.x + b.width && global.y < b.y + b.height;
   };
+  /** @type {Electron.BrowserWindow | null} */
   let target = null;
   if (Number.isFinite(under.number) && under.number > 0) target = candidates.find((w) => windowNumberOf(w.getMediaSourceId()) === under.number) ?? null;
   else if (under.pid === process.pid) target = candidates.find(inside) ?? null;
@@ -495,6 +499,7 @@ async function reachable(base) {
 /** The picker's view of the world, rebuilt each sweep and pushed to it. */
 let entries = candidates().map((entry) => ({ ...entry, reachable: false }));
 let sweeping = false;
+/** @type {NodeJS.Timeout | null} */
 let sweepTimer = null;
 
 /**
@@ -583,6 +588,7 @@ async function sweep() {
 const HEALTH_EVERY_MS = 3000;
 const HEALTH_STRIKES = 3;
 
+/** @type {NodeJS.Timeout | null} */
 let watchTimer = null;
 let strikes = 0;
 
@@ -789,7 +795,7 @@ function createWindow() {
   // the rest of the time. Shown before the window so the window gets a menu
   // bar, which an app with no dock presence is not given.
   dockShow();
-  win = new BrowserWindow({
+  const w = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 420,
@@ -817,10 +823,14 @@ function createWindow() {
       autoplayPolicy: "no-user-gesture-required",
     },
   });
+  // The handlers below are this window's own and use it by name: `win` is
+  // whichever window is current, and is null once this one has closed, which
+  // the renderer-gone dialog can outlast.
+  win = w;
 
   // A link to somewhere else is somewhere else's business: open it in the
   // browser rather than turning this window into one.
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  w.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
   });
@@ -841,44 +851,44 @@ function createWindow() {
    * page outside kururu goes to the browser, where the window-open handler
    * would have sent it; anything else is refused and the app stays drawn.
    */
-  win.webContents.on("will-navigate", (event, url) => {
+  w.webContents.on("will-navigate", (event, url) => {
     const bare = (/** @type {string} */ u) => u.split("#")[0];
-    if (bare(url) === bare(win?.webContents.getURL() ?? "")) return;
+    if (bare(url) === bare(w.webContents.getURL())) return;
     event.preventDefault();
-    const here = originOf(win?.webContents.getURL() ?? "");
+    const here = originOf(w.webContents.getURL());
     if (/^https?:/i.test(url) && originOf(url) !== here && originOf(url) !== connected) void shell.openExternal(url);
   });
 
   // Cut, Copy and Paste on a right-click in a text field, and Copy on selected
   // text; what each right-click gets is decided in `editmenu.js`.
-  win.webContents.on("context-menu", (_event, params) => {
+  w.webContents.on("context-menu", (_event, params) => {
     const template = editMenuTemplate(params);
     if (!template) return;
-    const contents = win.webContents;
+    const contents = w.webContents;
     for (const item of template) {
       if (item.id === "replace") item.click = () => contents.replaceMisspelling(/** @type {string} */ (item.word));
       if (item.id === "learn") item.click = () => contents.session.addWordToSpellCheckerDictionary(/** @type {string} */ (item.word));
     }
-    Menu.buildFromTemplate(template).popup({ window: win });
+    Menu.buildFromTemplate(template).popup({ window: w });
   });
 
   // The window's three buttons, which the page may ask to draw itself; see
   // `claimFrame` below for the terms.
-  for (const event of ["focus", "blur"]) win.on(/** @type {"focus"} */ (event), () => tellFrame(win));
-  win.on("enter-full-screen", () => {
+  for (const event of ["focus", "blur"]) w.on(/** @type {"focus"} */ (event), () => tellFrame(w));
+  w.on("enter-full-screen", () => {
     // Full screen keeps its buttons in the title bar that slides down with
     // the menu bar, and those are the system's whoever drew the others.
-    if (process.platform === "darwin") win.setWindowButtonVisibility(true);
-    tellFrame(win);
+    if (process.platform === "darwin") w.setWindowButtonVisibility(true);
+    tellFrame(w);
   });
-  win.on("leave-full-screen", () => {
-    if (process.platform === "darwin" && frames.get(win)?.claimed) win.setWindowButtonVisibility(false);
-    tellFrame(win);
+  w.on("leave-full-screen", () => {
+    if (process.platform === "darwin" && frames.get(w)?.claimed) w.setWindowButtonVisibility(false);
+    tellFrame(w);
   });
-  win.webContents.on("did-start-navigation", (details) => {
-    if (details.isMainFrame && !details.isSameDocument) leaveFrame(win, details.url.startsWith("file:") ? 0 : FRAME_GRACE_MS);
+  w.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) leaveFrame(w, details.url.startsWith("file:") ? 0 : FRAME_GRACE_MS);
   });
-  win.webContents.on("render-process-gone", () => leaveFrame(win, 0));
+  w.webContents.on("render-process-gone", () => leaveFrame(w, 0));
 
   /**
    * The renderer being killed is the way this window goes black that is not
@@ -899,15 +909,15 @@ function createWindow() {
    * too — an automatic retry under real pressure is a loop.
    */
   let explaining = false;
-  win.webContents.on("render-process-gone", async (_event, details) => {
-    if (details.reason === "clean-exit" || win.isDestroyed()) return;
+  w.webContents.on("render-process-gone", async (_event, details) => {
+    if (details.reason === "clean-exit" || w.isDestroyed()) return;
     if (explaining) return;
     explaining = true;
 
     const starved = details.reason === "oom" || details.reason === "killed";
     console.error(`kururu: the window's renderer went away (${details.reason})`);
     try {
-      const { response } = await dialog.showMessageBox(win, {
+      const { response } = await dialog.showMessageBox(w, {
         type: "warning",
         buttons: ["Reload the window", "Leave it"],
         defaultId: 0,
@@ -919,7 +929,7 @@ function createWindow() {
           ? "macOS ran out of memory and reclaimed it, which is the same thing it does to browser tabs — so anything else that disappeared went the same way, and kururu is not what it was reacting to. Your agents are untouched: they are in a server this window only looks at. Reloading costs a repaint.\n\nIf this keeps happening, something on this machine is holding far more memory than it should; the window is the symptom, not the cause."
           : "The agents are in a server this window only looks at, and are still running. Reloading costs a repaint and nothing else.",
       });
-      if (response === 0 && !win.isDestroyed()) win.reload();
+      if (response === 0 && !w.isDestroyed()) w.reload();
     } finally {
       explaining = false;
     }
@@ -930,14 +940,14 @@ function createWindow() {
    * `window-all-closed` cannot be relied on to say: a note or the pill is a
    * window too, and while one is up that event never comes.
    */
-  win.on("closed", () => {
+  w.on("closed", () => {
     win = null;
     stopSweeping();
     stopWatchingServer();
     dockHide();
   });
 
-  return win;
+  return w;
 }
 
 /** Bring the window up, making one if there is none. The tray's "Open Window", the dock, and ⌘N. */
@@ -952,7 +962,7 @@ function openWindow() {
   createWindow();
   if (connected) {
     const base = connected;
-    void openPage(base).then((page) => connected === base && win?.loadURL(page));
+    void openPage(base).then((page) => (connected === base ? win?.loadURL(page) : undefined));
   } else showPicker();
   app.focus({ steal: true });
   return true;
@@ -1484,6 +1494,7 @@ function launchedAtLogin() {
   return login.openAtLogin && os.uptime() < 180;
 }
 
+/** @type {ReturnType<typeof createTray> | null} */
 let tray = null;
 
 app.whenReady().then(async () => {
@@ -1637,7 +1648,8 @@ async function confirmQuit() {
   const parent = win && !win.isDestroyed() ? win : null;
   if (!parent) app.focus({ steal: true });
 
-  const { response } = await dialog.showMessageBox(parent, {
+  /** @type {Electron.MessageBoxOptions} */
+  const ask = {
     type: "question",
     buttons: ["Quit", "Quit and end them", "Cancel"],
     defaultId: 0,
@@ -1645,7 +1657,8 @@ async function confirmQuit() {
     message: live === 1 ? "One agent is still running." : `${live} agents are still running.`,
     detail:
       "Quitting stops kururu's server. The agents themselves are in a process below it and keep working — they are still there when you open kururu again, with their screens and their scrollback. What stops until then is the phone, which has nothing to connect to.\n\nEnding them stops every terminal on this machine, and that cannot be undone.",
-  });
+  };
+  const { response } = await (parent ? dialog.showMessageBox(parent, ask) : dialog.showMessageBox(ask));
 
   if (response === 2) return;
   finishQuit(response === 1);

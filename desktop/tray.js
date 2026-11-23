@@ -27,14 +27,40 @@ const { pillLog } = require("./talkkey");
 const CARDS_WAIT_MS = 350;
 
 /**
+ * What the tray asks of the app, which owns the window and the list of nodes.
+ *
+ * @typedef {{
+ *   openWindow: () => unknown,
+ *   closeWindow: () => void,
+ *   openKuru: () => void,
+ *   windowOpen: () => boolean,
+ *   nodes: () => unknown[],
+ *   openNode: (id: string) => unknown,
+ *   quit: () => void,
+ *   annotate: () => void,
+ *   serverChanged: () => void,
+ *   webRebuilt: () => void,
+ * }} TrayActions
+ */
+
+/**
+ * The server's `NoteCards` (`shared/notecards.ts`), the part the menu reads,
+ * written out because this half is checked as NodeNext and that file's own
+ * imports are bundler-style.
+ *
+ * @typedef {{ id: string, code: string, title: string }} TrayCard
+ */
+/** @typedef {{ profileKey: string, profileName: string, needs: TrayCard[], columns: { cards: TrayCard[] }[] }} TrayCards */
+
+/**
  * @param {object} options
- * @param {import("./runner").Runner} options.runner
- * @param {import("./talkkey").TalkKey} options.talk
- * @param {import("./notes").NoteWindows} options.notes
- * @param {import("./float").FloatKuru} options.float
+ * @param {InstanceType<typeof import("./runner").Runner>} options.runner
+ * @param {InstanceType<typeof import("./talkkey").TalkKey>} options.talk
+ * @param {InstanceType<typeof import("./notes").NoteWindows>} options.notes
+ * @param {InstanceType<typeof import("./float").FloatKuru>} options.float
  * @param {string} options.version
  * @param {boolean} options.packaged
- * @param {object} options.actions  `openWindow`, `closeWindow`, `windowOpen`, `nodes`, `openNode`, `quit`, `serverChanged`, `webRebuilt`
+ * @param {TrayActions} options.actions
  */
 function createTray({ runner, talk, notes, float, version, packaged, actions }) {
   const image = nativeImage.createFromPath(path.join(__dirname, "icon", "trayTemplate.png"));
@@ -49,6 +75,7 @@ function createTray({ runner, talk, notes, float, version, packaged, actions }) 
    * last answer stands in for one that is late, and a server that is down is
    * said in the label.
    */
+  /** @type {TrayCards | null} */
   let cards = null;
   const fetchCards = async () => {
     if (!runner.health) {
@@ -112,7 +139,8 @@ function createTray({ runner, talk, notes, float, version, packaged, actions }) 
     if (verb === "note-pop") {
       const card = cardsById().get(cardId);
       if (!card || !cards) return null;
-      return () => notes.popOut({ cardId, profileKey: cards.profileKey, profileName: cards.profileName, title: card.title, code: card.code });
+      const { profileKey, profileName } = cards;
+      return () => notes.popOut({ cardId, profileKey, profileName, title: card.title, code: card.code });
     }
     return null;
   };

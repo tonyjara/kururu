@@ -133,10 +133,16 @@ const LAUNCHCTL_TIMEOUT_MS = 10_000;
 // Pure: what the job is, and what launchd says
 // ---------------------------------------------------------------------------
 
-/** XML 1.0 has no spelling for most control characters, so they are dropped rather than escaped. */
+/**
+ * XML 1.0 has no spelling for most control characters, so they are dropped rather than escaped.
+ *
+ * The class is written in escapes, not as the characters themselves: TypeScript 7.0.2 reads a literal
+ * U+E000 at the start of a range as a class escape and refuses the file (TS1516), where the same
+ * range spelled `\uE000` is fine. The two spellings match exactly the same characters.
+ */
 function xml(text: string): string {
   return text
-    .replace(/[^\t\n\r -퟿-�\u{10000}-\u{10FFFF}]/gu, "")
+    .replace(/[^\t\n\r\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");

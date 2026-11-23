@@ -164,6 +164,7 @@ function realDisplays() {
  * those it was, for the log.
  */
 function homeDisplay(displays) {
+  /** @type {Electron.Point | null} */
   let cursor = null;
   try {
     cursor = screen.getCursorScreenPoint();
@@ -219,7 +220,7 @@ class TalkKey extends EventEmitter {
    * @param {string} options.helperPath  the compiled hook, which may be missing from a build without Xcode
    * @param {string} options.preloadPath
    * @param {boolean} options.debug  relay the pill page's console and its reports to stderr: a dev shell has one
-   * @param {object} options.saved  `talkKeyEverywhere`, `altSpace`, `pill`, `talkKey` from `desktop.json`
+   * @param {{ talkKeyEverywhere?: unknown, altSpace?: unknown, pill?: unknown, talkKey?: unknown }} options.saved  from `desktop.json`
    * @param {(patch: object) => void} options.save
    */
   constructor({ helperPath, preloadPath, debug = false, saved, save }) {

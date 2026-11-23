@@ -113,6 +113,7 @@ const { restartDelay } = await import("./restart.mjs").catch(() => ({
 /** When each crash that was started again happened, for the wait before the next. */
 const crashes = [];
 /** A start again that is waiting out its backoff; any other start cancels it. */
+/** @type {NodeJS.Timeout | null} */
 let restartTimer = null;
 
 /** Seconds or minutes, for a sentence. */
@@ -192,6 +193,7 @@ function buildError(said) {
 // --- the server ---------------------------------------------------------------
 
 /** The server this runner currently stands behind. Any other is on its way out. */
+/** @type {import("node:child_process").ChildProcess | null} */
 let server = null;
 let stopping = false;
 
@@ -344,7 +346,9 @@ async function replace(reason) {
 }
 
 /** A replacement in progress, and what has asked for another since it began. */
+/** @type {Promise<void> | null} */
 let cycling = null;
+/** @type {{ why: string, files?: string[], server?: number } | null} */
 let pending = null;
 
 /**
@@ -390,6 +394,7 @@ function cycle(reason) {
  */
 function watchSources() {
   const roots = [join(root, "server/src"), join(root, "shared")];
+  /** @type {NodeJS.Timeout | null} */
   let timer = null;
   const changed = new Set();
   for (const dir of roots) {
@@ -428,7 +433,7 @@ process.on("uncaughtExceptionMonitor", (err) => {
 });
 
 const SIGNALS = { SIGINT: " (Ctrl-C)", SIGTERM: "", SIGHUP: " (its terminal closed)" };
-for (const signal of Object.keys(SIGNALS)) {
+for (const signal of /** @type {(keyof typeof SIGNALS)[]} */ (Object.keys(SIGNALS))) {
   process.on(signal, () => {
     stopping = true;
     record("stop", `stopped by ${signal}${SIGNALS[signal]}`, { signal, ...(server ? { server: server.pid } : {}) });

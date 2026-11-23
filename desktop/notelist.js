@@ -143,6 +143,7 @@ function distance(a, b) {
  * none, which is a note left on a monitor that is gone — the nearest.
  */
 function displayFor(bounds, displays) {
+  /** @type {Electron.Display | null} */
   let best = null;
   let most = 0;
   for (const display of displays) {
@@ -153,6 +154,7 @@ function displayFor(bounds, displays) {
     }
   }
   if (best) return best;
+  /** @type {Electron.Display | null} */
   let near = null;
   let nearest = Infinity;
   for (const display of displays) {

@@ -80,6 +80,7 @@ function displays() {
 
 /** Where a logo with no place of its own lands: the display under the pointer, or the primary one. */
 function homeDisplay(all) {
+  /** @type {Electron.Display | null} */
   let at = null;
   try {
     at = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());

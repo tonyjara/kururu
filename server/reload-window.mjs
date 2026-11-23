@@ -46,6 +46,7 @@ function usage(problem) {
 
 function parse(argv) {
   const words = [];
+  /** @type {string | null} */
   let why = null;
   let timeout = DEFAULT_S;
   let port = process.env.KURURU_PORT || "7717";
@@ -95,6 +96,7 @@ const { why, timeout, port } = parse(process.argv.slice(2));
 const agent = process.env.KURURU_AGENT_ID || null;
 const deadline = Date.now() + timeout * 1000;
 let told = false;
+/** @type {number | null} */
 let downSince = null;
 
 for (;;) {

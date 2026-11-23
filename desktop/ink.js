@@ -457,6 +457,7 @@ class Ink extends EventEmitter {
       }
       const accessMs = ms(pressed);
       const dir = mkdtempSync(path.join(os.tmpdir(), "kururu-ink-"));
+      /** @type {number | null} */
       let home = null;
       try {
         home = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id;
@@ -1142,6 +1143,7 @@ class Ink extends EventEmitter {
       }
       const win = BrowserWindow.fromWebContents(contents);
       if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized()) continue;
+      /** @type {number | null} */
       let front = null;
       try {
         front = this.pencilFront(contents);
