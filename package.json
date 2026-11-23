@@ -38,9 +38,9 @@
     "postinstall": "node desktop/brand.mjs"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0",
-    "electron-builder": "^26.15.3",
+    "@types/bun": "^1.4.5",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
-    "typescript": "^5.8.0"
+    "typescript": "^5.9.3"
   }
 }
