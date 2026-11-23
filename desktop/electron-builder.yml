@@ -26,7 +26,7 @@ directories:
   output: ../release
 
 # node-pty ships N-API prebuilds, which load unchanged in both Node 24 and
-# Electron 44 — so there is nothing to rebuild, and a rebuild step here would be
+# Electron 45 — so there is nothing to rebuild, and a rebuild step here would be
 # the "fix" `CLAUDE.md` warns against for a spawn failure whose real cause is an
 # executable bit.
 npmRebuild: false

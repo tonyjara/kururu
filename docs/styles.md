@@ -109,7 +109,7 @@ the sidebar is away the toggle and the name lead the top-left pane's strip
 **The window's three buttons** are drawn by the page in the Mac app
 (`WindowButtons.tsx`): flat, the three plain colours, grey while the window is
 not the key one, level with the top of the logo. macOS draws its own large and
-glassy for an app built against the macOS 26 SDK, which Electron 44 is, and
+glassy for an app built against the macOS 26 SDK, which Electron 44 and 45 are, and
 has no switch for the old ones. They are measured in the screen's points, not
 the page's pixels — the group wears the inverse of the page's zoom — at
 Herdr's: 12 across, 8 between, 13 in from the window's left edge; only how far

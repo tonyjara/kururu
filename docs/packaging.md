@@ -21,7 +21,8 @@ spawn.
   notarized. The `filter` takes `lib/**` and the two darwin prebuilds and nothing
   else, which is exactly what `lib/utils.js` goes looking for.
 - **node-pty needs no `@electron/rebuild`.** Its prebuilds are N-API, so the same
-  binary loads in Node 24 (ABI 137) and Electron 44 (ABI 149). Do not add a
+  binary loads in Node 24 (ABI 137) and Electron 45 (ABI 150), as it did in
+  Electron 44 (ABI 149). Do not add a
   rebuild step to "fix" a spawn failure — check the executable bit first.
 - **The release workflow builds both architectures in ONE invocation.** Two would
   leave `latest-mac.yml` naming whichever ran last.

@@ -80,7 +80,7 @@ async function bundle(entry, outfile) {
     bundle: true,
     format: "esm",
     platform: "node",
-    // Electron 44 ships Node 24; there is no older runtime to be kind to.
+    // Electron 45 ships Node 24 (24.22); there is no older runtime to be kind to.
     target: "node22",
     sourcemap: true,
     // The maps ship inside the app, so they carry file and line for a stack
