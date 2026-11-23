@@ -21,9 +21,10 @@ shows, so it is written once and read in three places — see
   so the key never reaches the agent's screen, its transcript or a file.
   The agent hears which items were kept and, if it asks, the parts that
   are not secret, such as the key's id. Replacing a key already kept asks
-  you first, before the command runs; every capture puts a notice on your
-  screens saying who kept what, from which command, and the item says so
-  in Settings → Vault.
+  you first, before the command runs. Nothing else pops up: Settings →
+  Vault lists every capture under *Kept from commands* — when, which agent
+  or card, the command, the folder and the items, each a link to its
+  item.
 
 - **The talk key and Shift draw without talking.** Pressed together, in
   either order, from any app while the talk key works in every app, they

@@ -17,7 +17,7 @@ import { reply, replyAsync } from "./reply";
 
 /** What Settings → Vault draws above the census. */
 export function vaultPage(): VaultPage {
-  return { store: vault.storeKind, items: vault.list(), uses: vaultRuns.uses() };
+  return { store: vault.storeKind, items: vault.list(), captures: vault.captures(), uses: vaultRuns.uses() };
 }
 
 export function vaultVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): boolean {

@@ -8458,6 +8458,27 @@ label.st-row {
 .st-a:hover {
   text-decoration: underline;
 }
+/* A link that goes somewhere on the same page, which is a button: the vault's
+   history naming an item above it. */
+.st-jump {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: start;
+}
+.st-jump:hover {
+  text-decoration: underline;
+}
+/* The row a jump landed on, ringed for a moment so the eye finds it, as a
+   quoted line is in Kuru's drawer. */
+.st-row-lit {
+  outline: var(--border-thick) solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
 .st-mono {
   font-family: var(--mono);
   font-size: var(--fs-xs);

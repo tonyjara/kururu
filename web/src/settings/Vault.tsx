@@ -16,12 +16,14 @@
  *
  * Above the census, the vault's own store (`docs/vault.md`): the items
  * pasted into its dialog, each with its rule — free, or ask before each use —
- * and Remove; and below them the recent uses by `vault run`. Names, rules
- * and commands; never a value, which this page is never sent.
+ * and Remove; under them what agents kept from commands (`vault capture`),
+ * which is told nowhere else, since a capture puts nothing on the screen;
+ * and below that the recent uses by `vault run`. Names, rules and commands;
+ * never a value, which this page is never sent.
  */
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { NEVER_SHARED } from "../../../shared/secrets";
-import { kindWords, type VaultPage as StorePage, type VaultUse } from "../../../shared/vaultitems";
+import { kindWords, type CaptureEvent, type VaultPage as StorePage, type VaultUse } from "../../../shared/vaultitems";
 import { envLentTo, lentRows, lentTo, type VaultKey, type VaultLogin, type VaultPage as KeyPage, type VaultView, type VaultWorkspace } from "../../../shared/vaultview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -113,6 +115,12 @@ export function VaultPage({ readOnly, onOpen }: { readOnly: boolean; onOpen: (pa
   );
 }
 
+/** How many captures are drawn before Show all: the newest are the ones looked for. */
+const CAPTURES_SHOWN = 10;
+
+/** The row an item is drawn in, for the captures' history to scroll to. */
+const itemRowId = (name: string) => `vault-item-${name}`;
+
 const APPROVED: Record<VaultUse["approved"], string> = { free: "free to use", owner: "you allowed it", lasting: "allowed for 15 minutes", denied: "not allowed" };
 
 /**
@@ -123,6 +131,18 @@ function Kept({ readOnly }: { readOnly: boolean }) {
   const [page, setPage] = useState<StorePage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // The item a capture's link was pressed for, ringed for a moment.
+  const [lit, setLit] = useState<string | null>(null);
+  const litTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (litTimer.current) clearTimeout(litTimer.current);
+  }, []);
+  const jump = (name: string) => {
+    document.getElementById(itemRowId(name))?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setLit(name);
+    if (litTimer.current) clearTimeout(litTimer.current);
+    litTimer.current = setTimeout(() => setLit(null), 1600);
+  };
   const act = (key: string, run: () => Promise<StorePage>) => {
     setBusy(key);
     setError(null);
@@ -162,6 +182,8 @@ function Kept({ readOnly }: { readOnly: boolean }) {
             return (
               <Readout
                 key={item.name}
+                id={itemRowId(item.name)}
+                className={lit === item.name ? "st-row-lit" : undefined}
                 label={
                   <>
                     {item.label} <Mono>{item.name}</Mono>
@@ -191,6 +213,7 @@ function Kept({ readOnly }: { readOnly: boolean }) {
           })
         )}
       </Group>
+      <Captures captures={page.captures ?? []} kept={new Set(page.items.map((i) => i.name))} onJump={jump} />
       <Group title="Recent uses" foot="Every command run with a vault item or captured into one, newest first, the last fifty: who, which items, the command as it was written, where, and how it ended. No value is kept, and a value typed into a command is masked here too.">
         {page.uses.length === 0 ? (
           <Empty>No command has used the vault yet.</Empty>
@@ -220,6 +243,62 @@ function Kept({ readOnly }: { readOnly: boolean }) {
         )}
       </Group>
     </>
+  );
+}
+
+/**
+ * What agents kept from commands, newest first: the history that a notice
+ * on every screen used to be. When, who, the command, where it ran, and each
+ * item it kept, which goes to that item's row above; one removed since is
+ * named and says so.
+ */
+function Captures({ captures, kept, onJump }: { captures: CaptureEvent[]; kept: ReadonlySet<string>; onJump: (name: string) => void }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? captures : captures.slice(0, CAPTURES_SHOWN);
+  return (
+    <Group
+      title="Kept from commands"
+      lead={
+        <>
+          Every key an agent kept with <Mono>vault capture</Mono>, newest first: when, who, the command, where it ran, and the items it went into. Nothing pops up when one is kept; it is written down here.
+        </>
+      }
+      foot="The command is as it was written, masked; what it printed was shown to nobody. Replacing a key already in the vault still asks you first."
+    >
+      {captures.length === 0 ? (
+        <Empty>No agent has kept anything from a command yet.</Empty>
+      ) : (
+        shown.map((c, i) => (
+          <Row
+            key={`${c.at}:${i}`}
+            label={c.items.map((item, n) => (
+              <Fragment key={item.name}>
+                {n > 0 && ", "}
+                {kept.has(item.name) ? (
+                  <button type="button" className="st-jump" title={`Go to ${item.name}`} onClick={() => onJump(item.name)}>
+                    {item.label} <Mono>{item.name}</Mono>
+                  </button>
+                ) : (
+                  <>
+                    {item.label} <Mono>{item.name}</Mono> (removed since)
+                  </>
+                )}
+              </Fragment>
+            ))}
+            hint={
+              <>
+                {when(c.at)} · {c.by} · <Mono>{c.command}</Mono> in {c.cwd}
+              </>
+            }
+          />
+        ))
+      )}
+      {captures.length > CAPTURES_SHOWN && (
+        <Row label="" hint={all ? `All ${captures.length}.` : `The newest ${CAPTURES_SHOWN} of ${captures.length}.`}>
+          <Btn onClick={() => setAll(!all)}>{all ? "Show fewer" : "Show all"}</Btn>
+        </Row>
+      )}
+    </Group>
   );
 }
 

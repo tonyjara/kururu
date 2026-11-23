@@ -31,7 +31,9 @@
  *   caller is told so, and the paths that were there.
  *
  * Every capture is a line in the use log (`kind: "capture"`), a line in each
- * item's history, and a notice on the owner's pages (`Vault.capture`).
+ * item's history, and an entry in the vault's captures, which Settings →
+ * Vault lists (`Vault.capture`). Nothing is put on the owner's screens: a
+ * capture asks nothing of them, and only replacing an item does.
  */
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";

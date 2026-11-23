@@ -170,7 +170,7 @@ describe("a capture", () => {
     expect(everywhere(r.events)).not.toContain(Buffer.from(SECRET).toString("base64"));
   });
 
-  it("records who captured it, with what and when, in the item, the use log and a notice", async () => {
+  it("records who captured it, with what, when and where, in the item, the use log and the captures' history, and puts nothing on the screens", async () => {
     await capture({ argv: awsLike(), paths: [{ path: "AccessKey.SecretAccessKey", part: "secret" }], label: "Kaipago SES sender" });
     const item = vault.item("kaipago/ses/secret")!;
     expect(item.label).toBe("Kaipago SES sender · AccessKey.SecretAccessKey");
@@ -179,11 +179,13 @@ describe("a capture", () => {
     expect(item.history![0]!.command).toContain("sh -c");
     const [use] = runs.uses();
     expect(use).toMatchObject({ kind: "capture", by: "KAI-12 (a7)", agentId: "a7", names: ["kaipago/ses/secret"], approved: "free", code: 0 });
-    const notice = vault.asks().find((a) => a.kind === "captured");
-    expect(notice).toMatchObject({ kind: "captured", from: "KAI-12 (a7)", items: [{ name: "kaipago/ses/secret", label: "Kaipago SES sender · AccessKey.SecretAccessKey" }] });
-    // OK on any page dismisses it for all.
-    vault.allow(notice!.id, "once");
-    expect(vault.asks().find((a) => a.kind === "captured")).toBeUndefined();
+    const [event] = vault.captures();
+    expect(event).toMatchObject({ by: "KAI-12 (a7)", cwd: dir, items: [{ name: "kaipago/ses/secret", label: "Kaipago SES sender · AccessKey.SecretAccessKey" }] });
+    expect(event!.command).toContain("sh -c");
+    expect((saved as { captures: unknown[] }).captures).toEqual(vault.captures());
+    // Nothing for the owner to dismiss: a capture that replaces nothing asks nothing.
+    expect(vault.asks()).toEqual([]);
+    expect(shown).toEqual([]);
   });
 
   it("hands a captured item to vault run like a pasted one, masked in its output", async () => {
@@ -284,13 +286,38 @@ describe("a capture", () => {
     expect(store.values.get("kaipago/ses/racing")).toBe("theirs-FAKE");
   });
 
-  it("puts a notice back up after a restart, and lets a dismissed one go", async () => {
+  it("keeps the captures' history in vault.json across a restart, newest first, with no value in it", async () => {
     let kept: unknown = null;
-    const first = new Vault({ store, changed: () => {}, load: () => null, save: () => {}, log: () => {}, setTimer: () => 0, clearTimer: () => {}, saveAsks: (v) => (kept = v) });
+    const quiet = { store, changed: () => {}, log: () => {}, setTimer: () => 0, clearTimer: () => {} };
+    const first = new Vault({ ...quiet, load: () => null, save: (v) => (kept = v) });
     await first.capture([{ name: "kaipago/x", label: "x", value: "FAKE-value-x", use: null }], { by: "KAI-12 (a7)", command: "mint", cwd: "~" }, new Set());
-    const second = new Vault({ store, changed: () => {}, load: () => null, save: () => {}, log: () => {}, setTimer: () => 0, clearTimer: () => {}, loadAsks: () => kept });
-    const notice = second.asks().find((a) => a.kind === "captured")!;
-    expect(notice).toMatchObject({ from: "KAI-12 (a7)", command: "mint" });
-    expect(JSON.stringify(kept)).not.toContain("FAKE-value-x");
+    await first.capture([{ name: "kaipago/y", label: "y", value: "FAKE-value-y", use: null }], { by: "Kuru", command: "mint again", cwd: "~/x" }, new Set());
+    const second = new Vault({ ...quiet, load: () => kept, save: () => {} });
+    expect(second.captures().map((c) => [c.by, c.command, c.cwd, c.items.map((i) => i.name)])).toEqual([
+      ["Kuru", "mint again", "~/x", ["kaipago/y"]],
+      ["KAI-12 (a7)", "mint", "~", ["kaipago/x"]],
+    ]);
+    expect(JSON.stringify(kept)).not.toContain("FAKE-value");
+    // A history already begun is not begun again from the use log.
+    second.seedCaptures(() => {
+      throw new Error("read the use log again");
+    });
+    expect(second.captures()).toHaveLength(2);
+  });
+
+  it("begins the captures' history from the use log once, with the captures that kept something", () => {
+    let kept: unknown = null;
+    const quiet = { store, changed: () => {}, log: () => {}, setTimer: () => 0, clearTimer: () => {} };
+    const old = { v: 1, items: { "kaipago/ses/secret": { label: "Kaipago SES sender", use: "free", env: [], createdAt: 1, updatedAt: 1, by: "KAI-12 (a7)", lastUse: null } } };
+    const v = new Vault({ ...quiet, load: () => old, save: (x) => (kept = x) });
+    const line = { by: "KAI-12 (a7)", agentId: "a7", command: "aws iam create-access-key", cwd: "~/kaipago", ms: 1 };
+    v.seedCaptures(() => [
+      { ...line, at: 4, names: ["vault/run"], approved: "free", code: 0 },
+      { ...line, at: 3, names: ["kaipago/ses/secret"], approved: "owner", code: 0, kind: "capture" },
+      { ...line, at: 2, names: ["kaipago/ses/secret"], approved: "denied", code: null, kind: "capture" },
+      { ...line, at: 1, names: ["kaipago/ses/gone"], approved: "free", code: 1, kind: "capture" },
+    ]);
+    expect(v.captures()).toEqual([{ at: 3, by: "KAI-12 (a7)", command: "aws iam create-access-key", cwd: "~/kaipago", items: [{ name: "kaipago/ses/secret", label: "Kaipago SES sender" }] }]);
+    expect((kept as { captures: unknown }).captures).toEqual(v.captures());
   });
 });

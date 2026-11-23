@@ -68,6 +68,7 @@ import {
   slots,
   mac,
   vault,
+  vaultRuns,
   snapshot,
   snapshots,
   state,
@@ -754,6 +755,8 @@ export async function attach(port: Port): Promise<void> {
     port: PORT,
     logPath: () => usesPath(dataDir()),
   }));
+  // The captures' history, begun from the use log by the first server that keeps it.
+  vault.seedCaptures(() => vaultRuns.uses(Number.POSITIVE_INFINITY));
   {
     // A file item's copy outlives its run only when a server died under it.
     const swept = sweepRunFiles(vaultFilesDir());

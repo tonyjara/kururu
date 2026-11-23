@@ -288,25 +288,43 @@ export type VaultAsk =
        * key that can be shown only once. Answered Allow once or Deny.
        */
       replace?: boolean;
-    }
-  | {
-      /**
-       * A notice, not a question: a command's output was kept in the vault
-       * (`vault capture`), and the owner is told who did it and with what,
-       * as they would have seen the dialog had it been pasted. Dismissed by
-       * the `vault-allow` a page already sends, from any page, for all.
-       */
-      kind: "captured";
-      id: string;
-      from: string;
-      items: { name: string; label: string }[];
-      /** The command, clipped and masked. */
-      command: string;
-      cwd: string;
-      at: number;
-      /** When it goes by itself if nobody dismisses it. */
-      until: number;
     };
+
+/**
+ * A `vault capture` that kept something: who, when, the command (clipped and
+ * masked, as the use log has it), where it ran, and the items it kept, with
+ * the labels they had then. Written down and shown nowhere but Settings →
+ * Vault: the owner, 2026-11-23, on the notice each one used to put up — "it's
+ * ok to keep track of those, but I don't see the point of me dismissing those
+ * all the time". A capture asks nothing of anybody, so it does not interrupt;
+ * replacing an item is still asked first, as a `use` ask with `replace`.
+ */
+export interface CaptureEvent {
+  at: number;
+  /** "Kuru", an agent by its card's code or its title, with its id, or "a shell". */
+  by: string;
+  command: string;
+  cwd: string;
+  items: { name: string; label: string }[];
+}
+
+/** How many of those `vault.json` keeps, newest first. */
+export const CAPTURES_KEPT = 200;
+
+/** Captures read off `vault.json`, or the use log they are first made from: anything malformed is dropped. */
+export function adoptCaptures(raw: unknown): CaptureEvent[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CaptureEvent[] = [];
+  for (const e of raw) {
+    const v = e as Partial<CaptureEvent> | null;
+    if (!v || typeof v.at !== "number" || !Number.isFinite(v.at) || typeof v.by !== "string" || !Array.isArray(v.items)) continue;
+    const items = v.items.filter((i): i is { name: string; label: string } => Boolean(i) && typeof i.name === "string").map((i) => ({ name: i.name, label: typeof i.label === "string" ? i.label : i.name }));
+    if (!items.length) continue;
+    out.push({ at: v.at, by: v.by, command: typeof v.command === "string" ? v.command : "", cwd: typeof v.cwd === "string" ? v.cwd : "", items });
+    if (out.length >= CAPTURES_KEPT) break;
+  }
+  return out;
+}
 
 /**
  * What became of one field, and for anything but a save, why — never with
@@ -511,5 +529,7 @@ export interface VaultUse {
 export interface VaultPage {
   store: "keychain" | "file";
   items: VaultItemView[];
+  /** Every `vault capture` that kept something, newest first: the vault's history of what it was handed by a command. */
+  captures: CaptureEvent[];
   uses: VaultUse[];
 }

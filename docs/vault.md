@@ -292,10 +292,18 @@ stderr which items were kept. `server/src/vaultcapture.ts`, through
   `vault.json`, newest ten) gets `captured`, who, when and the command,
   masked; a pasted value gets `pasted` and `vault convert` `converted`.
   `vault list` and Settings → Vault say *captured … by … from …*. The use
-  log gets a line with `kind: "capture"`. And every page gets a notice,
-  *Kept from a command*, with who, the command, where and the items: a
-  `captured` entry among the vault's asks, kept across restarts for a day
-  or until **OK** on any page.
+  log gets a line with `kind: "capture"`. And the vault's own history of
+  captures (`captures` in `vault.json`, newest two hundred) gets who,
+  when, the command, where it ran and the items, which Settings → Vault
+  lists under *Kept from commands*, each item a link to its row. The first
+  server that keeps that history begins it from the use log's capture
+  lines.
+- **Nothing pops up.** A capture asks the owner nothing, so it puts
+  nothing on a screen — no dialog, no notice, no Telegram message. Until
+  2026-11-23 every one put up a *Kept from a command* notice that had to
+  be dismissed; the owner: "it's ok to keep track of those, but I don't
+  see the point of me dismissing those all the time". Only replacing an
+  item interrupts, since that is a decision.
 - **Afterwards** the items are ordinary: `vault run --secret
   kaipago/ses/secret=AWS_SECRET_ACCESS_KEY -- …`.
 - **There is no `vault put`** reading a value from stdin. It would put the
@@ -330,7 +338,10 @@ there is nothing to hold it to. The log says which: `owner`, `lasting` or
 Above the census, **Kept in the vault**: every item by label and name, where
 its value lives, the env files it was written to, when it was saved and for
 whom, its last use, its rule with a button to change it, and Remove (which
-leaves an env file as it is). Then **Recent uses**, the last fifty lines of
+leaves an env file as it is). Then **Kept from commands**, every `vault
+capture` that kept something, newest ten with Show all: when, who, the
+command, the folder, and each item as a link that scrolls to its row and
+rings it (or says it was removed since). Then **Recent uses**, the last fifty lines of
 the log, with Clear. On a phone the page is for looking, as the census is.
 
 ## `list_secrets` and `vault list`

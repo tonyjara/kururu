@@ -178,6 +178,7 @@ export function Row({
   wide,
   children,
   className,
+  id,
   as: Tag = "div",
 }: {
   label: ReactNode;
@@ -185,10 +186,12 @@ export function Row({
   wide?: boolean;
   children?: ReactNode;
   className?: string;
+  /** For a link on the same page to scroll to. */
+  id?: string;
   as?: "div" | "label";
 }) {
   return (
-    <Tag className={`st-row${wide ? " st-row-wide" : ""}${className ? ` ${className}` : ""}`}>
+    <Tag id={id} className={`st-row${wide ? " st-row-wide" : ""}${className ? ` ${className}` : ""}`}>
       <span className="st-row-text">
         <span className="st-label">{label}</span>
         {hint && <span className="st-hint">{hint}</span>}
@@ -737,15 +740,19 @@ export function Readout({
   value,
   tone,
   children,
+  id,
+  className,
 }: {
   label: ReactNode;
   hint?: ReactNode;
   value: ReactNode;
   tone?: Tone;
   children?: ReactNode;
+  id?: string;
+  className?: string;
 }) {
   return (
-    <Row label={label} hint={hint}>
+    <Row label={label} hint={hint} id={id} className={className}>
       <span className={`st-readout${tone === "bad" ? " st-readout-bad" : ""}`}>
         {tone && <Dot tone={tone} />}
         <span className="st-readout-v">{value}</span>

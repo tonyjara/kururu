@@ -25,12 +25,14 @@
 import { randomUUID } from "node:crypto";
 import {
   acceptsName,
+  adoptCaptures,
   base64Bytes,
   canonicalBase64,
   cleanFileName,
   defaultUse,
   durationWords,
   FILE_MAX,
+  CAPTURES_KEPT,
   HISTORY_KEPT,
   sizeWords,
   type AnswerValue,
@@ -42,7 +44,9 @@ import {
   type ItemEvent,
   type UseAnswer,
   type UseRule,
+  type CaptureEvent,
   type VaultAsk,
+  type VaultUse,
   type VaultItemView,
 } from "../../shared/vaultitems";
 import type { Approval } from "./vaultrun";
@@ -64,10 +68,6 @@ const DONE_KEPT = 50;
 export const USE_ASK_MS = 5 * 60_000;
 /** "Allow for 15 minutes": per agent, per item, in memory. */
 export const LASTING_MS = 15 * 60_000;
-/** How long a capture's notice stays on the pages when nobody dismisses it. */
-export const NOTICE_MS = 24 * 3_600_000;
-/** And at most this many at once: the oldest goes first. */
-const NOTICES_KEPT = 20;
 
 interface ItemMeta {
   label: string;
@@ -95,8 +95,6 @@ export interface CapturedValue {
   value: string;
   use: UseRule | null;
 }
-
-type Notice = Extract<VaultAsk, { kind: "captured" }>;
 
 type Timer = unknown;
 
@@ -180,10 +178,16 @@ function adoptItems(raw: unknown): Map<string, ItemMeta> {
 
 export class Vault {
   private items: Map<string, ItemMeta>;
+  /**
+   * Every capture that kept something, newest first. Null until the first
+   * server that knows of it has begun it from the use log
+   * (`seedCaptures`), so the captures made before it are not missing from
+   * it; written as `captures` in `vault.json`, beside the items.
+   */
+  private captureLog: CaptureEvent[] | null;
   private readonly open = new Map<string, OpenAsk>();
   private readonly finished = new Map<string, { at: number; outcomes: FieldOutcome[] }>();
   private readonly openUses = new Map<string, OpenUse>();
-  private readonly notices = new Map<string, { view: Notice; timer: Timer }>();
   /** `${agentId} ${name}` → until, from "Allow for 15 minutes". Gone with a restart, on purpose. */
   private readonly lasting = new Map<string, number>();
   private readonly now: () => number;
@@ -197,7 +201,10 @@ export class Vault {
     this.now = deps.now ?? Date.now;
     this.setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
     this.clearTimer = deps.clearTimer ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
-    this.items = adoptItems((deps.load ?? (() => readConfigFile(VAULT_FILE)))());
+    const raw = (deps.load ?? (() => readConfigFile(VAULT_FILE)))();
+    this.items = adoptItems(raw);
+    const captures = raw && typeof raw === "object" ? (raw as { captures?: unknown }).captures : undefined;
+    this.captureLog = Array.isArray(captures) ? adoptCaptures(captures) : null;
     this.takeUp(deps.loadAsks?.() ?? null);
   }
 
@@ -217,13 +224,8 @@ export class Vault {
         }
       }
     }
-    if (Array.isArray((r as { notices?: unknown }).notices)) {
-      for (const raw of (r as { notices: unknown[] }).notices) {
-        const v = raw as Notice;
-        if (!v || v.kind !== "captured" || typeof v.id !== "string" || typeof v.until !== "number" || !Number.isFinite(v.until) || v.until <= now || !Array.isArray(v.items)) continue;
-        this.postNotice({ kind: "captured", id: v.id, from: String(v.from ?? ""), items: v.items, command: String(v.command ?? ""), cwd: String(v.cwd ?? ""), at: Number.isFinite(v.at) ? v.at : now, until: v.until });
-      }
-    }
+    // A server before 2026-11-23 also kept capture notices here; they are
+    // left unread, since each capture is in the captures' history.
     if (!Array.isArray(r.open)) return;
     for (const raw of r.open) {
       const v = raw as OpenAsk["view"] & { openFor?: unknown };
@@ -241,7 +243,6 @@ export class Vault {
     const value = {
       v: 1,
       open: [...this.open.values()].map((a) => ({ ...a.view, openFor: a.openFor })),
-      notices: [...this.notices.values()].map((n) => n.view),
       finished: [...this.finished].map(([id, f]) => ({ id, at: f.at, outcomes: f.outcomes })),
     };
     try {
@@ -264,7 +265,7 @@ export class Vault {
   private persist(): void {
     const items: Record<string, ItemMeta> = {};
     for (const [name, meta] of [...this.items].sort(([a], [b]) => a.localeCompare(b))) items[name] = meta;
-    const value = { v: 1, items };
+    const value = { v: 1, items, captures: this.captureLog ?? [] };
     if (this.deps.save) this.deps.save(value);
     else writeConfigFile(VAULT_FILE, value, 0o600);
   }
@@ -273,14 +274,36 @@ export class Vault {
     (this.deps.log ?? ((l) => console.log(l)))(`kururu: vault: ${line}`);
   }
 
-  /** The open asks, as every page is sent them: a command waiting first, since something is held up on it, and a notice last, since nothing is. */
+  /** The open asks, as every page is sent them: a command waiting first, since something is held up on it. */
   asks(): VaultAsk[] {
-    return [...[...this.openUses.values()].map((u) => u.view), ...[...this.open.values()].map((a) => a.view), ...[...this.notices.values()].map((n) => n.view)];
+    return [...[...this.openUses.values()].map((u) => u.view), ...[...this.open.values()].map((a) => a.view)];
   }
 
   private announce(): void {
     this.keepAsks();
     this.deps.changed(this.asks());
+  }
+
+  /** Every capture that kept something, newest first. Never a value. */
+  captures(): CaptureEvent[] {
+    return this.captureLog ?? [];
+  }
+
+  /**
+   * The captures' history begun, once, from the use log's capture lines
+   * (newest first), for a `vault.json` written before it was kept: the
+   * captures that succeeded, with each item's label as it is now. Nothing
+   * when it was begun already, so a cleared use log takes nothing away.
+   */
+  seedCaptures(readUses: () => readonly VaultUse[]): void {
+    if (this.captureLog !== null) return;
+    this.captureLog = adoptCaptures(
+      readUses()
+        .filter((u) => u.kind === "capture" && u.code === 0 && u.approved !== "denied")
+        .map((u) => ({ at: u.at, by: u.by, command: u.command, cwd: u.cwd, items: u.names.map((name) => ({ name, label: this.items.get(name)?.label ?? name })) })),
+    );
+    if (this.captureLog.length) this.log(`began the captures' history with ${this.captureLog.length} from the use log`);
+    this.persist();
   }
 
   /** Every item, by name. Never a value. */
@@ -535,15 +558,8 @@ export class Vault {
     open.resolve(approval);
   }
 
-  /** The owner's answer to a command waiting to use items — or "seen" to a capture's notice, which any answer dismisses. */
+  /** The owner's answer to a command waiting to use items. */
   allow(id: string, answer: UseAnswer): void {
-    const notice = this.notices.get(id);
-    if (notice) {
-      this.notices.delete(id);
-      this.clearTimer(notice.timer);
-      this.announce();
-      return;
-    }
     const open = this.openUses.get(id);
     if (!open) throw new Error("That ask is closed: it was answered elsewhere, ran out of time, or its command was stopped.");
     if (answer === "lasting" && open.agentId && !open.view.replace) {
@@ -564,8 +580,9 @@ export class Vault {
    * history saying it was captured, by whom and with what command. An item
    * already kept is replaced only when it is in `replace`, which the owner
    * allowed before the command ran; one that appeared while it ran is
-   * refused. Every item kept puts one notice on the pages. Never throws, and
-   * no outcome carries a value.
+   * refused. A capture that kept anything is one entry in the captures'
+   * history, which Settings → Vault shows; nothing is put on the owner's
+   * screens for it. Never throws, and no outcome carries a value.
    */
   async capture(values: readonly CapturedValue[], source: { by: string; command: string; cwd: string }, replace: ReadonlySet<string>): Promise<{ name: string; outcome: "saved" | "failed"; why?: string }[]> {
     const outcomes: { name: string; outcome: "saved" | "failed"; why?: string }[] = [];
@@ -597,26 +614,12 @@ export class Vault {
     }
     const saved = outcomes.filter((o) => o.outcome === "saved").map((o) => o.name);
     if (saved.length) {
+      const event: CaptureEvent = { at: this.now(), by: source.by, command: source.command, cwd: source.cwd, items: saved.map((name) => ({ name, label: this.items.get(name)?.label ?? name })) };
+      this.captureLog = [event, ...(this.captureLog ?? [])].slice(0, CAPTURES_KEPT);
       this.persist();
-      const at = this.now();
-      this.postNotice({ kind: "captured", id: randomUUID().slice(0, 8), from: source.by, items: saved.map((name) => ({ name, label: this.items.get(name)?.label ?? name })), command: source.command, cwd: source.cwd, at, until: at + NOTICE_MS });
-      this.announce();
     }
     this.log(`${source.by} captured ${outcomes.map((o) => `${o.name} ${o.outcome}`).join(", ") || "nothing"}`);
     return outcomes;
-  }
-
-  /** A notice up, with its timer; the oldest goes when there are too many. Announced by the caller. */
-  private postNotice(view: Notice): void {
-    const timer = this.setTimer(() => {
-      if (this.notices.delete(view.id)) this.announce();
-    }, Math.max(0, view.until - this.now()));
-    this.notices.set(view.id, { view, timer });
-    while (this.notices.size > NOTICES_KEPT) {
-      const [oldest, n] = this.notices.entries().next().value!;
-      this.clearTimer(n.timer);
-      this.notices.delete(oldest);
-    }
   }
 
   /** A file item's name and size, or null for text or no such item. */

@@ -40,10 +40,10 @@
  * A `use` ask — a command waiting for the owner to allow an item — is drawn
  * here too, in the same place, with Allow once, Allow for 15 minutes and
  * Deny; one that would replace items with what a command prints (`vault
- * capture`) has Replace and Deny only. And a capture's notice — a command's
- * output kept in the vault without anybody seeing it — is drawn last, with
- * who, the command and the items, and an OK that dismisses it everywhere,
- * so a key never arrives in the vault without the owner hearing of it.
+ * capture`) has Replace and Deny only. A capture that replaces nothing is
+ * not drawn at all: it asks the owner nothing, so it is written in the
+ * vault's history (Settings → Vault) and interrupts nobody — the owner,
+ * 2026-11-23, after dismissing one notice too many.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -64,7 +64,6 @@ function until(at: number): string {
 /** "a shell" at the start of a sentence. */
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 type Use = Extract<VaultAsk, { kind: "use" }>;
-type Captured = Extract<VaultAsk, { kind: "captured" }>;
 
 const REASON_DOORS: MarkdownDoors = { leaf: (text) => text, link: () => null };
 
@@ -93,10 +92,8 @@ export function VaultAsks() {
       <div className="dialog vault-dialog" role="dialog" aria-modal onPointerDown={(event) => event.stopPropagation()}>
         {ask.kind === "values" ? (
           <ValuesAsk key={ask.id} ask={ask} more={more} onDone={(outcomes) => setDone({ ask, outcomes })} />
-        ) : ask.kind === "use" ? (
-          <UseAsk key={ask.id} ask={ask} more={more} />
         ) : (
-          <CapturedNotice key={ask.id} ask={ask} more={more} />
+          <UseAsk key={ask.id} ask={ask} more={more} />
         )}
       </div>
     </div>,
@@ -428,38 +425,6 @@ function UseAsk({ ask, more }: { ask: Use; more: string | null }) {
         )}
         <button type="button" className="button" onClick={() => answer("once")} disabled={busy}>
           {ask.replace ? "Replace" : "Allow once"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CapturedNotice({ ask, more }: { ask: Captured; more: string | null }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const seen = () => {
-    setBusy(true);
-    void api.allowVault(ask.id, "once").catch((err: unknown) => {
-      setBusy(false);
-      setError(err instanceof Error ? err.message : String(err));
-    });
-  };
-  const time = new Date(ask.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  return (
-    <div onKeyDown={(event) => event.stopPropagation()}>
-      <h2 className="dialog-title">Kept from a command</h2>
-      <p className="dialog-hint">
-        At {time}, {ask.from} kept {ask.items.length === 1 ? "a secret" : `${ask.items.length} secrets`} this command made: {ask.items.map((i) => i.label).join(", ")}. What it printed went into the vault and was shown to nobody
-        {more ? ` · ${more}` : ""}.
-      </p>
-      <pre className="vault-command">{ask.command}</pre>
-      <p className="vault-where">
-        in <code>{ask.cwd}</code> · Keychain · {ask.items.map((i) => i.name).join(", ")}
-      </p>
-      {error && <p className="dialog-move-refused">{error}</p>}
-      <div className="dialog-actions">
-        <button type="button" className="button" onClick={seen} disabled={busy} autoFocus>
-          OK
         </button>
       </div>
     </div>
