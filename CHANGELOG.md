@@ -219,6 +219,14 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **Everything kururu is built on is current.** The app runs on Electron 45
+  (Chromium 156, Node 24.22), up from 44.3, and every other dependency is at
+  its latest release, which clears the known security advisories against
+  them — among them Markdown parsing that could be made to stall, image
+  libraries under the voice, and Electron's own. Nothing about how it looks
+  or works is meant to change. node-pty stays on 1.2.0-beta.18, the release
+  that gives a terminal's pty back.
+
 - **The "This Mac" chip says what the Mac is using, not its load.** It used
   to read "146 · 7 GB", and "load 146 on 12 cores" when opened, which nobody
   could read. Now the bottom bar shows how much of the processors is in use,
