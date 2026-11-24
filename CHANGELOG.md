@@ -220,6 +220,14 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **The floating Kuru's chat stays put around its logo.** The logo is
+  always at the same corner of the chat — the bottom right — wherever you
+  drag it, where the chat used to flip above, below, left or right of it to
+  open towards the middle of the screen. Right-click the logo to move it
+  to another corner of the chat; the choice is kept. Near the edge of the
+  screen the chat and the logo are held inside it together, rather than
+  the chat turning round.
+
 - **Everything kururu is built on is current.** The app runs on Electron 45
   (Chromium 156, Node 24.22), up from 44.3, and every other dependency is at
   its latest release, which clears the known security advisories against

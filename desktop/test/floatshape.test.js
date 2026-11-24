@@ -1,11 +1,14 @@
 /**
  * The floating Kuru's sums. A logo read back wrong off the disk is a window
  * put where NaN puts it; a chat that opens off the edge of its display is a
- * composer nobody can type in; and a waveform on the wrong side of a logo in
- * a corner is one drawn off the screen. All arithmetic, so all read here.
+ * composer nobody can type in; a chat that turns round its logo as the logo
+ * is dragged is the shifting the owner asked to be rid of (2026-11-24); and
+ * a waveform on the wrong side of a logo in a corner is one drawn off the
+ * screen. All arithmetic, so all read here.
  */
 import { describe, expect, it } from "bun:test";
 import {
+  CORNERS,
   GAP,
   HOME_INSET,
   LOGO,
@@ -24,6 +27,7 @@ import {
   draggedWidth,
   heldInside,
   logoBox,
+  logoFor,
   panelBox,
   placeOf,
   waveBox,
@@ -39,13 +43,19 @@ const inside = (box, area) => box.x >= area.x && box.y >= area.y && box.x + box.
 
 describe("what desktop.json holds", () => {
   it("is off, nowhere and the default height when there is nothing", () => {
-    expect(adoptFloat(undefined)).toEqual({ on: false, place: null, height: PANEL_HEIGHT, width: PANEL_WIDTH });
-    expect(adoptFloat("yes")).toEqual({ on: false, place: null, height: PANEL_HEIGHT, width: PANEL_WIDTH });
+    expect(adoptFloat(undefined)).toEqual({ on: false, place: null, corner: "bottom-right", height: PANEL_HEIGHT, width: PANEL_WIDTH });
+    expect(adoptFloat("yes")).toEqual({ on: false, place: null, corner: "bottom-right", height: PANEL_HEIGHT, width: PANEL_WIDTH });
   });
 
   it("keeps a place that is a share of a display, as it was written", () => {
-    const kept = adoptFloat({ on: true, place: { displayId: 2, x: 0.25, y: 0.875 }, height: 400, width: 560 });
-    expect(kept).toEqual({ on: true, place: { displayId: 2, x: 0.25, y: 0.875 }, height: 400, width: 560 });
+    const kept = adoptFloat({ on: true, place: { displayId: 2, x: 0.25, y: 0.875 }, corner: "top-left", height: 400, width: 560 });
+    expect(kept).toEqual({ on: true, place: { displayId: 2, x: 0.25, y: 0.875 }, corner: "top-left", height: 400, width: 560 });
+  });
+
+  it("keeps a corner only if it is one, and starts at the bottom right", () => {
+    for (const corner of CORNERS) expect(adoptFloat({ corner }).corner).toBe(corner);
+    for (const corner of ["middle", "Bottom-Right", 3, null, ["top-left"]]) expect(adoptFloat({ corner }).corner).toBe("bottom-right");
+    expect(CORNERS[0]).toBe("bottom-right");
   });
 
   it("drops a place that is not one", () => {
@@ -119,32 +129,65 @@ describe("which way the chat opens", () => {
     // Its right edge is the mark's, and its foot is a gap above the mark.
     expect(box.x + box.width).toBe(logo.x + LOGO - LOGO_MARGIN);
     expect(box.y + box.height).toBe(logo.y + LOGO_MARGIN - GAP);
+    expect(box.logo).toEqual({ x: logo.x, y: logo.y });
     expect(inside(box, main.workArea)).toBe(true);
   });
 
-  it("opens downwards and to the right from the top left corner", () => {
-    const logo = logoAt(0, 25);
-    const box = panelBox(logo, main.workArea, 520);
-    expect(box.side).toBe("below");
-    expect(box.reach).toBe("right");
-    expect(box.x).toBe(logo.x + LOGO_MARGIN);
-    expect(box.y).toBe(logo.y + LOGO - LOGO_MARGIN + GAP);
-    expect(inside(box, main.workArea)).toBe(true);
+  it("keeps the logo at its corner wherever on the display the logo is", () => {
+    // The middle of the display, and each quarter of it: the chat never turns round.
+    for (const [x, y] of [[700, 500], [400, 700], [1200, 700], [1200, 650], [900, 900 - LOGO]]) {
+      const box = panelBox(logoAt(x, y), main.workArea, 400, 420);
+      expect([box.side, box.reach]).toEqual(["above", "left"]);
+      expect(box.logo).toEqual({ x, y });
+      expect(box.x + box.width).toBe(x + LOGO - LOGO_MARGIN);
+    }
   });
 
-  it("opens downwards and to the left from the top right corner, and upwards and to the right from the bottom left", () => {
-    const topRight = panelBox(logoAt(1512 - LOGO, 25), main.workArea, 400);
+  it("puts the chat on the side the corner says, for each corner", () => {
+    const logo = logoAt(700, 450);
+    const area = { x: 0, y: 0, width: 1512, height: 1100 };
+    const right = panelBox(logo, area, 400, 420, "bottom-right");
+    expect([right.side, right.reach]).toEqual(["above", "left"]);
+    const left = panelBox(logo, area, 400, 420, "bottom-left");
+    expect([left.side, left.reach]).toEqual(["above", "right"]);
+    expect(left.x).toBe(logo.x + LOGO_MARGIN);
+    const topRight = panelBox(logo, area, 400, 420, "top-right");
     expect([topRight.side, topRight.reach]).toEqual(["below", "left"]);
-    const bottomLeft = panelBox(logoAt(0, 25 + 900 - LOGO), main.workArea, 400);
-    expect([bottomLeft.side, bottomLeft.reach]).toEqual(["above", "right"]);
+    expect(topRight.y).toBe(logo.y + LOGO - LOGO_MARGIN + GAP);
+    const topLeft = panelBox(logo, area, 400, 420, "top-left");
+    expect([topLeft.side, topLeft.reach]).toEqual(["below", "right"]);
+    for (const box of [right, left, topRight, topLeft]) expect(box.logo).toEqual({ x: logo.x, y: logo.y });
   });
 
-  it("is never taller than the side it opens on", () => {
-    const logo = logoAt(700, 25 + 500);
-    const box = panelBox(logo, main.workArea, 2000);
+  it("brings the logo out with it from a corner of the display it does not fit against, rather than turning round", () => {
+    const logo = logoAt(0, 25);
+    const box = panelBox(logo, main.workArea, 520, 420);
+    expect([box.side, box.reach]).toEqual(["above", "left"]);
+    expect(inside(box, main.workArea)).toBe(true);
+    // Moved just enough: the chat's top and left edges on the display's.
+    expect(box.x).toBe(0);
+    expect(box.y).toBe(25);
+    expect(box.logo).toEqual({ x: 420 - LOGO + LOGO_MARGIN, y: 25 + 520 - LOGO_MARGIN + GAP });
+    // And still at its corner.
+    expect(box.x + box.width).toBe(box.logo.x + LOGO - LOGO_MARGIN);
+    expect(box.y + box.height).toBe(box.logo.y + LOGO_MARGIN - GAP);
+  });
+
+  it("does the same from the other corners for a logo at the top", () => {
+    for (const [x, corner] of [[1512 - LOGO, "bottom-left"], [0, "top-right"], [1512 - LOGO, "top-left"]]) {
+      const start = corner.startsWith("top") ? 25 + 900 - LOGO : 25;
+      const box = panelBox(logoAt(x, start), main.workArea, 520, 420, corner);
+      expect(inside(box, main.workArea)).toBe(true);
+      expect(inside({ ...box.logo, width: LOGO, height: LOGO }, main.workArea)).toBe(true);
+    }
+  });
+
+  it("is never taller than the display has with the logo beside it", () => {
+    const box = panelBox(logoAt(700, 25 + 500), main.workArea, 2000);
     expect(box.side).toBe("above");
-    expect(box.height).toBe(box.room);
+    expect(box.height).toBe(900 - (LOGO - LOGO_MARGIN + GAP));
     expect(box.y).toBe(main.workArea.y);
+    expect(box.logo.y).toBe(25 + 900 - LOGO);
     expect(inside(box, main.workArea)).toBe(true);
   });
 
@@ -152,7 +195,8 @@ describe("which way the chat opens", () => {
     const logo = logoAt(-1920 + 40, 1080 - LOGO - 30);
     const box = panelBox(logo, left.workArea, 520);
     expect(inside(box, left.workArea)).toBe(true);
-    expect(box.reach).toBe("right");
+    expect(box.reach).toBe("left");
+    expect(box.logo.x).toBe(-1920 + PANEL_WIDTH - LOGO + LOGO_MARGIN);
   });
 
   it("reads a height that is not a number as the default", () => {
@@ -161,14 +205,12 @@ describe("which way the chat opens", () => {
     expect(panelBox(logo, main.workArea, undefined).height).toBe(PANEL_HEIGHT);
   });
 
-  it("is no wider than the display has from the logo's side of it", () => {
+  it("is no wider than the display, less the room to the mark", () => {
     const narrow = { x: 0, y: 0, width: 360, height: 800 };
-    const logo = logoAt(280, 700);
-    const box = panelBox(logo, narrow, 400);
-    // From the mark's right edge to the display's left, which is less than a chat's own width.
-    expect(box.width).toBe(logo.x + LOGO - LOGO_MARGIN);
+    const box = panelBox(logoAt(100, 700), narrow, 400);
+    expect(box.width).toBe(360 - LOGO_MARGIN);
     expect(box.x).toBe(0);
-    expect(box.width).toBeLessThan(PANEL_WIDTH);
+    expect(box.logo.x).toBe(360 - LOGO);
     expect(inside(box, narrow)).toBe(true);
   });
 
@@ -178,7 +220,7 @@ describe("which way the chat opens", () => {
     expect(box.width).toBe(640);
     // Its right edge is still the mark's: the width went leftwards.
     expect(box.x + box.width).toBe(logo.x + LOGO - LOGO_MARGIN);
-    const right = panelBox(logoAt(100, 700), main.workArea, 520, 640);
+    const right = panelBox(logoAt(100, 700), main.workArea, 520, 640, "bottom-left");
     expect(right.x).toBe(100 + LOGO_MARGIN);
     expect(right.width).toBe(640);
   });
@@ -190,23 +232,41 @@ describe("which way the chat opens", () => {
     expect(panelBox(logo, main.workArea, 520, 5000).width).toBe(PANEL_WIDTH_MAX);
   });
 
-  it("is never wider than the display has that way", () => {
-    // A logo a third of the way in from the right: 500 px of display to its left.
-    const logo = logoAt(500 - LOGO + LOGO_MARGIN, 700);
-    const box = panelBox(logo, { x: 0, y: 25, width: 900, height: 900 }, 520, 900);
+  it("brings the logo along to make room for the width it was dragged to", () => {
+    // A logo a third of the way in from the right: 500 px of display to its left, and a chat 700 wide.
+    const area = { x: 0, y: 25, width: 900, height: 900 };
+    const box = panelBox(logoAt(500 - LOGO + LOGO_MARGIN, 700), area, 520, 700);
     expect(box.reach).toBe("left");
-    expect(box.roomAcross).toBe(500);
-    expect(box.width).toBe(500);
+    expect(box.width).toBe(700);
     expect(box.x).toBe(0);
+    expect(box.logo.x).toBe(700 - LOGO + LOGO_MARGIN);
+    expect(box.roomAcross).toBe(700);
   });
 
-  it("still has its least width beside a logo with less room than that, slid inside the display", () => {
-    const tiny = { x: 0, y: 0, width: 400, height: 800 };
-    // Just left of the middle, so it extends rightwards with well under the least width to do it in.
-    const box = panelBox(logoAt(190 - LOGO / 2, 700), tiny, 400, 420);
-    expect(box.reach).toBe("right");
-    expect(box.width).toBe(PANEL_WIDTH_MIN);
-    expect(inside(box, tiny)).toBe(true);
+  it("fills a display too short for the height it was dragged to", () => {
+    const short = { x: 0, y: 25, width: 1512, height: 440 };
+    const box = panelBox(logoAt(700, 25 + 200), short, 520);
+    expect(box.height).toBe(440 - (LOGO - LOGO_MARGIN + GAP));
+    expect(box.room).toBe(box.height);
+    expect(inside(box, short)).toBe(true);
+  });
+});
+
+describe("picking another corner", () => {
+  it("moves the logo to that corner of a chat that stays where it is", () => {
+    const area = { x: 0, y: 0, width: 1512, height: 1100 };
+    const chat = panelBox(logoAt(900, 700), area, 400, 420);
+    for (const corner of CORNERS) {
+      const to = logoFor(chat, corner);
+      const again = panelBox({ ...to, width: LOGO, height: LOGO }, area, 400, 420, corner);
+      expect(again.logo).toEqual(to);
+      expect({ x: again.x, y: again.y, width: again.width, height: again.height }).toEqual({ x: chat.x, y: chat.y, width: chat.width, height: chat.height });
+    }
+  });
+
+  it("is the same spot for the corner it is already at", () => {
+    const chat = panelBox(logoAt(900, 700), main.workArea, 400, 420);
+    expect(logoFor(chat, "bottom-right")).toEqual({ x: 900, y: 700 });
   });
 });
 
@@ -221,7 +281,7 @@ describe("dragging the chat's far side", () => {
   });
 
   it("follows the pointer with its right edge when it extends rightwards", () => {
-    const box = panelBox(logoAt(100, 700), main.workArea, 520, 420);
+    const box = panelBox(logoAt(100, 700), main.workArea, 520, 420, "bottom-left");
     expect(draggedWidth(box, box.x + 555)).toBe(555);
     expect(draggedWidth(box, box.x + 1)).toBe(PANEL_WIDTH_MIN);
     expect(draggedWidth(box, 99999)).toBe(PANEL_WIDTH_MAX);
@@ -250,7 +310,7 @@ describe("dragging the chat's far edge", () => {
   });
 
   it("follows the pointer with its foot when it is below the logo", () => {
-    const box = panelBox(logoAt(0, 25), main.workArea, 520);
+    const box = panelBox(logoAt(0, 25), main.workArea, 520, 420, "top-left");
     expect(draggedHeight(box, box.y + 340)).toBe(340);
     expect(draggedHeight(box, 99999)).toBe(box.room);
   });
@@ -260,10 +320,8 @@ describe("dragging the chat's far edge", () => {
     expect(draggedHeight(box, Number.NaN)).toBe(box.height);
   });
 
-  it("never asks for less than the side has", () => {
-    const logo = logoAt(700, 25 + 200);
-    const box = panelBox(logo, { x: 0, y: 25, width: 1512, height: 440 }, 520);
-    expect(box.room).toBeLessThan(PANEL_MIN);
+  it("never asks for less than the floor", () => {
+    const box = panelBox(logoAt(700, 25 + 200), { x: 0, y: 25, width: 1512, height: 200 }, 520);
     expect(box.room).toBeGreaterThanOrEqual(PANEL_FLOOR);
     expect(draggedHeight(box, box.y)).toBe(box.room);
   });
@@ -278,7 +336,7 @@ describe("the room around the logo's mark", () => {
 });
 
 describe("where the waveform sits", () => {
-  it("is on the left of a logo in the right half, a gap from its mark", () => {
+  it("is on the chat's side of the logo, a gap from its mark", () => {
     const logo = logoBox(null, [main], main);
     const size = { width: WAVE_WIDTH + 2 * PILL_MARGIN, height: 48 + 2 * PILL_MARGIN };
     const box = waveBox(logo, main.workArea, size);
@@ -289,12 +347,20 @@ describe("where the waveform sits", () => {
     expect(box.y + size.height / 2).toBe(logo.y + LOGO / 2);
   });
 
-  it("is on the right of a logo in the left half", () => {
-    const logo = logoAt(30, 400);
+  it("stays on the chat's side in the left half of the display, and with the logo at a left corner goes right", () => {
     const size = { width: 200, height: 40 };
-    const box = waveBox(logo, main.workArea, size);
+    expect(waveBox(logoAt(400, 400), main.workArea, size).side).toBe("left");
+    const box = waveBox(logoAt(400, 400), main.workArea, size, "bottom-left");
     expect(box.side).toBe("right");
-    expect(box.x + PILL_MARGIN).toBe(logo.x + LOGO - LOGO_MARGIN + WAVE_GAP);
+    expect(box.x + PILL_MARGIN).toBe(400 + LOGO - LOGO_MARGIN + WAVE_GAP);
+  });
+
+  it("goes the other way beside a shut chat whose logo is hard against the chat's edge, and never with it open", () => {
+    const size = { width: 200, height: 40 };
+    const logo = logoAt(30, 400);
+    expect(waveBox(logo, main.workArea, size).side).toBe("right");
+    expect(waveBox(logo, main.workArea, size, "bottom-right", true).side).toBe("left");
+    expect(waveBox(logoAt(1512 - LOGO, 400), main.workArea, size, "top-left").side).toBe("left");
   });
 
   it("runs the rest of the chat's width when the chat is open", () => {

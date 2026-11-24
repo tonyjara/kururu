@@ -113,8 +113,10 @@ export interface FloatState {
   open: boolean;
   /** Where the chat is from the logo — which is also which edge of it is dragged. */
   side: "above" | "below";
-  /** Which way the chat and the waveform extend from the logo along its row: towards the middle of its display. */
+  /** Which way the chat extends from the logo along its row: away from the corner of it the logo is at, which the person picks from the logo's right-click. */
   reach: "left" | "right";
+  /** Which way the waveform extends from the logo: the chat's way, but for a shut chat's logo too near that edge of its display for it. */
+  waveReach: "left" | "right";
   /** How wide the waveform is drawn, in CSS pixels: its own width beside a shut chat, the rest of the chat's along an open one. */
   wave: number;
   /** Which of the floating Kuru's two pages asked, when one of them did (`state()` only). */

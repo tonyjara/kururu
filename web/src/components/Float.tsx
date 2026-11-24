@@ -881,7 +881,7 @@ export function FloatWave({ float, room = float.wave }: { float: FloatState; roo
 
   return (
     <div
-      className={`float-wave float-wave-${ui.phase} float-wave-${float.reach} ${float.open ? "float-wave-wide" : ""}`}
+      className={`float-wave float-wave-${ui.phase} float-wave-${float.waveReach} ${float.open ? "float-wave-wide" : ""}`}
       style={{ width }}
       role="status"
       aria-live="polite"

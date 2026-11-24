@@ -23,9 +23,11 @@
  * is `web/src/components/Float.tsx`), each a client of the server like the
  * pill and the notes: the chat is Kuru's drawer and the Needs drawer
  * themselves, not copies of them. What is kept here is only what a page
- * cannot know: where the logo is, whether the chat is open, and how tall and
- * how wide it was dragged — `desktop.json`'s `float`. Where the chat goes is never kept:
- * it is worked out against the logo each time (`floatshape.js`).
+ * cannot know: where the logo is, which corner of the chat it is at, whether
+ * the chat is open, and how tall and how wide it was dragged —
+ * `desktop.json`'s `float`. Where the chat goes is never kept: it is worked
+ * out against the logo each time (`floatshape.js`), with the logo at the
+ * corner picked from its right-click and never another (`setCorner`).
  *
  * **The voice moves here while this is on.** The pill is still the one voice
  * client — the microphone, the player and the pen's tools are its page's —
@@ -41,7 +43,7 @@ const { BrowserWindow, Menu, screen, shell } = require("electron");
 const { EventEmitter } = require("node:events");
 const { editMenuTemplate } = require("./editmenu");
 const { neverActivates, staysUp } = require("./stays");
-const { LOGO, PANEL_FLOOR, adoptFloat, draggedHeight, draggedWidth, heldInside, logoBox, panelBox, placeOf, reach, waveBox, waveWidth } = require("./floatshape");
+const { LOGO, PANEL_FLOOR, adoptCorner, adoptFloat, draggedHeight, draggedWidth, heldInside, logoBox, logoFor, panelBox, placeOf, reachOf, sideOf, waveBox, waveReach, waveWidth } = require("./floatshape");
 
 /** As in `talkkey.js`: macOS is still moving windows for a while after a display changes. */
 const SETTLE_MS = [600, 2500];
@@ -110,6 +112,8 @@ class FloatKuru extends EventEmitter {
     this.enabled = kept.on;
     /** @type {{ displayId: number, x: number, y: number } | null} */
     this.placeKept = kept.place;
+    /** Which corner of the chat the logo is at: the person's, from the logo's right-click. */
+    this.corner = kept.corner;
     this.height = kept.height;
     this.width = kept.width;
     /** The origin the pages come from — the pill's — or null while there is none. */
@@ -156,11 +160,15 @@ class FloatKuru extends EventEmitter {
     const logo = this.logoBounds();
     const area = logo ? this.areaOf(logo) : null;
     const box = this.open ? this.box : null;
+    const way = reachOf(this.corner);
     return {
       on: this.enabled,
       open: this.open,
-      side: this.box?.side ?? "above",
-      reach: logo && area ? reach(logo, area) : "left",
+      side: sideOf(this.corner),
+      reach: way,
+      corner: this.corner,
+      // The waveform's own side, which is the chat's but for a shut chat's logo hard against that edge (`waveReach`).
+      waveReach: logo && area ? waveReach(logo, area, this.corner, this.open) : way,
       wave: waveWidth(box),
       // What this build of the app is and can do, for pages that may be
       // newer than the app they are drawn in: how big the logo's window is,
@@ -181,7 +189,7 @@ class FloatKuru extends EventEmitter {
   }
 
   keep() {
-    this.save({ on: this.enabled, place: this.placeKept, height: this.height, width: this.width });
+    this.save({ on: this.enabled, place: this.placeKept, corner: this.corner, height: this.height, width: this.width });
   }
 
   // --- on and off --------------------------------------------------------------------
@@ -381,6 +389,35 @@ class FloatKuru extends EventEmitter {
     if (this.logo && !this.logo.isDestroyed()) this.logo.showInactive();
   }
 
+  /**
+   * The logo's right-click: the corner of the chat it is at. The chat is
+   * where it stays — the one that is open, or where it would open — and the
+   * logo goes to the corner picked of it, then the two are held inside the
+   * display together as ever. Kept, so the next launch has it.
+   */
+  setCorner(raw) {
+    const corner = adoptCorner(raw);
+    if (corner === this.corner) return;
+    const logo = this.logoBounds();
+    if (!logo) {
+      this.corner = corner;
+      this.keep();
+      this.changed();
+      return;
+    }
+    const area = this.areaOf(logo);
+    const chat = this.open && this.box ? this.box : panelBox(logo, area, this.height, this.width, this.corner);
+    this.corner = corner;
+    const to = logoFor(chat, corner);
+    const held = panelBox({ ...to, width: LOGO, height: LOGO }, area, this.height, this.width, corner).logo;
+    this.moveLogo(held.x, held.y);
+    if (this.open) this.placePanel();
+    this.rememberPlace();
+    this.keep();
+    this.changed();
+    this.redock();
+  }
+
   /** Where the logo is now, written down as a share of the display it is on. */
   rememberPlace() {
     const bounds = this.logoBounds();
@@ -492,7 +529,8 @@ class FloatKuru extends EventEmitter {
     const panel = this.panel;
     if (!panel || panel.isDestroyed()) return;
     this.open = true;
-    this.placePanel();
+    // A logo too near the edge for the chat on its side is brought out with it, and left where it was brought.
+    if (this.placePanel()) this.rememberPlace();
     // Told before it is shown, so the page has the drawer in it by the time
     // the window is anything but clear.
     this.changed();
@@ -550,14 +588,22 @@ class FloatKuru extends EventEmitter {
     return true;
   }
 
-  /** The chat's window against the logo, at the size it was dragged to or as much of it as there is that way. */
+  /**
+   * The chat's window against the logo, with the logo at its corner, at the
+   * size it was dragged to or as much of it as the display has. Where the
+   * chat would go off the display the logo is moved in with it, never the
+   * chat turned round it (`panelBox`); true when the logo was moved.
+   */
   placePanel() {
     const logo = this.logoBounds();
     const panel = this.panel;
-    if (!logo || !panel || panel.isDestroyed()) return;
-    this.box = panelBox(logo, this.areaOf(logo), this.height, this.width);
+    if (!logo || !panel || panel.isDestroyed()) return false;
+    this.box = panelBox(logo, this.areaOf(logo), this.height, this.width, this.corner);
+    const moved = this.box.logo.x !== logo.x || this.box.logo.y !== logo.y;
+    if (moved) this.moveLogo(this.box.logo.x, this.box.logo.y);
     const { x, y, width, height } = this.box;
     panel.setBounds({ x, y, width, height });
+    return moved;
   }
 
   /** The window's opacity walked to `to`, and `then` once it is there; a fade under way is taken over, never raced. */
@@ -639,13 +685,13 @@ class FloatKuru extends EventEmitter {
 
   /**
    * Where the pill's window goes while this is on, for `TalkKey.place`: in
-   * the logo's row, on the side with the room. Null while this is off or has
-   * no logo up, which leaves the pill where it has always been.
+   * the logo's row, on the chat's side. Null while this is off or has no
+   * logo up, which leaves the pill where it has always been.
    */
   dock(size) {
     const logo = this.enabled ? this.logoBounds() : null;
     if (!logo || !this.logo?.isVisible()) return null;
-    return waveBox(logo, this.areaOf(logo), size);
+    return waveBox(logo, this.areaOf(logo), size, this.corner, this.open);
   }
 
   // --- displays ------------------------------------------------------------------------

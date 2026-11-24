@@ -29,6 +29,8 @@ function adopt(raw: unknown): FloatState | null {
     open: r.open === true,
     side: r.side === "below" ? "below" : "above",
     reach: r.reach === "right" ? "right" : "left",
+    // From an app before the corner was the person's, the waveform's side was the chat's.
+    waveReach: r.waveReach === "right" ? "right" : r.waveReach === "left" ? "left" : r.reach === "right" ? "right" : "left",
     // A number off another process: checked before it is used as a width.
     wave: typeof r.wave === "number" && Number.isFinite(r.wave) ? Math.max(60, Math.min(2000, r.wave)) : 132,
     role: r.role === "logo" || r.role === "panel" ? r.role : (state?.role ?? null),

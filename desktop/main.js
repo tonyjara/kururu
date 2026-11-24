@@ -1426,11 +1426,22 @@ ipcMain.on("kururu:float-press", (event) => {
 ipcMain.on("kururu:float-drag", (event, phase) => {
   if (float.isLogo(event.sender) && ["start", "move", "end"].includes(phase)) float.drag(phase);
 });
+/** The logo's corners as its right-click names them, the default first (`CORNERS` in `floatshape.js`). */
+const CORNER_LABELS = [
+  ["bottom-right", "Bottom Right"],
+  ["bottom-left", "Bottom Left"],
+  ["top-right", "Top Right"],
+  ["top-left", "Top Left"],
+];
 ipcMain.on("kururu:float-menu", (event) => {
   if (!float.isLogo(event.sender) || !float.logo) return;
   Menu.buildFromTemplate([
     { label: float.open ? "Close the Conversation" : "Open the Conversation", click: () => float.toggle() },
     { label: "Open Kururu's Window", click: () => openWindow() },
+    { type: "separator" },
+    // Which corner of the chat the logo is at. The chat no longer turns round the logo by itself (`floatshape.js`), so this is the one way it changes.
+    { label: "Move to Another Corner of the Chat", enabled: false },
+    ...CORNER_LABELS.map(([corner, label]) => ({ label, type: /** @type {const} */ ("radio"), checked: float.corner === corner, click: () => float.setCorner(corner) })),
     { type: "separator" },
     { label: "Hide the Floating Kuru", click: () => float.setEnabled(false) },
   ]).popup({ window: float.logo });

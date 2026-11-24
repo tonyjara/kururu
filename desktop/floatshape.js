@@ -12,11 +12,18 @@
  * puts somewhere; the chat and the waveform are placed against it every time
  * they are shown, never remembered on their own, so neither can be left
  * behind on a monitor that went or drift away from the thing they belong to.
- * The chat opens above or below the logo, whichever side has the room, with
- * its outer edge on the logo's; the waveform sits in the logo's own row,
- * towards the middle of the display — which is the side the chat extends to
- * as well, so with the chat open the row reads as one bar along its edge,
- * the waveform ending at the logo.
+ *
+ * **And the logo is always at the same corner of the chat** — the bottom
+ * right unless the person picked another from its right-click — whatever
+ * part of the display it is on. The chat once opened above or below the
+ * logo by whichever side had more room, and towards the middle of the
+ * display, so dragging the logo across the screen flipped the chat round
+ * it at every half; the owner, 2026-11-24: "the constant shifting can get
+ * annoying". So the corner is the person's, and near an edge it is the two
+ * together that are held inside the display — the logo moved with the chat
+ * — never the corner that gives way. The waveform sits in the logo's row on
+ * the chat's side, so with the chat open the row reads as one bar along its
+ * edge, the waveform ending at the logo.
  *
  * **The logo's place is a share of a display,** on the pill's reasoning
  * (`talkkey.js`): a pixel is nonsense the moment its display is unplugged,
@@ -59,6 +66,27 @@ const WAVE_WIDTH = 132;
 /** The room the pill's page keeps around what it draws (`.pill-page-root`'s padding, and `PANEL_MARGIN` in `talkkey.js`). */
 const PILL_MARGIN = 8;
 
+/**
+ * The corners of the chat the logo can be at, the first the one it starts
+ * at: where a page's chat bubble is looked for, and the corner of the
+ * display a logo that was never dragged sits in.
+ */
+const CORNERS = ["bottom-right", "bottom-left", "top-right", "top-left"];
+
+/** Whether the chat is above the logo or below it, for a logo at `corner` of it. */
+function sideOf(corner) {
+  return corner.startsWith("top") ? "below" : "above";
+}
+
+/** Which way the chat extends from the logo along its row: away from the logo's side of it. */
+function reachOf(corner) {
+  return corner.endsWith("left") ? "right" : "left";
+}
+
+function adoptCorner(raw) {
+  return CORNERS.includes(raw) ? raw : CORNERS[0];
+}
+
 function clamp(value, low, high) {
   return Math.min(Math.max(value, low), high);
 }
@@ -69,8 +97,8 @@ function finite(value) {
 
 /**
  * What `desktop.json` holds of the floating Kuru, read as if off the wire:
- * whether it is on, where its logo was left, and how tall and how wide its
- * chat was dragged. Anything that is not what it should be is its default,
+ * whether it is on, where its logo was left, which corner of the chat the
+ * logo is at, and how tall and how wide its chat was dragged. Anything that is not what it should be is its default,
  * never a throw — and a size is checked with `finite` before it is clamped,
  * since NaN loses every comparison a clamp makes.
  */
@@ -79,6 +107,7 @@ function adoptFloat(raw) {
   return {
     on: r.on === true,
     place: adoptPlace(r.place),
+    corner: adoptCorner(r.corner),
     height: finite(r.height) ? Math.round(clamp(r.height, PANEL_MIN, 4000)) : PANEL_HEIGHT,
     width: finite(r.width) ? Math.round(clamp(r.width, PANEL_WIDTH_MIN, PANEL_WIDTH_MAX)) : PANEL_WIDTH,
   };
@@ -141,54 +170,76 @@ function heldInside(x, y, area) {
   };
 }
 
-/** Which way things extend from the logo along its row: towards the middle of its display. */
-function reach(logo, area) {
-  return logo.x + logo.width / 2 > area.x + area.width / 2 ? "left" : "right";
-}
-
 /**
- * The chat's box against the logo: above it or below, whichever has more
- * room — so a logo in the lower half of its display opens upwards and one in
- * the upper half downwards — at the height and the width it was dragged to,
- * or as much of each as there is. Its outer edge is on the logo's mark, and
- * it extends the way `reach` says, held inside the work area.
+ * The chat's box against the logo, with the logo at `corner` of it: above
+ * the logo for a bottom corner and below it for a top one, extending left
+ * for a right corner and right for a left one, at the height and the width
+ * it was dragged to, or as much of each as the display has. Its outer edges
+ * are on the logo's mark.
+ *
+ * Near an edge it does not give way: the logo does. `logo` is where the
+ * logo has to be for the chat to be wholly inside the work area — the one
+ * it was asked about whenever it already is — and the box is put against
+ * that. So a logo dragged towards an edge with the chat open is held where
+ * the chat still fits, and a chat opened from a logo in the wrong corner of
+ * the display for it brings the logo out with it.
  *
  * `side` is where the chat is from the logo, and `reach` which way it
  * extends; the two edges away from the logo, and the corner between them,
  * are what the page lets be dragged. `room` and `roomAcross` are the most
  * each drag may ask for: from the logo's side of the chat to the edge of the
- * work area.
+ * work area, with the logo where it is.
  */
-function panelBox(logo, area, wantedHeight, wantedWidth) {
-  const top = logo.y + LOGO_MARGIN - GAP;
-  const bottom = logo.y + logo.height - LOGO_MARGIN + GAP;
-  const above = top - area.y;
-  const below = area.y + area.height - bottom;
-  const side = above >= below ? "above" : "below";
-  const room = Math.max(PANEL_FLOOR, side === "above" ? above : below);
+function panelBox(logo, area, wantedHeight, wantedWidth, corner = CORNERS[0]) {
+  const side = sideOf(corner);
+  const way = reachOf(corner);
+  // From the logo's window to the chat's near edge: the margin to the mark, and the gap past it.
+  const near = LOGO - LOGO_MARGIN + GAP;
+  // The most the display has room for with the logo in its row beside the chat, and the least it is ever shown at.
+  const tallest = Math.max(PANEL_FLOOR, area.height - near);
+  const widest = Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, area.width - LOGO_MARGIN));
   const want = finite(wantedHeight) ? clamp(wantedHeight, PANEL_MIN, 4000) : PANEL_HEIGHT;
-  const height = Math.round(Math.min(want, room));
-  const way = reach(logo, area);
-  // The logo's side of the chat, which stays; the chat runs from it towards the middle of the display.
-  const anchor = way === "left" ? logo.x + logo.width - LOGO_MARGIN : logo.x + LOGO_MARGIN;
-  const across = way === "left" ? anchor - area.x : area.x + area.width - anchor;
-  // A logo dragged hard against the far side of a narrow display leaves less than the least width; the chat is then slid inside instead.
-  const roomAcross = Math.min(PANEL_WIDTH_MAX, area.width, Math.max(PANEL_WIDTH_MIN, across));
   const wide = finite(wantedWidth) ? clamp(wantedWidth, PANEL_WIDTH_MIN, PANEL_WIDTH_MAX) : PANEL_WIDTH;
-  const width = Math.round(Math.min(wide, roomAcross));
-  const x = way === "left" ? anchor - width : anchor;
+  const height = Math.round(Math.min(want, tallest));
+  const width = Math.round(Math.min(wide, widest));
+  const bottom = area.y + area.height;
+  const right = area.x + area.width;
+  // Where the logo may be for the chat and itself to be inside: the bounds on each axis, the low one winning on a display too small for both.
+  const [lowY, highY] = side === "above" ? [area.y + height - LOGO_MARGIN + GAP, bottom - LOGO] : [area.y, bottom - height - near];
+  const [lowX, highX] = way === "left" ? [area.x + width - LOGO + LOGO_MARGIN, right - LOGO] : [area.x, right - width - LOGO_MARGIN];
+  const at = {
+    x: Math.round(Math.max(lowX, Math.min(logo.x, highX))),
+    y: Math.round(Math.max(lowY, Math.min(logo.y, highY))),
+  };
+  const top = at.y + LOGO_MARGIN - GAP;
+  const foot = at.y + near;
+  const anchor = way === "left" ? at.x + LOGO - LOGO_MARGIN : at.x + LOGO_MARGIN;
+  const room = Math.max(PANEL_FLOOR, side === "above" ? top - area.y : bottom - foot);
+  const roomAcross = Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, way === "left" ? anchor - area.x : right - anchor));
   return {
-    x: Math.round(clamp(x, area.x, area.x + area.width - width)),
-    y: Math.round(side === "above" ? top - height : bottom),
+    x: way === "left" ? anchor - width : anchor,
+    y: side === "above" ? top - height : foot,
     width,
     height,
     side,
     reach: way,
+    /** Where the logo is for this box: where it was, or moved in so the chat fits. */
+    logo: at,
     /** The tallest this side lets it be dragged, for the handle. */
     room: Math.round(room),
     /** And the widest. */
     roomAcross: Math.round(roomAcross),
   };
+}
+
+/**
+ * Where the logo goes to be at `corner` of a chat at `box`: the other half
+ * of `panelBox`, for a corner picked while the chat stays where it is.
+ */
+function logoFor(box, corner) {
+  const x = reachOf(corner) === "left" ? box.x + box.width - LOGO + LOGO_MARGIN : box.x - LOGO_MARGIN;
+  const y = sideOf(corner) === "above" ? box.y + box.height - LOGO_MARGIN + GAP : box.y - LOGO + LOGO_MARGIN - GAP;
+  return { x: Math.round(x), y: Math.round(y) };
 }
 
 /**
@@ -223,14 +274,35 @@ function waveWidth(panel) {
 }
 
 /**
+ * The waveform's room beside a shut chat: as wide as it is ever drawn, with
+ * words in it (`FloatWave`'s 300), and its gap from the mark.
+ */
+const WAVE_ROOM = 300 + WAVE_GAP;
+
+/**
+ * Which side of the logo the waveform is on: the chat's, so that with the
+ * chat open it runs along its edge. With the chat shut there is no chat to
+ * hold inside the display, and a logo can be dragged hard against the edge
+ * the chat would extend over — there the waveform goes on the other side,
+ * since a voice drawn off the screen is one nobody sees. It is the one
+ * thing that changes sides, and only while it is up and the chat is not.
+ */
+function waveReach(logo, area, corner, open) {
+  const way = reachOf(corner);
+  if (open) return way;
+  const room = way === "left" ? logo.x + LOGO_MARGIN - area.x : area.x + area.width - (logo.x + LOGO - LOGO_MARGIN);
+  return room >= WAVE_ROOM ? way : way === "left" ? "right" : "left";
+}
+
+/**
  * Where the pill's window goes while it is docked to the logo: in the logo's
  * row, centred on it, its drawn edge `WAVE_GAP` from the mark's, on the side
- * `reach` says. `size` is the window's, which is what it draws plus
+ * `waveReach` says. `size` is the window's, which is what it draws plus
  * `PILL_MARGIN` all round; the two windows' clear margins overlap, which is
  * what lets the gap be smaller than both.
  */
-function waveBox(logo, area, size) {
-  const way = reach(logo, area);
+function waveBox(logo, area, size, corner = CORNERS[0], open = false) {
+  const way = waveReach(logo, area, corner, open);
   const x =
     way === "left"
       ? logo.x + LOGO_MARGIN - WAVE_GAP + PILL_MARGIN - size.width
@@ -243,6 +315,7 @@ function waveBox(logo, area, size) {
 }
 
 module.exports = {
+  CORNERS,
   GAP,
   HOME_INSET,
   LOGO,
@@ -256,15 +329,19 @@ module.exports = {
   PILL_MARGIN,
   WAVE_GAP,
   WAVE_WIDTH,
+  adoptCorner,
   adoptFloat,
   adoptPlace,
   draggedHeight,
   draggedWidth,
   heldInside,
   logoBox,
+  logoFor,
   panelBox,
   placeOf,
-  reach,
+  reachOf,
+  sideOf,
   waveBox,
+  waveReach,
   waveWidth,
 };
