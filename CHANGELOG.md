@@ -365,6 +365,14 @@ shows, so it is written once and read in three places — see
 
 ### Fixed
 
+- **Mascots keep the tops of their heads.** Beside an agent's name in the
+  sidebar, a tab, a board card or a drawer, the mascot is raised to stand
+  on the line of text, and the raise cut its top few pixels off: the
+  monkeys drew with flat heads, the frog lost the top of its jump, the
+  gull and the hawk their wingtips, the tea its steam and the boba its
+  straw. The whole figure shows now, still at the same place and size
+  and still pixel-sharp. The floating Kuru was never affected.
+
 - **Kururu no longer runs out of terminals.** Every agent, card and shell
   it ever started kept one of the Mac's 511 ptys for as long as the pty
   host ran, so after enough of them nothing new would start, and the error

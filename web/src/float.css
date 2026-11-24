@@ -106,18 +106,16 @@ html.float-logo-page #root {
   }
 }
 
-/* The mascot, at a size a logo is read at. The sidebar lifts its sprite onto
-   the text's baseline (`.mascot` in `styles.css`); here it stands on nothing.
-   A sprite's cell has its figure standing on the floor of it, with sky over
-   its head, so the box is lifted a little for the figure — not the box — to
-   sit in the middle of the disc. Measured against the frog; a sheet with
-   another figure in it is a pixel or two off, which a disc forgives. */
+/* The mascot, at a size a logo is read at. The sidebar lifts its sprite's box
+   onto the text's baseline (`.status` holding a `.mascot`, in `styles.css`);
+   here it stands on nothing, and this rule outweighs that one. A sprite's cell
+   has its figure standing on the floor of it, with sky over its head, so the
+   box is lifted a little for the figure — not the box — to sit in the middle
+   of the disc. Measured against the frog; a sheet with another figure in it is
+   a pixel or two off, which a disc forgives. */
 .float-logo .status {
   --status-size: 34px;
   translate: -1px -3px;
-}
-.float-logo .mascot {
-  translate: none;
 }
 .float-logo-still .mascot {
   animation-name: none;

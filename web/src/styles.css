@@ -1580,12 +1580,24 @@ kbd {
    distance from a line box's bottom to its baseline is a property of the type,
    so a different size of type wants a different number of pixels and the same
    fraction of an em. The dot keeps the centre it always
-   had; it is not standing on anything. */
+   had; it is not standing on anything.
+
+   What is lifted is the box, not the sprite in it. The box is the window that
+   clips the strip to one trim, and it has to clip: either side of the frame on
+   show is the next one, and under the trim is the rest of the cell, which on
+   some sheets is the top of the row below. A sprite lifted inside that window
+   lost its top 0.3em to the window's edge and showed as much of what lies
+   under its trim — a monkey whose trim is its exact outline drew with a flat
+   head (the owner, 2026-11-24). Lifting the window carries the trim up whole.
+   `:where` keeps the rule at one class's weight, so the floating Kuru's own
+   placement of the box (`.float-logo .status`) still wins over it. */
+:where(.status):has(> .mascot) {
+  translate: 0 -0.3em;
+}
 .mascot {
   position: absolute;
   top: 0;
   left: 0;
-  translate: 0 -0.3em;
   background-repeat: no-repeat;
   image-rendering: pixelated;
   animation-name: hop;
