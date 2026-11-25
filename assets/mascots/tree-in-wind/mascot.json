@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "tree-in-wind",
+  "name": "Bush",
+  "description": "abetusk's round tree, swaying while it works. The magenta key colour is made transparent.",
+  "author": "abetusk",
+  "licence": "CC0-1.0",
+  "source": "https://opengameart.org/content/animated-tree-and-water",
+  "sheet": "sheet.png",
+  "frame": 32,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 32
+  },
+  "working": {
+    "row": 1,
+    "col": 0,
+    "count": 4,
+    "cycle": 800
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 1,
+    "cycle": 2400
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "plant-pumpkin",
+  "name": "Pumpkin",
+  "description": "Plant and Mushroom Enemies: the pumpkin, facing you. Walks while it works; stands while it waits.",
+  "author": "NettySvit",
+  "licence": "CC0-1.0",
+  "source": "https://opengameart.org/content/plant-and-mushroom-enemies-charset-and-battlers",
+  "sheet": "sheet.png",
+  "frame": 42,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 42
+  },
+  "working": {
+    "row": 1,
+    "col": 0,
+    "count": 4,
+    "cycle": 640
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 1,
+    "cycle": 2400
+  }
+}

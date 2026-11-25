@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "wild-sunflower",
+  "name": "Sunflower",
+  "description": "Hiross's sunflower. Grows from a shoot while it works (the seed's first six frames are on the sheet, left out of the clip); stands in flower while it waits.",
+  "author": "Hiross",
+  "licence": "CC0-1.0",
+  "source": "https://opengameart.org/content/wild-sunflower",
+  "sheet": "sheet.png",
+  "frame": 32,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 32
+  },
+  "working": {
+    "row": 1,
+    "col": 6,
+    "count": 8,
+    "cycle": 1040
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 1,
+    "cycle": 2400
+  }
+}

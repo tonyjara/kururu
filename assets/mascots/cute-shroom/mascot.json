@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "cute-shroom",
+  "name": "Shroom",
+  "description": "CazBee's little shroom, in green. All seven colourways are on the sheet, two rows each (idle, walk): green, red, blue, yellow, orange, pink, coffee, so another is a re-cut in Settings.",
+  "author": "CazBee",
+  "licence": "CC0-1.0",
+  "source": "https://caz-bee.itch.io/cute-shroom-character-sprite",
+  "sheet": "sheet.png",
+  "frame": 27,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 27
+  },
+  "working": {
+    "row": 1,
+    "col": 0,
+    "count": 4,
+    "cycle": 560
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 4,
+    "cycle": 1600
+  }
+}

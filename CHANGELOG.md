@@ -15,6 +15,17 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Twenty-one plant and tree mascots.** Potted plant pets (a dog, a cat
+  and a parrot), eight little walking plants (pumpkin, chamomile, lotus,
+  fly agaric, nettle, herb Paris, morel, mandrake), three mushrooms, a
+  sunflower, a seedling and a cactus that grow while their agent works, two
+  trees in the wind, an old-tree creature and a predator plant. Pick one
+  from a workspace's **Mascot…** or in Settings → Mascot.
+
+- **Settings → About → Credits** names whose pixel art each mascot is, under
+  which licence, with a link to where it came from, and gives the credit line
+  word for word where a licence asks for one. `CREDITS.md` is the same list.
+
 - **Send a card to the top of its column from its menu.** Every card's
   right-click menu, on your own board, a workspace's board and a
   popped-out column, starts with **Send to top** and **Send to bottom**,

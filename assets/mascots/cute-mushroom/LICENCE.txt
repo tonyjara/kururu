@@ -1,0 +1,19 @@
+These sprites are from "Cute Mushroom Character Sprite" by CazBee.
+
+    https://caz-bee.itch.io/cute-mushroom-character-sprite
+
+It is published under CC0 1.0 (itch.io asset licence: Creative Commons Zero v1.0 Universal):
+
+    https://creativecommons.org/publicdomain/zero/1.0/
+
+No attribution is required. It is here anyway, because knowing where a
+picture came from is worth more than the lines it costs.
+
+WHAT WAS CHANGED
+
+The original ships an idle strip and a walk strip at 48x48. Row 0 is the idle, row 1 the walk.
+
+Every frame was then cropped by one box, the union of every frame on the sheet,
+and set in a square cell of that box's longer side, standing on the cell's floor
+and centred across it, so the trim is the whole cell and nothing is clipped. No
+pixel was redrawn or rescaled.

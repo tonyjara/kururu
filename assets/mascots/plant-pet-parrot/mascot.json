@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "plant-pet-parrot",
+  "name": "Plant parrot",
+  "description": "Plant Pets: a potted plant whose bloom is a parrot's head. The head bobs while it works and, slower, while it waits.",
+  "author": "Aswino",
+  "licence": "CC0-1.0",
+  "source": "https://opengameart.org/content/plant-pets",
+  "sheet": "sheet.png",
+  "frame": 29,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 29
+  },
+  "working": {
+    "row": 0,
+    "col": 0,
+    "count": 8,
+    "cycle": 800
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 8,
+    "cycle": 2400
+  }
+}

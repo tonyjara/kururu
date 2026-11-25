@@ -1,0 +1,23 @@
+These sprites are from "Pixel Predator Plant Mob Character" by CraftPix.net 2D Game Assets.
+
+    https://opengameart.org/content/pixel-predator-plant-mob-character
+
+It is published under the OpenGameArt Attribution License 3.0 (OGA-BY 3.0):
+
+    https://static.opengameart.org/OGA-BY-3.0.txt
+
+Attribution IS required by this licence. Kururu shows it in
+Settings -> About -> Credits, and in CREDITS.md, as:
+
+    Pixel Predator Plant by CraftPix.net (craftpix.net), OGA-BY 3.0
+
+Keep this file with the sheet.
+
+WHAT WAS CHANGED
+
+The original ships each animation in four facings at 64x64, in layers. This sheet is the facing-the-viewer row of Idle and of Walk, the head layer drawn over the body and the shadow layer left out: row 0 idle, row 1 walk.
+
+Every frame was then cropped by one box, the union of every frame on the sheet,
+and set in a square cell of that box's longer side, standing on the cell's floor
+and centred across it, so the trim is the whole cell and nothing is clipped. No
+pixel was redrawn or rescaled.

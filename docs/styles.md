@@ -339,3 +339,15 @@ routes are in `server/src/http/mascot.ts`.
   falls back rather than bends.
 - `guide.png` in `assets/spritesheets/` labels the animations and is skipped by
   the picker for exactly that reason.
+- **Found art comes with its source, and some of it with a name owed.**
+  `assets/mascots/<id>/` holds a sheet kururu carries as a source rather than
+  a built-in: `sheet.png`, a `mascot.json` with the clips, author, licence and
+  source, and a `LICENCE.txt` saying what was changed. The server does not
+  read it; a sheet reaches a picker by `/api/mascot/import` and the
+  `add-mascot` / `rename-mascot` / `set-mascot` verbs, like anything imported.
+  Each is laid out so its cell is the sprite's box across every frame, with
+  the trim the whole cell, so nothing is clipped. Credits are
+  `web/src/credits.ts`, drawn in Settings → About → Credits and written out in
+  `CREDITS.md`; `web/test/credits.test.ts` holds the three to one another.
+  When the registry went, the credit its install row carried went too, so
+  the earlier OGA-BY and CC BY mascots are listed there as well.

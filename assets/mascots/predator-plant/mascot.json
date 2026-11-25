@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "predator-plant",
+  "name": "Predator plant",
+  "description": "CraftPix.net's predator plant, facing you, without its drop shadow. Walks while it works; breathes while it waits.",
+  "author": "CraftPix.net 2D Game Assets",
+  "licence": "OGA-BY-3.0",
+  "source": "https://opengameart.org/content/pixel-predator-plant-mob-character",
+  "credit": "Pixel Predator Plant by CraftPix.net (craftpix.net), OGA-BY 3.0",
+  "sheet": "sheet.png",
+  "frame": 33,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 33
+  },
+  "working": {
+    "row": 1,
+    "col": 0,
+    "count": 6,
+    "cycle": 600
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 4,
+    "cycle": 1200
+  }
+}

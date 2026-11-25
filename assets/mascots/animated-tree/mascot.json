@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "animated-tree",
+  "name": "Tree",
+  "description": "MScull's tree, its leaves blowing in the wind while it works.",
+  "author": "MScull",
+  "licence": "CC0-1.0",
+  "source": "https://opengameart.org/content/animated-tree-64x64",
+  "sheet": "sheet.png",
+  "frame": 63,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 63
+  },
+  "working": {
+    "row": 1,
+    "col": 0,
+    "count": 39,
+    "cycle": 3900
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 1,
+    "cycle": 2400
+  }
+}

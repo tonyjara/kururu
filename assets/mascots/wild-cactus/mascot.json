@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "wild-cactus",
+  "name": "Cactus",
+  "description": "Hiross's cactus. Grows while it works (the first six frames, mostly soil, are on the sheet and left out of the clip); stands grown while it waits.",
+  "author": "Hiross",
+  "licence": "CC0-1.0",
+  "source": "https://opengameart.org/content/wild-cactus",
+  "sheet": "sheet.png",
+  "frame": 18,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 18
+  },
+  "working": {
+    "row": 1,
+    "col": 6,
+    "count": 8,
+    "cycle": 1040
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 1,
+    "cycle": 2400
+  }
+}

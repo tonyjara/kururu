@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "cute-mushroom",
+  "name": "Mushroom",
+  "description": "CazBee's red toadstool with a face. Hops while it works; looks about while it waits.",
+  "author": "CazBee",
+  "licence": "CC0-1.0",
+  "source": "https://caz-bee.itch.io/cute-mushroom-character-sprite",
+  "sheet": "sheet.png",
+  "frame": 40,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 40
+  },
+  "working": {
+    "row": 1,
+    "col": 0,
+    "count": 4,
+    "cycle": 560
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 9,
+    "cycle": 1800
+  }
+}

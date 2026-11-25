@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "mushroom-monster",
+  "name": "Toadstool",
+  "description": "ScratchIO's Big Mushroom, the same artist as the Bear, Boar, Deer, Fox, Rabbit and Wolf. Walks while it works.",
+  "author": "ScratchIO",
+  "licence": "CC0-1.0",
+  "source": "https://opengameart.org/content/animated-mushroom-monster-pixel-art",
+  "sheet": "sheet.png",
+  "frame": 24,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 24
+  },
+  "working": {
+    "row": 1,
+    "col": 0,
+    "count": 6,
+    "cycle": 720
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 1,
+    "cycle": 2400
+  }
+}

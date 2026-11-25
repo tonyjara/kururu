@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "kind": "mascot",
+  "id": "sprout",
+  "name": "Sprout",
+  "description": "Eddie's Workshop's Sprout, a gnarled old-tree creature. Walks while it works; sways while it waits.",
+  "author": "Eddie's Workshop",
+  "licence": "free-commercial-by-author",
+  "source": "https://eddies-workshop.itch.io/sprout",
+  "sheet": "sheet.png",
+  "frame": 62,
+  "trim": {
+    "x": 0,
+    "y": 0,
+    "size": 62
+  },
+  "working": {
+    "row": 1,
+    "col": 0,
+    "count": 5,
+    "cycle": 600
+  },
+  "idle": {
+    "row": 0,
+    "col": 0,
+    "count": 4,
+    "cycle": 1200
+  }
+}

@@ -1,0 +1,20 @@
+These sprites are from "Sprout" by Eddie's Workshop.
+
+    https://eddies-workshop.itch.io/sprout
+
+No named licence. The author's own words, quoted from the page on 2026-11-25:
+
+    "This package can be used freely and commercially Credits are not required but I would appreciate it."
+
+That is permission to use it commercially, by the author's own words, but
+it is not a named licence. Credit is not required; kururu gives it anyway,
+in Settings -> About -> Credits and in CREDITS.md.
+
+WHAT WAS CHANGED
+
+The original ships one vertical strip per animation at 96x96. Row 0 is Sprout_idle.png, row 1 Sprout_move.png, each turned to run across.
+
+Every frame was then cropped by one box, the union of every frame on the sheet,
+and set in a square cell of that box's longer side, standing on the cell's floor
+and centred across it, so the trim is the whole cell and nothing is clipped. No
+pixel was redrawn or rescaled.

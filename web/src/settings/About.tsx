@@ -14,13 +14,17 @@
  * Below is the server's own story: when it started, why, and the last lines of
  * `lifecycle.log`, because "which kururu is this" is the question people bring
  * here right after the window reconnected, and the real question is why.
+ *
+ * Last come the credits for the mascots' pictures (`credits.ts`), since some of
+ * their licences ask for a name wherever the art is shown.
  */
 import { useCallback, useEffect, useState } from "react";
 import type { LifeEvent, LifecycleReport } from "../../../shared/lifecycle";
 import type { HostInfo } from "../../../shared/model";
 import type { UpdateCheck } from "../../../shared/wire";
+import { CREDITS, LICENCES, type Credit } from "../credits";
 import { desktop, type UpdateState } from "../desktop";
-import { Action, Banner, Btn, Details, Group, Item, Mono, Readout } from "./ui";
+import { A, Action, Banner, Btn, Details, Group, Item, Mono, Readout } from "./ui";
 
 export function AboutPage({ host }: { host: HostInfo }) {
   const [check, setCheck] = useState<UpdateCheck | null>(null);
@@ -75,7 +79,44 @@ export function AboutPage({ host }: { host: HostInfo }) {
 
       <DataHome />
       <ServerLife />
+      <Credits />
     </>
+  );
+}
+
+/** Whose pictures the mascots are. A credit a licence asks for word for word is given word for word. */
+function Credits() {
+  return (
+    <Group
+      title="Credits"
+      foot={
+        <>
+          The mascots are other people's pixel art. Each licence is kept beside its sheet in <Mono>assets/mascots</Mono> or kururu-styles, and the whole list
+          is <Mono>CREDITS.md</Mono>.
+        </>
+      }
+    >
+      {CREDITS.map((credit) => (
+        <CreditRow key={credit.source} credit={credit} />
+      ))}
+    </Group>
+  );
+}
+
+function CreditRow({ credit }: { credit: Credit }) {
+  const licence = LICENCES[credit.licence];
+  return (
+    <Item
+      name={credit.mascots.join(", ")}
+      sub={
+        <>
+          <A href={credit.source}>{credit.work}</A> by {credit.author}, under{" "}
+          {licence?.url ? <A href={licence.url}>{licence.name}</A> : (licence?.name ?? credit.licence)}
+          {credit.line && <>. {credit.line}</>}
+          {credit.words && <>: “{credit.words}”</>}
+        </>
+      }
+    />
   );
 }
 
