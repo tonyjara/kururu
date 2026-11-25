@@ -128,6 +128,11 @@ export function lookVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): b
       workspaces.setWorkspaceMobile(msg.profileId, msg.workspaceId, msg.on === true);
       return true;
 
+    case "set-workspace-loose":
+      if (typeof msg.profileId !== "string" || typeof msg.workspaceId !== "string") return true;
+      workspaces.setWorkspaceLoose(msg.profileId, msg.workspaceId, msg.on === true);
+      return true;
+
     case "set-launch":
       saveLaunch(adoptLaunch(msg.launch));
       // Which login the bar reads may just have changed hands.

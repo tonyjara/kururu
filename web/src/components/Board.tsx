@@ -90,6 +90,7 @@ import {
   type PoppedColumn,
 } from "./Lanes";
 import { MadeLinks } from "./MadeLinks";
+import { TestChip } from "./TestChip";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { quotable, selectNotDrag } from "./Quote";
 import { Status } from "./Status";
@@ -1053,6 +1054,8 @@ const CardView = memo(function CardView({
             onResume={resumable ? () => verbs.current.resume(card) : undefined}
           />
         )}
+        {/* A test run its agent has going, as the agent's row says it. */}
+        {agent?.testing && !agent.exited ? <TestChip className="board-testing" testing={agent.testing} /> : null}
         {/* The links its agent's row carries, kept here so they outlive the agent —
             after an idle card's agent is ended, this is where the document still is. */}
         {card.made?.length ? <MadeLinks className="board-made" files={card.made} workspaceId={workspaceId} /> : null}

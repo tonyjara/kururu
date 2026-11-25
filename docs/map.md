@@ -23,6 +23,8 @@ in this folder.
 | `lifecycle.ts` | The line `lifecycle.log` is made of, and reading it back forgivingly. Three processes write it; two of them are plain JS and keep in step by hand |
 | `usage.ts` | The ledger's rows, the count that refuses a non-count, the Mac's days, and whose a session was: `attributionFor` and which reading wins |
 | `usagepull.ts` | What a node tells its parent it spent, by the quarter hour, and how the parent checks it off the wire |
+| `testing.ts` | Knowing a test run from its command line (`classifyCommand`), what may be kept of it (`redactCommand`), and the counts on a runner's summary line (`parseTestCounts`). Pure, shared by the hook, the reader and the page |
+| `testreport.ts` | What the recorded runs add up to: by project and suite, the slowest, the flags (no test suite here, slower than usual, rerun in a card), and the lines Kuru is given |
 | `usagereport.ts` | What the Usage page draws, from the ledger's cells: ranges and their edges, buckets, whose a cell is, who keeps which colour |
 | `chartcolor.ts` | The colours a chart may wear, Kuru's moved into the band, and the arithmetic that says they can be told apart |
 | `prices.ts` | What a token costs at list price, dated, read off Anthropic's page. An unknown model has no price, never a guess. Kept by the `update-models` skill |
@@ -152,6 +154,8 @@ in this folder.
 | `src/usage/sweep.ts` | The reader: the backfill, the sweep every five minutes, the nudge off `/api/report`. Types into nothing |
 | `src/usage/attribute.ts` | Whose a session was, written when kururu starts it: a launch's row, a hook's word for a session no launch knew, and Codex's id found by folder and time. Never why an agent did not start. See [data](data.md#the-usage-ledger) |
 | `src/usage/remote.ts` | What the other nodes spent: a child's answer, and the parent asking every five minutes and keeping it. A machine's logs are `sweep.ts`'s, through ssh |
+| `src/usage/testlog.ts` | The test runs in the ledger: one row a run, written by the hook or the transcript and added to by the other, the hook believed for times; a run's tokens summed from `messages`. See [data](data.md#test-runs) |
+| `src/usage/testlines.ts` | A test run in a log's lines: the Bash call that is one, the result line asked for by its id, a background run's notice, and Codex's three shapes of tool call |
 | `src/usage/report.ts` | The Usage page's one question to the ledger, and the one number read out of a login's settings. Thin on purpose: the arithmetic is `usagereport.ts` |
 | `src/codexusage.ts` | The Codex allowance, off the `rate_limits` in the newest rollout of the Codex home in use. No credential, no request |
 | `src/machines.ts` | The bottom bar's machines (a VPS, a PC on the tailnet): the user's own `ssh`, `BatchMode`, one fixed read-only script, `tmux ls` before a session that types something, `tmux kill-session` when a session tab is closed, and two fixed reads of an agent's conversation files for `sleep.ts`, and the hardware reading `specs.ts` keeps. A client names a host and nothing else (`shared/machines.ts`, [machines](machines.md)) |
@@ -174,6 +178,7 @@ in this folder.
 | `src/agy.ts` | Antigravity's `agy`, the half that touches the disk: each launch's `--settings`, Kuru's `.agents/` folder, the quota file read for the bar. See [antigravity](antigravity.md) |
 | `src/agy-report-cli.ts` | What `agy` runs as its title command, and as Kuru's hooks: bundled to `agyreport.mjs` beside the server. See [antigravity](antigravity.md) |
 | `src/opencode.ts` | Kuru on OpenCode, the half that touches the disk: kururu's plugin, which posts the same `/api/report`s Claude Code's hooks do, and the config and role written into Kuru's folder before each start. See [harness](harness.md#on-opencode) |
+| `src/testing.ts` | What is testing now, from the agents' hooks, as the chip on a row and card; and the door to the recorded runs for the Testing page, Kuru's `testing` tool and a card's history. Types into nothing |
 | `src/hooks.ts` | The hooks kururu hands a Claude Code it starts in a profile with a login of its own, whose empty `settings.json` would otherwise run it with none |
 | `src/outbox.ts` | Your words on their way to Kuru, kept on the disk from the moment they arrive until Kuru's own hook says it has them. See [voice](voice.md) |
 | `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` for the harness and `POST /mcp/web` for every agent |

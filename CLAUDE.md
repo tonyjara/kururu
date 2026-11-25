@@ -227,6 +227,11 @@ The load-bearing invariants, one line each, with the argument behind the link:
 - **The usage ledger keeps the numbers and never the words** — `usage.db`, in no
   copy or backup, read-only off the logs the programs already write; it fails
   open. → [more](docs/invariants.md#the-usage-ledger)
+- **A test run is recorded off what was already being read, and costs no
+  token** — `test_runs` in `usage.db`, off the transcript line the reader
+  parses anyway and the hook that already runs; a redacted command and three
+  counts, never the output, and no flag is announced
+  (`shared/testing.ts`). → [more](docs/invariants.md#test-runs)
 - **The OpenRouter key, a channel's bot token and the web providers' keys are the
   credentials kururu stores** — 0600, read per request, a client sent its hint,
   out only sealed to a node; on a Mac the key itself in the Keychain behind

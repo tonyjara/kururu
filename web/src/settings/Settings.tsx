@@ -48,6 +48,7 @@ import { ProcessesPage } from "./Processes";
 import { ProfilesPage } from "./Profiles";
 import { SpecsPage } from "./Specs";
 import { UsagePage } from "./Usage";
+import { TestingPage } from "./Testing";
 import { EditingScope, type Tone } from "./ui";
 import { VaultPage } from "./Vault";
 import { VoicePage } from "./Voice";
@@ -74,6 +75,7 @@ export type Tab =
   | "notify"
   | "processes"
   | "usage"
+  | "testing"
   | "about";
 
 /**
@@ -125,6 +127,7 @@ const GROUPS: ReadonlyArray<{ label: string; pages: ReadonlyArray<readonly [Tab,
       ["notify", "Notifications", "When kururu may interrupt you, and what it sounds like."],
       ["processes", "Processes", "What every terminal is running and what it costs."],
       ["usage", "Usage", "Where the tokens went: Kuru and the agents, per workspace, over time."],
+      ["testing", "Testing", "Every test, typecheck, lint and build run the agents make: how long, how often, and what it costs."],
       ["about", "About", "Which kururu this is, and why the server is the one it is."],
     ],
   },
@@ -375,6 +378,8 @@ function Page({ tab, props: p }: { tab: Tab; props: PageProps }): ReactNode {
       return <ProcessesPage />;
     case "usage":
       return <UsagePage narrow={p.narrow} onClose={p.onClose} />;
+    case "testing":
+      return <TestingPage narrow={p.narrow} />;
     case "about":
       return <AboutPage host={p.host} />;
   }

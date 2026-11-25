@@ -8,12 +8,13 @@
 import { countsAsAgent } from "../../../shared/model";
 import { AGY_CONVERSATION } from "../../../shared/agy";
 import { isUsageDimension, isUsageRange } from "../../../shared/usagereport";
+import { isTestingRange } from "../../../shared/testreport";
 import { keysOfNames, splitReplyTags, tagProjects } from "../../../shared/kurutags";
 import { parseReport } from "../agents/report";
-import { activity, channels, harness, host, kuruKey, MAX_ACTIVITY, outbox, peerKurus, store, usageReader, voice, workspaces } from "../context";
+import { activity, channels, harness, host, kuruKey, MAX_ACTIVITY, outbox, peerKurus, store, testing, usageReader, voice, workspaces } from "../context";
 import { recordTurn } from "../conversation";
 import { noteMade } from "../madelinks";
-import { noteReported, usageReportFor } from "../terminals";
+import { noteReported, testingReportFor, usageReportFor } from "../terminals";
 import { json, readJsonBody, text } from "./respond";
 import type { Route } from "./router";
 
@@ -73,6 +74,24 @@ export const agentRoutes: Route[] = [
   },
 
   /**
+   * Settings → Testing, asked for while the page is open, as the usage report
+   * above is and for its reasons. See `testing.ts`.
+   */
+  {
+    path: "/api/testing/report",
+    handle: (req, res, url) => {
+      const range = url.searchParams.get("range");
+      const report = testingReportFor(isTestingRange(range) ? range : "week");
+      if (!report) {
+        json(res, { error: "The usage ledger did not open, so no test run is being recorded. Why is in the server's log." }, 503);
+        return;
+      }
+      json(res, report);
+      return;
+    },
+  },
+
+  /**
    * How an agent tells kururu what it is doing. The only source of `blocked`
    * and of context usage; see agents/report.ts for why neither is inferable.
    */
@@ -86,7 +105,16 @@ export const agentRoutes: Route[] = [
       try {
         const body = await readJsonBody(req);
         const parsed = parseReport(body);
+        // A test run starting or ending, on the hook's same report (`hooks.ts`).
+        const tested = body && typeof body === "object" ? (body as Record<string, unknown>).test : undefined;
         if (!parsed) {
+          // The hook after a Bash call may have nothing else to say: no status, and no transcript to read a context from.
+          const named = (body as Record<string, unknown> | null)?.agent;
+          const who = typeof named === "string" && host.find(named) ? named : null;
+          if (tested !== undefined && who && testing.hook(who, tested)) {
+            json(res, { ok: true });
+            return;
+          }
           json(res, { error: "need a valid status or context" }, 400);
           return;
         }
@@ -98,6 +126,9 @@ export const agentRoutes: Route[] = [
           return;
         }
         host.report(agentId, parsed.report);
+        if (tested !== undefined) testing.hook(agentId, tested);
+        // A turn that ended took its foreground commands with it, whatever their own hooks said.
+        if (parsed.report.status === "done") testing.turnEnded(agentId);
         // Kuru's tag line, which says which workspaces its reply is about
         // (`shared/kurutags.ts`), comes off here, before anything else reads
         // the reply — the harness's last word, the voice, a channel, the

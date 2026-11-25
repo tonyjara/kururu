@@ -38,16 +38,41 @@ import { basename, dirname, join, normalize } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { claudeProjectDir } from "../../../shared/sessions";
 import { parseUsageChunk, parseUsageListing, type UsageFile, type UsageLog } from "../../../shared/machines";
+import { TEST_RETENTION_DAYS } from "../../../shared/testreport";
 import { HARNESS_TITLE, HARNESS_TITLE_HEAD, noFacts, type AttributionFacts, type LedgerStatus, type UsageSource } from "../../../shared/usage";
 import type { RemoteSource } from "../../../shared/usagepull";
 import { CLAUDE_NEEDLES, claudeRoots, parseClaudeLine, placeOf, type ClaudeRoot } from "./claude";
 import { codexLimitSnapshots, codexRoots, noCodexTurn, parseCodexLine, placeOfCodex, rolloutIdOf, CODEX_NEEDLES, type CodexRoot, type CodexTurn } from "./codex";
 import { opencodeDbPath, opencodeHome, opencodeLegacyDir, opencodeLegacyFiles, parseOpencodeMessage } from "./opencode";
 import { Ledger, LedgerBatch, ledgerPath, type FileRow } from "./store";
-import { halfDuty, tailFile, type TailOptions } from "./tail";
+import { halfDuty, RETIRED, tailFile, type TailOptions } from "./tail";
+import { CODEX_CALL_NEEDLES } from "./testlines";
+import { openTestRuns, pruneTestRuns, type TestEvent } from "./testlog";
 
 const NEEDLES = CLAUDE_NEEDLES.map((needle) => Buffer.from(needle));
-const CODEX_NEEDLE_BUFFERS = CODEX_NEEDLES.map((needle) => Buffer.from(needle));
+const CODEX_NEEDLE_BUFFERS = [...CODEX_NEEDLES, ...CODEX_CALL_NEEDLES].map((needle) => Buffer.from(needle));
+/**
+ * How Claude Code begins the lines it keeps of its own API requests. They are
+ * the largest in a transcript, a megabyte each, and quote every id and every
+ * record type the conversation has held, so a needle finds them constantly;
+ * nothing the ledger wants is on one, and this is how they are passed over
+ * before they are made into strings.
+ */
+const API_REQUEST = Buffer.from('{"type":"api-request');
+
+/** A run whose result has not turned up in a day is not going to: its agent was closed, or its log pruned. */
+const WAITING_RUN_MS = 24 * 3600_000;
+/** Runs waited on at once. Past this the oldest are let go, which costs them their end and nothing else. */
+const MAX_WAITING_RUNS = 512;
+
+/** A test run the reader has seen start and is looking for the end of. */
+interface WaitingRun {
+  sessionId: string;
+  background: boolean;
+  at: number;
+  /** The message that asked for it, so that the same message's later records are not taken for the one after. */
+  messageId: string | null;
+}
 const TITLE = Buffer.from(HARNESS_TITLE);
 /** One page of OpenCode's `message` table at a time, so a 130 MB database never holds the event loop for long. */
 const OPENCODE_BATCH = 500;
@@ -116,6 +141,8 @@ export interface ReaderDeps {
   sweepMs?: number;
   tail?: TailOptions;
   log?: (line: string) => void;
+  /** The test runs a pass wrote down, once they are written: how a chip learns its run ended. See `server/src/testing.ts`. */
+  onTests?: (events: readonly TestEvent[]) => void;
 }
 
 interface Listed<R> {
@@ -153,6 +180,8 @@ export class UsageReader {
   private countsAt = 0;
   private countsHeld: ReturnType<Ledger["counts"]> | null = null;
   private readonly machineState = new Map<string, { at: number | null; error: string | null }>();
+  /** Test runs seen to start and not yet to end, by call id. Filled from the ledger on first use, so a restart mid-run still finds the result. */
+  private waitingRuns: Map<string, WaitingRun> | null = null;
 
   constructor(private readonly deps: ReaderDeps) {
     this.ledger = deps.ledger;
@@ -269,7 +298,15 @@ export class UsageReader {
   }
 
   private flush(): void {
+    const tests = this.batch.tests;
     this.ledger.flush(this.batch, this.facts());
+    if (tests.length) {
+      try {
+        this.deps.onTests?.(tests);
+      } catch {
+        // A chip that could not be told is a chip that ends a little late.
+      }
+    }
     this.batch = new LedgerBatch();
     this.lastFlush = Date.now();
     this.countsAt = 0;
@@ -289,6 +326,7 @@ export class UsageReader {
     this.reading = null;
     this.factsAt = 0;
     this.ledger.reattribute(this.facts());
+    this.forgetOldRuns();
     this.countsAt = 0;
     this.sweptAt = Date.now();
     const files = claude.files + codex.files;
@@ -370,7 +408,7 @@ export class UsageReader {
       for (const line of chunk.lines) {
         const at = offset + line.at;
         if (file.log === "claude") {
-          this.line(line.text, at, key, origin, place, false, row);
+          this.line(line.text, at, key, origin, place, false, row, null);
           continue;
         }
         const parsed = parseCodexLine(line.text, turn);
@@ -486,10 +524,12 @@ export class UsageReader {
     let titled = false;
     let row = null as FileRow | null;
     let finalSize = 0;
+    // The two needles every file is searched for, and the ids of the test runs this session is still owed an end for.
+    const needles = [...NEEDLES, ...this.runNeedles(known?.sessionId ?? null)];
     const result = await tailFile(
       path,
       known,
-      NEEDLES,
+      needles,
       {
         begin: (info) => {
           finalSize = info.size;
@@ -514,7 +554,8 @@ export class UsageReader {
         head: (bytes) => {
           titled = bytes.subarray(0, HARNESS_TITLE_HEAD).includes(TITLE);
         },
-        line: (text, at) => this.line(text, at, path, root, place, titled, row),
+        wants: (buffer, start, stop) => stop - start < API_REQUEST.length || buffer.compare(API_REQUEST, 0, API_REQUEST.length, start, start + API_REQUEST.length) !== 0,
+        line: (text, at) => this.line(text, at, path, root, place, titled, row, needles),
         skip: (at, why) => this.batch.skipped.push({ path, atByte: at, why }),
         advanced: (offset, read) => {
           row!.offset = offset;
@@ -537,8 +578,12 @@ export class UsageReader {
     }
   }
 
-  private line(text: string, at: number, path: string, root: LogOrigin, place: { projectDir: string; source: UsageSource }, titled: boolean, row: FileRow | null): void {
-    const parsed = parseClaudeLine(text, place.source);
+  private line(text: string, at: number, path: string, root: LogOrigin, place: { projectDir: string; source: UsageSource }, titled: boolean, row: FileRow | null, needles: Buffer[] | null): void {
+    const parsed = parseClaudeLine(text, place.source, this.waiting());
+    if (parsed.kind === "test") {
+      this.testLine(parsed.seen, needles);
+      return;
+    }
     if (parsed.kind === "skip") {
       this.batch.skipped.push({ path, atByte: at, why: parsed.why });
       return;
@@ -551,6 +596,12 @@ export class UsageReader {
     const message = parsed.row;
     if (row && !row.sessionId) row.sessionId = message.sessionId;
     this.batch.addMessage(message);
+    // A machine's log comes through a `grep` that drops tool results, so a run there ends at its session's next message.
+    if (root.machine) this.endByNextMessage(message.sessionId, message.messageId, message.at);
+    for (const test of parsed.tests) {
+      this.batch.tests.push({ type: "start", by: "log", sessionId: message.sessionId, callId: test.callId, program: "claude", call: test.call, background: test.background, cwd: parsed.cwd, at: message.at });
+      this.waitFor(test.callId, { sessionId: message.sessionId, background: test.background, at: message.at, messageId: message.messageId }, needles);
+    }
     // The file's folder under its session is its parent, in the rare case a subagent's records name a session of their own.
     const parent = place.source === "subagent" ? parentOfSubagent(path, place.projectDir) : null;
     this.batch.addSession({
@@ -578,10 +629,11 @@ export class UsageReader {
     let turn: CodexTurn = this.turnAt(known?.offset ?? 0, place.sessionId);
     let row = null as FileRow | null;
     let finalSize = 0;
+    const needles = [...CODEX_NEEDLE_BUFFERS, ...this.runNeedles(place.sessionId)];
     const result = await tailFile(
       path,
       known,
-      CODEX_NEEDLE_BUFFERS,
+      needles,
       {
         begin: (info) => {
           finalSize = info.size;
@@ -591,13 +643,23 @@ export class UsageReader {
           return true;
         },
         line: (text, at) => {
-          const parsed = parseCodexLine(text, turn);
+          const parsed = parseCodexLine(text, turn, this.waiting());
           if (parsed.kind === "skip") {
             this.batch.skipped.push({ path, atByte: at, why: parsed.why });
             return;
           }
           if (parsed.kind === "turn") {
             turn = parsed.turn;
+            return;
+          }
+          if (parsed.kind === "test") {
+            const seen = parsed.seen;
+            if (seen.kind === "start") {
+              this.batch.tests.push({ type: "start", by: "log", sessionId: place.sessionId, callId: seen.callId, program: "codex", call: seen.call, background: false, cwd: turn.cwd, at: seen.at });
+              this.waitFor(seen.callId, { sessionId: place.sessionId, background: false, at: seen.at, messageId: null }, needles);
+            } else {
+              this.testLine({ kind: "end", sessionId: place.sessionId, callId: seen.callId, at: seen.at, durationMs: seen.durationMs, exit: seen.exit, stopped: false, counts: seen.counts }, needles);
+            }
             return;
           }
           if (parsed.kind !== "message") return;
@@ -620,6 +682,76 @@ export class UsageReader {
     } else if (result === "read" && row) {
       row.size = Math.max(finalSize, row.offset);
       this.batch.files.set(path, row);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Test runs
+  // -------------------------------------------------------------------------
+
+  /** The runs being waited on, read from the ledger the first time anything asks. */
+  private waiting(): Map<string, WaitingRun> {
+    if (this.waitingRuns) return this.waitingRuns;
+    const held = new Map<string, WaitingRun>();
+    try {
+      for (const run of openTestRuns(this.ledger, Date.now() - WAITING_RUN_MS)) held.set(run.callId, { sessionId: run.sessionId, background: run.background, at: run.startedAt, messageId: null });
+    } catch (err) {
+      this.deps.log?.(`kururu: the usage ledger could not read its open test runs: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return (this.waitingRuns = held);
+  }
+
+  /** The ids to search a session's file for: one per run of its that has not ended. */
+  private runNeedles(sessionId: string | null): Buffer[] {
+    if (!sessionId) return [];
+    const out: Buffer[] = [];
+    for (const [callId, run] of this.waiting()) if (run.sessionId === sessionId) out.push(Buffer.from(callId));
+    return out;
+  }
+
+  private waitFor(callId: string, run: WaitingRun, needles: Buffer[] | null): void {
+    const waiting = this.waiting();
+    if (waiting.has(callId)) return;
+    waiting.set(callId, run);
+    // The rest of this file is searched for the id from the next line on. See `scanLines`.
+    needles?.push(Buffer.from(callId));
+    if (waiting.size > MAX_WAITING_RUNS) waiting.delete(waiting.keys().next().value!);
+  }
+
+  /** A line that says how a waited-on run went, or that it is running behind its call. */
+  private testLine(seen: import("./testlines").TestLineSeen, needles: Buffer[] | null): void {
+    const held = this.waiting().get(seen.callId);
+    // The id in a line of another session is somebody quoting it.
+    if (!held || (seen.sessionId !== null && seen.sessionId !== held.sessionId)) return;
+    if (seen.kind === "background") {
+      held.background = true;
+      this.batch.tests.push({ type: "background", sessionId: held.sessionId, callId: seen.callId });
+      return;
+    }
+    this.waiting().delete(seen.callId);
+    // Found, so no longer looked for: the rest of the file is not searched for an id it will not hold again.
+    const needle = needles?.findIndex((each) => each !== RETIRED && each.length === seen.callId.length && each.toString("utf8") === seen.callId) ?? -1;
+    if (needles && needle !== -1) needles[needle] = RETIRED;
+    this.batch.tests.push({ type: "end", by: "log", sessionId: held.sessionId, callId: seen.callId, at: seen.at, durationMs: seen.durationMs, exit: seen.exit, stopped: seen.stopped, counts: seen.counts });
+  }
+
+  /** For a log with no results in it: a run in the foreground is over by the time its session says anything more. */
+  private endByNextMessage(sessionId: string, messageId: string, at: number): void {
+    for (const [callId, run] of this.waiting()) {
+      if (run.sessionId !== sessionId || run.background || run.messageId === messageId || run.at >= at) continue;
+      this.waiting().delete(callId);
+      this.batch.tests.push({ type: "end", by: "next", sessionId, callId, at, durationMs: null, exit: null, stopped: false, counts: null });
+    }
+  }
+
+  /** Once a sweep: runs past the retention go, and a run nobody will ever see the end of stops being looked for. */
+  private forgetOldRuns(): void {
+    const now = Date.now();
+    for (const [callId, run] of this.waiting()) if (now - run.at > WAITING_RUN_MS) this.waiting().delete(callId);
+    try {
+      pruneTestRuns(this.ledger, now - TEST_RETENTION_DAYS * 86_400_000, now);
+    } catch (err) {
+      this.deps.log?.(`kururu: the usage ledger could not prune its test runs: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -778,7 +910,7 @@ async function walk<R>(dir: string, root: R): Promise<Listed<R>[] | null> {
  * carries on either way, and a ledger that will not open says why in the log;
  * `/api/health` has nothing to say about a ledger that is not there.
  */
-export function openUsageReader(facts: () => AttributionFacts, log: (line: string) => void, remote: Pick<ReaderDeps, "machines" | "machineReads"> = {}): UsageReader | null {
+export function openUsageReader(facts: () => AttributionFacts, log: (line: string) => void, remote: Pick<ReaderDeps, "machines" | "machineReads" | "onTests"> = {}): UsageReader | null {
   try {
     return new UsageReader({ ledger: Ledger.open(), facts, log, ...remote });
   } catch (err) {

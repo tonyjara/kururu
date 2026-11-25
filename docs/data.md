@@ -464,6 +464,63 @@ never replaced" would have been wrong. `bun run backup --check` lists the path
 without opening a ledger, the way it already lists everything else it would
 carry.
 
+### Test runs
+
+The owner asked to see testing "like how we have usage": whether something is
+testing, what kind, how many tests, how long, and what it cost, without
+spending tokens to find out. A test run is a tool call, and the ledger's
+reader already parses the line every tool call is asked for on. So the runs
+are a table in this file, `test_runs`, written by the same pass and in the
+same transaction as the offsets (`usage/testlog.ts`). The plan and its
+arguments are in [plans/testing-telemetry.md](plans/testing-telemetry.md).
+
+**One extra line is read per run, and it is asked for by id.** An assistant
+line holds the `Bash` call; `classifyCommand` (`shared/testing.ts`) says
+whether it is a test, typecheck, lint or build run, by the program at the
+head of each part of the command and never by a word in it. A call that is
+one puts its own id among the needles the rest of the file is searched for,
+and the line that id turns up on, the call's result, is the only tool output
+that is ever made into a string. It gives the end, the exit code and three
+counts off the runner's summary line; the output goes no further. The needle
+is retired once found. Claude Code's saved API requests quote every id and
+are a megabyte each, so the reader passes over any line that begins as one
+before it is a string (`TailSink.wants`). A run in the background ends at
+its task notice instead.
+
+**The hook is the live half and the better clock.** `PreToolUse` already
+runs `report.mjs` for every tool call; for a test's call it adds a `test`
+field to the report it was sending anyway, and that is the chip on the
+agent's row and card (`server/src/testing.ts`). `PostToolUse` and
+`PostToolUseFailure` on Bash alone say it ended, with Claude Code's own
+`duration_ms`; that hook is a shell `case` over the call that starts node
+only for something test-shaped. Both witnesses write the same row, keyed by
+session and call id: the hook's times win, since a transcript's two
+timestamps include a permission prompt, and either's outcome is kept.
+
+**The one column of words.** `command` holds the part of the line that is the
+run, never the `cd` or heredoc around it, through `redactCommand`: an
+environment variable keeps its name and loses its value, a secret-named
+flag loses its value, and anything shaped like a token goes. 240 characters
+at most. `server/test/testruns.test.ts` writes a marked word through a
+command and a test's output and looks for it in the file's bytes.
+
+**Tokens** are what the run's session billed after it started, through the
+first message after it ended, summed from `messages` when the run is written
+and again when that next message is read. The message that asked for the run
+is not counted, so two runs in a row never share one.
+
+**Nothing is rolled up and nothing is announced.** A few hundred rows a day
+are read whole when a page or Kuru asks (`shared/testreport.ts`), and the
+flags (a suite run in a workspace marked as having no test suite, a run much
+slower than its usual, a suite rerun five times in a card) are worked out
+then, from the rows and the switch as they stand. Kept 180 days, pruned in
+the sweep.
+
+Best effort: Codex's rollout is read for its command and its output's stated
+wall time, after the fact and with no chip. A machine's log comes through a
+`grep` that drops tool output, so a run there ends at its session's next
+message with no counts. Another node records its own and is not pulled yet.
+
 ## Git, in two files
 
 `worktree.ts` was the one file that ran `git`, on the user's repositories.

@@ -535,6 +535,18 @@ export const HARNESS_TOOLS: readonly HarnessTool[] = [
     inputSchema: obj({ card: str("The card id.") }, ["card"]),
   },
   {
+    name: "testing",
+    description:
+      "Test, typecheck, lint and build runs kururu recorded off its agents' hooks and transcripts, at no cost in tokens: what is testing right now, then for a span each project's suites with runs, median time, failures and tokens, and what is worth a look (a suite run in a project marked as having no test suite, one slower than its usual, one rerun many times in a card). Answers \"is anything testing\" and \"how long do X's tests take\".",
+    inputSchema: obj(
+      {
+        range: { type: "string", enum: ["today", "week", "month"], description: "Default week." },
+        project: str("Only projects whose name has this in it."),
+      },
+      [],
+    ),
+  },
+  {
     name: "ask_kuru",
     description:
       `Ask another node's Kuru to do something on its node — start an agent, answer one, run a card, look into what its agents are doing — since only that node's Kuru drives that node's agents. The message is typed into it as "[kuru@<this node>] <message>", from you, and it answers in its own drawer. Write it as one colleague to another: what is wanted and why, with what the user said that it needs. wait=false (default) returns once that node has taken the message; wait=true also waits for its reply, up to timeout_s (default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S}). A node that is away holds nothing: the call says so, and you tell the user. Ask the node that has the thing, never one Kuru to ask a third.`,

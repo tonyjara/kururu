@@ -75,6 +75,7 @@ import { Menu, type MenuItem } from "./Menu";
 import type { DialogState } from "./Dialog";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
+import { TestChip } from "./TestChip";
 import { TerminalTunnels, TunnelLine } from "./Tunnels";
 import { anyTunnelDown, tunnelsOn, unpairedTunnels } from "../../../shared/tunnels";
 import { AutomationsSection } from "./Automations";
@@ -940,6 +941,9 @@ export function Sidebar({
         {agent.made?.length ? (
           <MadeLinks className="agent-made" files={agent.made} workspaceId={at?.workspaceId ?? null} onOpened={navigated} />
         ) : null}
+        {/* A test run it has going, from its hooks, counting up. A line of its own
+            for the links' reason: a row with nothing running keeps its height. */}
+        {agent.testing && !agent.exited ? <TestChip className="agent-testing" testing={agent.testing} /> : null}
         {/* A tunnel typed into this terminal, with whether its address answers. */}
         {!agent.exited && <TerminalTunnels agentId={agent.id} />}
       </li>

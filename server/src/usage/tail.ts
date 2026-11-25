@@ -27,19 +27,33 @@ export const MAX_LINE = 64 * 1024 * 1024;
 
 const NEWLINE = 0x0a;
 
+/** What a needle is replaced by once it is no longer wanted. Compared by identity, never searched for. */
+export const RETIRED: Buffer = Buffer.alloc(0);
+
 /**
  * Each line of `buffer[0, end)` holding any of the needles, in order. `end` is
  * one past a newline. Finding a needle first and its line second, because the
  * lines that hold none are the ones that are megabytes long, and walking them
  * for their newlines is the very cost this exists to avoid.
+ *
+ * The list may grow while it is being used: a line that was visited can add a
+ * needle for something later in the file, which is how a test run's call
+ * asks for the one line its result is on (`testlines.ts`). A needle added
+ * mid-way is looked for from the line after the one that added it, and one
+ * that has been found is put out of use by `RETIRED` in its place, so that a
+ * long file does not go on being searched for every id it ever held.
  */
 export function scanLines(buffer: Buffer, end: number, needles: readonly Buffer[], visit: (start: number, stop: number) => void): void {
-  const hits = needles.map((needle) => buffer.indexOf(needle, 0));
+  const hits = needles.map((needle) => (needle === RETIRED ? -1 : buffer.indexOf(needle, 0)));
   let at = 0;
   while (at < end) {
     let hit = -1;
     for (let i = 0; i < needles.length; i++) {
-      if (hits[i]! !== -1 && hits[i]! < at) hits[i] = buffer.indexOf(needles[i]!, at);
+      if (needles[i] === RETIRED) {
+        hits[i] = -1;
+        continue;
+      }
+      if (hits[i] === undefined || (hits[i]! !== -1 && hits[i]! < at)) hits[i] = buffer.indexOf(needles[i]!, at);
       if (hits[i]! !== -1 && (hit === -1 || hits[i]! < hit)) hit = hits[i]!;
     }
     if (hit === -1 || hit >= end) return;
@@ -75,6 +89,12 @@ export interface TailSink {
   begin(info: { inode: number; size: number; mtime: number; fresh: boolean; offset: number }): boolean;
   /** The first bytes of a file met from the start, for what only a head can say. */
   head?(bytes: Buffer): void;
+  /**
+   * Whether a line holding a needle is worth turning into a string, asked of
+   * its bytes. For a kind of line that can be megabytes and is never wanted,
+   * known by how it begins. Absent, every such line is wanted.
+   */
+  wants?(buffer: Buffer, start: number, stop: number): boolean;
   /** A complete line holding a needle. `at` is its byte offset in the file. */
   line(text: string, at: number): void;
   /** A line was not read, in a word of ours. */
@@ -164,6 +184,7 @@ export async function tailFile(
       const end = lastNewline + 1;
       const base = position;
       scanLines(buffer.subarray(0, bytesRead), end, needles, (start, stop) => {
+        if (sink.wants && !sink.wants(buffer, start, stop)) return;
         sink.line(buffer.toString("utf8", start, stop), base + start);
       });
       position += end;

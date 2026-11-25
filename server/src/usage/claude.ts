@@ -15,6 +15,13 @@
  * name, with no field a sentence could travel in. `skipped` says why a line was
  * refused in a word chosen here, never in anything off the line.
  *
+ * **One exception, and it is asked for by id.** An assistant line that is
+ * parsed anyway may hold a Bash call that is a test run; the reader then
+ * looks for that call's id in the rest of the file, and the line it is on
+ * (the call's result) is parsed for a time, an exit code and three counts.
+ * The command comes out redacted and cut to the run itself, the output not
+ * at all. See `testlines.ts`.
+ *
  * **The format is Claude Code's private business** and has moved before, so
  * every field is checked rather than trusted. A record that does not add up is
  * counted, not guessed at, and the page shows the count. `cost-state` in
@@ -31,6 +38,7 @@ import { isLoginKey } from "../../../shared/model";
 import { costOf } from "../../../shared/prices";
 import { countOf, splitCacheWrite, type MessageRow, type TotalsRow, type UsageSource } from "../../../shared/usage";
 import { configPath } from "../config";
+import { claudeTestCalls, claudeTestResult, type TestCallSeen, type TestLineSeen } from "./testlines";
 
 /** A record is one of these two when it is anything to us. Compact, because that is how Claude Code writes them. */
 export const CLAUDE_NEEDLES = ['"type":"assistant"', '"type":"cost-state"'] as const;
@@ -43,8 +51,10 @@ const MAX_CWD = 1024;
 
 /** What a line amounted to. `cwd` and `version` are all a message says about its session. */
 export type ParsedLine =
-  | { kind: "message"; row: MessageRow; cwd: string | null; version: string | null }
+  | { kind: "message"; row: MessageRow; cwd: string | null; version: string | null; tests: TestCallSeen[] }
   | { kind: "totals"; rows: TotalsRow[] }
+  /** The line a test run's result is on, and only when the reader was waiting for it. */
+  | { kind: "test"; seen: TestLineSeen }
   | { kind: "skip"; why: string }
   | { kind: "other" };
 
@@ -57,8 +67,11 @@ function word(value: unknown): string | null {
  * `server/test/fixtures/usage/` are hand-written with the real field names.
  * `other` is a line that merely mentions the needle, like a tool result quoting
  * a transcript inside an object.
+ *
+ * `waiting` is the test runs whose results have not been seen. With none, a
+ * `user` record is not looked at, as it never was.
  */
-export function parseClaudeLine(line: string, source: UsageSource): ParsedLine {
+export function parseClaudeLine(line: string, source: UsageSource, waiting?: { has(id: string): boolean; readonly size: number }): ParsedLine {
   let record: Record<string, any>;
   try {
     record = JSON.parse(line);
@@ -67,6 +80,10 @@ export function parseClaudeLine(line: string, source: UsageSource): ParsedLine {
   }
   if (!record || typeof record !== "object") return { kind: "other" };
   if (record.type === "assistant") return assistant(record, source);
+  if (waiting?.size && (record.type === "user" || record.type === "queue-operation" || record.type === "attachment")) {
+    const seen = claudeTestResult(record, waiting);
+    return seen ? { kind: "test", seen } : { kind: "other" };
+  }
   // A subagent's file could only be repeating its parent, and a running total
   // read out of order is worse than none.
   if (record.type === "cost-state") return source === "transcript" ? costState(record) : { kind: "other" };
@@ -114,6 +131,7 @@ function assistant(record: Record<string, any>, source: UsageSource): ParsedLine
     },
     cwd: typeof record.cwd === "string" && record.cwd.length <= MAX_CWD ? record.cwd : null,
     version: word(record.version),
+    tests: claudeTestCalls(record),
   };
 }
 

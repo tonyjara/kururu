@@ -238,6 +238,7 @@ function adopt(stored: Profile): Profile {
       // so it is read as a client's would be.
       root: adoptRoot(workspace.root, homedir()),
       mobile: workspace.mobile === true,
+      ...(workspace.loose === true ? { loose: true } : {}),
       // Absent before workspaces had projects. What was found rides along
       // until the next look under the root replaces it.
       subprojects: adoptSubprojects(workspace.subprojects),
@@ -1534,6 +1535,13 @@ export class Workspaces {
     const workspace = this.workspaceIn(profileId, workspaceId);
     if (!workspace || workspace.mobile === on) return;
     this.mutate(profileId, workspaceId, (w) => ({ ...w, mobile: on }));
+  }
+
+  /** Whether a workspace has no test suite on purpose — see `Workspace.loose`. */
+  setWorkspaceLoose(profileId: string, workspaceId: string, on: boolean): void {
+    const workspace = this.workspaceIn(profileId, workspaceId);
+    if (!workspace || (workspace.loose === true) === on) return;
+    this.mutate(profileId, workspaceId, ({ loose: _was, ...w }) => (on ? { ...w, loose: true } : w));
   }
 
   /** Whether this profile's agents load only kururu's MCP servers — see `Profile.agentsKururuMcpOnly`. Read at each launch, so it reaches the next agent started. */

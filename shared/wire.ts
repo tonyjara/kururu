@@ -1067,6 +1067,8 @@ export type ClientMessage =
   | { type: "set-agents-kururu-mcp-only"; profileId: string; on: boolean }
   /** Whether a workspace builds a mobile app, and so its card runs start with the slot queue's paragraph. See `Workspace.mobile`. */
   | { type: "set-workspace-mobile"; profileId: string; workspaceId: string; on: boolean }
+  /** Whether a workspace has no test suite on purpose, so a test run in it is flagged. See `Workspace.loose`. */
+  | { type: "set-workspace-loose"; profileId: string; workspaceId: string; on: boolean }
   /**
    * A workspace's root folder, or "" for none. `~` is allowed and expanded;
    * the server refuses a path that is not a folder on this Mac, and the reply

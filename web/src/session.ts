@@ -2074,6 +2074,11 @@ export function setWorkspaceMobile(profileId: string, workspaceId: string, on: b
   send({ type: "set-workspace-mobile", profileId, workspaceId, on });
 }
 
+/** Whether a workspace has no test suite on purpose. See `Workspace.loose`. */
+export function setWorkspaceLoose(profileId: string, workspaceId: string, on: boolean): void {
+  send({ type: "set-workspace-loose", profileId, workspaceId, on });
+}
+
 // ---------------------------------------------------------------------------
 // React binding
 // ---------------------------------------------------------------------------

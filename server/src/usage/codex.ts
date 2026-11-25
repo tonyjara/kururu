@@ -32,6 +32,7 @@ import { isLoginKey } from "../../../shared/model";
 import { costOf } from "../../../shared/prices";
 import { countOf, type LimitRow, type MessageRow } from "../../../shared/usage";
 import { configPath } from "../config";
+import { codexTestLine, type CodexTestLine } from "./testlines";
 
 export const CODEX_NEEDLES = ['"type":"turn_context"', '"type":"token_count"'] as const;
 
@@ -60,11 +61,16 @@ export function noCodexTurn(): CodexTurn {
 export type ParsedCodexLine =
   | { kind: "turn"; turn: CodexTurn }
   | { kind: "message"; row: Omit<MessageRow, "sessionId" | "messageId">; limits: { raw: unknown; at: number } | null }
+  /** A tool call that is a test run, or the output of one being waited on. See `testlines.ts`. */
+  | { kind: "test"; seen: NonNullable<CodexTestLine> }
   | { kind: "skip"; why: string }
   | { kind: "other" };
 
-/** Pure: a `turn_context` or `token_count` line, or neither. The fixtures in `server/test/fixtures/usage/` are hand-written. */
-export function parseCodexLine(line: string, turn: CodexTurn): ParsedCodexLine {
+/**
+ * Pure: a `turn_context` or `token_count` line, or neither. The fixtures in `server/test/fixtures/usage/` are hand-written.
+ * With `waiting`, the test runs whose outputs have not been seen, a tool's call and its output are read too.
+ */
+export function parseCodexLine(line: string, turn: CodexTurn, waiting?: { has(id: string): boolean }): ParsedCodexLine {
   let record: Record<string, any>;
   try {
     record = JSON.parse(line);
@@ -74,6 +80,10 @@ export function parseCodexLine(line: string, turn: CodexTurn): ParsedCodexLine {
   if (!record || typeof record !== "object") return { kind: "other" };
   if (record.type === "turn_context") return turnContext(record);
   if (record.type === "event_msg" && record.payload?.type === "token_count") return tokenCount(record, turn);
+  if (record.type === "response_item" && waiting) {
+    const seen = codexTestLine(record, waiting);
+    return seen ? { kind: "test", seen } : { kind: "other" };
+  }
   return { kind: "other" };
 }
 

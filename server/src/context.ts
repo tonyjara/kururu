@@ -58,6 +58,7 @@ import type { Automations } from "./automations";
 import type { VaultRuns } from "./vaultrun";
 import { Store } from "./store";
 import { Launches } from "./usage/attribute";
+import { Testing } from "./testing";
 import { NodeUsage } from "./usage/remote";
 import type { UsageReader } from "./usage/sweep";
 import { Voice } from "./voice";
@@ -678,6 +679,14 @@ export const activity = new Map<string, string>();
 export const MAX_ACTIVITY = 200;
 
 /**
+ * Which agents have a test run going, from their hooks, and the door to what
+ * the ledger has recorded of them. Beside `activity` because the live half
+ * is the same kind of thing: about the work, from the agent's own report,
+ * and forgotten by a restart. See `testing.ts`.
+ */
+export const testing = new Testing();
+
+/**
  * What each agent's last turn ended in, as the links under its row. Beside
  * `activity` because it is the same kind of thing — about the work, from the
  * agent's own report, nothing the host needs — and unlike it kept on disk,
@@ -801,10 +810,12 @@ export function overlay(agent: AgentSnapshot): AgentSnapshot {
   const fresh = unread.has(agent.id);
   const held = memory.get(agent.id);
   const made = madeFiles.of(agent.id);
-  if (!said && !was && !held && made.length === 0 && fresh === agent.unread) return agent;
+  const run = agent.exited ? null : testing.of(agent.id);
+  if (!said && !was && !held && !run && made.length === 0 && fresh === agent.unread) return agent;
   return {
     ...agent,
     ...(said ? { activity: said } : {}),
+    ...(run ? { testing: run } : {}),
     ...(was ? { lastAgent: was } : {}),
     ...(held ? { rss: held } : {}),
     ...(made.length ? { made } : {}),

@@ -40,6 +40,8 @@
  * `noticeStatuses` is the one place transitions are observed, and `noticed`
  * is what it calls.
  */
+import { chipName, shortDuration, type LiveTest } from "../../shared/testing";
+import { isTestingRange, type TestingRange } from "../../shared/testreport";
 import { randomUUID } from "node:crypto";
 import { NO_SUBPROJECTS, visibleProjects } from "../../shared/subprojects";
 import { open, stat } from "node:fs/promises";
@@ -285,6 +287,15 @@ export interface HarnessDeps {
   /** The lines pinned in the profile's drawer, newest said first, as turn hits. See `shared/kurupin.ts`. */
   pinned?: (profileId: string) => SearchHit[];
   cardHistory: (cardId: string) => { card: Card; workspaceName: string | null; deleted: boolean; events: CardEvent[] } | null;
+  /**
+   * The recorded test runs: the `testing` tool's lines, an agent's run that is
+   * going now for `kururu_status`, and a card's runs for its history. See `testing.ts`.
+   */
+  testing?: {
+    text: (range: TestingRange, project: string | null) => string;
+    of: (agentId: string) => LiveTest | null;
+    cardLines: (cardId: string) => { at: number; text: string }[];
+  };
   /**
    * The slot queue: what `kururu_status` says about it, named the way this
    * module names agents, and `prioritize_agent`. See `slots.ts`.
@@ -1628,8 +1639,18 @@ export class Harness {
       const where = found.workspaceName ? `${found.workspaceName}'s board` : "the profile's board";
       const head = `${found.workspaceName ? cardCode(found.workspaceName, found.card.number) : `#${found.card.number}`} "${found.card.title}" on ${where}, now in ${laneName(found.card.column, this.laneNames(profileId))}${found.deleted ? " (deleted)" : ""}:`;
       const names = this.laneNames(profileId);
-      const lines = found.events.map((event) => `- ${stamp(event.at)} ${eventLine(event, names)}`);
-      return ok([head, ...lines].join("\n"));
+      // Its agents' test runs among its moves, in the order things happened.
+      const lines = [
+        ...found.events.map((event) => ({ at: event.at, line: `- ${stamp(event.at)} ${eventLine(event, names)}` })),
+        ...(this.deps.testing?.cardLines(cardId) ?? []).map((run) => ({ at: run.at, line: `- ${stamp(run.at)} test run: ${run.text}` })),
+      ].sort((a, b) => a.at - b.at);
+      return ok([head, ...lines.map((each) => each.line)].join("\n"));
+    },
+
+    testing: ({ args }) => {
+      if (!this.deps.testing) return fail("Test runs are not recorded on this kururu.");
+      const range = isTestingRange(args.range) ? args.range : "week";
+      return ok(this.deps.testing.text(range, str(args.project) || null));
     },
 
     ask_kuru: ({ args }) => {
@@ -2236,8 +2257,10 @@ export class Harness {
         const ctx = agent.contextUsage ? ` · context ${Math.round((agent.contextUsage.used / agent.contextUsage.window) * 100)}%` : "";
         const doing = this.deps.activity.get(id);
         const remote = remoteShellOf(agent.command)?.agent ? " · status read off its screen, no transcript" : "";
+        const run = agent.exited ? null : this.deps.testing?.of(id);
+        const tests = run ? ` · testing ${chipName(run.suite)} for ${shortDuration(Date.now() - run.since)}${run.loose ? " (in a workspace marked as having no test suite)" : ""}` : "";
         out.push(
-          `  - ${id === selfId ? "you: " : ""}${this.name(agent)} · ${agent.exited ? "exited" : agent.status}${ctx}${remote}` +
+          `  - ${id === selfId ? "you: " : ""}${this.name(agent)} · ${agent.exited ? "exited" : agent.status}${ctx}${tests}${remote}` +
             (doing ? ` · ${remote ? "on screen" : "last told"}: ${doing.slice(0, 120)}` : "") +
             (this.inboxes.has(id) ? "" : agent.agent === "claude" ? " · not heard from its hooks yet" : "") +
             (this.held.has(id) ? ` · ${this.held.get(id)!.length} message${this.held.get(id)!.length === 1 ? "" : "s"} from you waiting to be typed` : "") +

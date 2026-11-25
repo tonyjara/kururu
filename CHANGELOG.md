@@ -15,6 +15,21 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Testing, seen the way usage is.** Kururu now records every test,
+  typecheck, lint and build run your agents make, and spends no tokens doing
+  it: runs are read off the transcripts and hooks that were already there.
+  An agent that is testing says so on its row and its card, with the suite
+  and a running clock (`testing: chat:e2e · 2m10s`). **Settings → Testing**
+  shows what is running now, where the time went by project and suite, fail
+  rates, test counts, the slowest suites, and the tokens spent around each
+  run, with the rule for counting them on the page. It points out a suite run
+  in a workspace you marked **No test suite** (Settings → Workspaces), a run
+  much slower than its usual, and a suite rerun many times in one card. Kuru
+  can answer "is anything testing?" and "how long do this project's tests
+  take?", and a card's history lists its runs. Commands are kept redacted
+  and output is never kept. Codex runs and agents on other machines are
+  recorded after the fact, without the live chip.
+
 - **Twenty-one plant and tree mascots.** Potted plant pets (a dog, a cat
   and a parrot), eight little walking plants (pumpkin, chamomile, lotus,
   fly agaric, nettle, herb Paris, morel, mandrake), three mushrooms, a

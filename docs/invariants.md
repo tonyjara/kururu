@@ -210,6 +210,25 @@ its parent asks, keeping quarter-hour rollups by the node's id and never a
 qualified one; a session one road has read, the other leaves alone. →
 [data](data.md#other-computers)
 
+## Test runs
+
+**A test run is recorded off what was already being read, and costs no
+token.** `test_runs` in `usage.db`: a Bash call that is a test, typecheck,
+lint or build run (`classifyCommand`, by the program at the head of each
+part of the line), found in the assistant line the ledger's reader parses
+anyway, with its result read off the one line its id is on and no other tool
+output ever made a string. The hook that already runs before every tool call
+says a run is starting, which is the chip on the agent's row and card; a
+shell-filtered hook after Bash says it ended, with Claude Code's own
+duration. Nothing is typed into a pty, no agent is asked to report, and Kuru
+hears of a run only by calling `testing`. The command is the ledger's one
+column of words: the part that is the run, redacted (`redactCommand`), 240
+characters, in a file that is in no copy or backup; a test's output is read
+for three counts and never kept. Flags (a suite in a workspace marked as
+having none, a run slower than its usual, reruns in a card) are worked out
+when asked, never stored and never announced. Codex, machines and other
+nodes are best effort. → [data](data.md#test-runs)
+
 ## Stored credentials
 
 **The OpenRouter key is one of the credentials kururu stores — a

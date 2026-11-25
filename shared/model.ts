@@ -129,6 +129,13 @@ export interface AgentSnapshot {
    */
   activity?: string | null;
   /**
+   * A test run this agent has going right now — a suite, a kind and when it
+   * started — or absent. From its hooks, held by the server beside
+   * `activity` and for the same reasons; the record of the run is the usage
+   * ledger's. See `shared/testing.ts`.
+   */
+  testing?: import("./testing").LiveTest | null;
+  /**
    * The agent program last seen in this pty, even if it is not there now — the
    * pty's memory of having been an agent, as opposed to `agent` above, which is
    * whether one is running in it this second.
@@ -690,6 +697,14 @@ export interface Workspace {
    * A preference, set in Settings → Workspaces; false until somebody ticks it.
    */
   mobile: boolean;
+  /**
+   * Whether this project has no test suite on purpose: typecheck and lint
+   * are what it is checked by. Ticked, a unit, e2e or simulator run in it is
+   * flagged where test runs are shown (`shared/testreport.ts`), and nothing
+   * else changes: no agent is told and no run is stopped. Optional, and
+   * absent is no, since a file from before it has none.
+   */
+  loose?: boolean;
   /**
    * The projects inside it — a monorepo's sites, each its own thing — which
    * Kuru's conversation is tagged and filtered by beside the workspace

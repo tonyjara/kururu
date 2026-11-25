@@ -82,6 +82,7 @@ import {
   watches,
   windows,
   workspaces,
+  testing,
 } from "./context";
 import { cardHistoryOf, pinnedFor, sayAside, searchFor } from "./conversation";
 import { closeDatabasePools } from "./databases";
@@ -157,6 +158,8 @@ import {
   workspaceRepo,
   workspaceRoot,
   rootToStore,
+  testingPlaceOf,
+  testingTextFor,
 } from "./terminals";
 import { leadEligibility, nodeAddress, nodeSummary, nodeUnreachable, refreshClaudeReady, secretLanded, STARTED_AT } from "./thisnode";
 import { usageSnapshot } from "./usage";
@@ -586,8 +589,19 @@ export async function attach(port: Port): Promise<void> {
           .map(({ id, name, host }) => ({ id, name, host }));
       },
       machineReads: { list: usageFilesOn, chunk: usageChunkOn },
+      // A run the reader saw end is a chip that can go. See `testing.ts`.
+      onTests: (events) => testing.sawTests(events),
     },
   ));
+  // What is testing now, and the ledger's test runs. Bound here because the
+  // ledger is opened here; without one the chips are still drawn.
+  testing.bind({
+    ledger: () => usageReader?.ledger ?? null,
+    placeOf: testingPlaceOf,
+    cwdOf: (agentId) => host.find(agentId)?.cwd ?? null,
+    changed: pushSnapshot,
+    log: (line) => console.log(line),
+  });
   usageReader?.start();
   provide("usageLaunches", usageReader
     ? new Launches({
@@ -658,6 +672,11 @@ export async function attach(port: Port): Promise<void> {
     search: searchFor,
     pinned: pinnedFor,
     cardHistory: cardHistoryOf,
+    testing: {
+      text: (range, project) => testingTextFor(range, project, (agentId) => (host.find(agentId) ? harness.nameOf(agentId) : null)),
+      of: (agentId) => testing.of(agentId),
+      cardLines: (cardId) => testing.cardLines(cardId),
+    },
     reloadWindow: (why, timeoutMs) => reloads.ask(why, "Kuru", timeoutMs),
     madeOf: (agentId) => madeFiles.of(agentId),
     // The module's `state`, by another name: `attach` has one of its own, the host's hello.

@@ -21,7 +21,7 @@ describe("hookSettings", () => {
       Object.entries(settings.hooks).map(([event, groups]) => [event, groups[0]?.hooks[0]?.command ?? ""]),
     );
     expect(Object.keys(commands).sort()).toEqual(
-      ["Notification", "PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"].sort(),
+      ["Notification", "PostToolUse", "PostToolUseFailure", "PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"].sort(),
     );
     expect(commands.Notification).toContain("report.mjs' blocked >");
     expect(commands.Stop).toContain("report.mjs' done >");

@@ -105,6 +105,8 @@ interface StoredWorkspace {
   root?: string | null;
   /** Whether it builds a mobile app — see `Workspace.mobile`. Absent is no. */
   mobile?: boolean;
+  /** Whether it has no test suite on purpose — see `Workspace.loose`. Absent is no. */
+  loose?: boolean;
   /** The owner's edits to its projects — see `Workspace.subprojects`. What was found is looked for again, never stored. Absent is none. */
   projects?: ProjectEdit[];
   /**
@@ -231,6 +233,7 @@ export function writeSnapshot(profiles: Profile[], activeProfileId: string): voi
         ...(workspace.machine ? { machine: workspace.machine } : {}),
         ...(workspace.root ? { root: workspace.root } : {}),
         ...(workspace.mobile ? { mobile: true } : {}),
+        ...(workspace.loose ? { loose: true } : {}),
         ...(workspace.subprojects?.edits.length ? { projects: workspace.subprojects.edits } : {}),
         layout: strip(workspace.layout),
       })),
@@ -437,6 +440,7 @@ export function readSnapshot(): { profiles: Profile[]; activeProfileId: string }
         machine: adoptPin(w.machine),
         root: adoptRoot(w.root, homedir()),
         mobile: w.mobile === true,
+        ...(w.loose === true ? { loose: true } : {}),
         subprojects: { found: [], edits: adoptProjectEdits(w.projects) },
       };
       workspaces.push(workspace);

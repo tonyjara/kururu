@@ -1326,6 +1326,65 @@ kbd {
   padding: 0 8px 6px;
 }
 
+/* A test run an agent has going (`TestChip.tsx`): under its sidebar row and
+   on its card, in the colour of a working agent because that is what it is
+   doing, and in the asking colour when the workspace says it has no tests.
+   Mono, one line, the suite's name cut before the time is. */
+.test-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--working);
+  background: color-mix(in srgb, var(--working) 14%, transparent);
+}
+.test-chip-loose {
+  color: var(--blocked);
+  background: color-mix(in srgb, var(--blocked) 14%, transparent);
+}
+.test-chip-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: test-chip-pulse 1.6s ease-in-out infinite;
+}
+@keyframes test-chip-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .test-chip-dot {
+    animation: none;
+  }
+}
+.test-chip-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.test-chip-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.agent-testing {
+  margin: 0 8px 6px;
+  max-width: calc(100% - 16px);
+}
+.board-testing {
+  margin-top: 2px;
+  align-self: flex-start;
+}
+
 /* A link to a file an agent made: under its sidebar row and on its card
    (`MadeLinks.tsx`). The card codes' chip in Kuru's replies, in the same
    accent, because it is the same kind of thing — a door to somewhere else in

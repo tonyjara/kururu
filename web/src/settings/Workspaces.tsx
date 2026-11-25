@@ -59,6 +59,7 @@ export function WorkspacesPage({
       {shown && <Root key={shown.id} profileId={profileId} workspace={shown} />}
       {shown && <Projects key={`projects-${shown.id}`} profileId={profileId} workspace={shown} />}
       {shown && <Mobile profileId={profileId} workspace={shown} />}
+      {shown && <Tests profileId={profileId} workspace={shown} />}
 
       {shown && !root && (
         <Group title="Repository">
@@ -281,6 +282,25 @@ function Mobile({ profileId, workspace }: { profileId: string; workspace: Worksp
         hint={workspace.machine ? "Only card runs on this Mac are told; a run on a machine has no slot queue there." : undefined}
         on={workspace.mobile}
         onChange={(on) => api.setWorkspaceMobile(profileId, workspace.id, on)}
+      />
+    </Group>
+  );
+}
+
+/**
+ * Whether this project has no test suite on purpose (`Workspace.loose`).
+ * Ticked, a test run an agent makes here is flagged on Settings → Testing
+ * and to Kuru when it asks; typecheck, lint and build are what such a
+ * project is checked by and are never flagged. It tells no agent anything.
+ */
+function Tests({ profileId, workspace }: { profileId: string; workspace: Workspace }) {
+  return (
+    <Group title="Testing" foot="Every test, typecheck, lint and build run an agent makes is recorded either way, on Settings → Testing. This only says which runs are a surprise here.">
+      <Toggle
+        label="No test suite"
+        hint="Checked by typecheck and lint only. A unit, end-to-end or simulator run here is flagged."
+        on={workspace.loose === true}
+        onChange={(on) => api.setWorkspaceLoose(profileId, workspace.id, on)}
       />
     </Group>
   );

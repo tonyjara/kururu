@@ -29,6 +29,7 @@ import { isRemote } from "../../shared/remote";
 import { sessionOfTranscript } from "../../shared/store";
 import type { LaunchRow } from "../../shared/usage";
 import type { UsageDimension, UsageNames, UsageRange, UsageReport } from "../../shared/usagereport";
+import type { TestingNames, TestingRange, TestingReport } from "../../shared/testreport";
 import { WEB_SERVER } from "../../shared/web";
 import { SAVE_DEBOUNCE_MS, type ServerMessage, type UsageLimit } from "../../shared/wire";
 import { isDirectory } from "./cards";
@@ -64,6 +65,8 @@ import {
   watches,
   windows,
   workspaces,
+  testing,
+  overlay,
 } from "./context";
 import { processCwd } from "./cwd";
 import { closeDatabasePools } from "./databases";
@@ -637,6 +640,52 @@ export function usageReportFor(reader: UsageReader, range: UsageRange, by: Usage
     status: reader.status(),
     remote: [...reader.machineSources(), ...(usageNodes?.sources() ?? [])],
   });
+}
+
+/**
+ * What the recorded test runs are called: a workspace by its name, a card by
+ * its title, and which workspaces are marked as having no test suite. Read
+ * when a page or Kuru asks. See `testing.ts`.
+ */
+function testingNames(): TestingNames {
+  const home = homedir();
+  const loose = new Set<string>();
+  for (const profile of workspaces.all()) for (const workspace of profile.workspaces) if (workspace.loose) loose.add(workspace.key);
+  const memo = <T,>(read: (key: string) => T) => {
+    const held = new Map<string, T>();
+    return (key: string): T => {
+      if (!held.has(key)) held.set(key, read(key));
+      return held.get(key)!;
+    };
+  };
+  return {
+    workspace: memo((key) => store.usageWorkspaceName(key)),
+    card: memo((id) => store.usageCard(id)?.title.replace(/\s+/g, " ").trim().slice(0, 60) ?? null),
+    loose: (key) => loose.has(key),
+    folder: (path) => abbreviateHome(path, home),
+  };
+}
+
+/** An agent as a line about testing names it, or null for one that is gone. */
+function testingAgentName(agentId: string): string | null {
+  const agent = host.find(agentId);
+  return agent && !agent.exited ? agentLabel(overlay(agent)) : null;
+}
+
+export function testingReportFor(range: TestingRange): TestingReport | null {
+  return testing.report(range, testingNames(), testingAgentName);
+}
+
+/** The same in a few lines, for Kuru, which names agents its own way. */
+export function testingTextFor(range: TestingRange, project: string | null, nameOf: (agentId: string) => string | null): string {
+  return testing.text(range, testingNames(), nameOf, project);
+}
+
+/** Where an agent's terminal is, for a chip that says a test is running in a workspace that has none. */
+export function testingPlaceOf(agentId: string): { workspace: string; loose: boolean } | null {
+  const at = workspaces.terminalAt(agentId);
+  const workspace = at ? workspaces.workspaceIn(at.profileId, at.workspaceId) : null;
+  return workspace ? { workspace: workspace.name, loose: workspace.loose === true } : null;
 }
 
 /** A hook in one of kururu's terminals named its session, which may be one no launch knew: `/clear`, or a `claude` typed into a shell. */

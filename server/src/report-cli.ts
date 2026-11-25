@@ -34,7 +34,7 @@
  */
 import { isAgentStatus } from "../../shared/model";
 import { tokenHeaders } from "../localtoken.mjs";
-import { asksNothing } from "./hooks";
+import { asksNothing, testReportOf } from "./hooks";
 import { STANDARD_WINDOW, readContext } from "./transcript";
 
 /** A turn must never wait on us. Long enough for a local socket, and no longer. */
@@ -97,6 +97,15 @@ async function main(): Promise<void> {
   if (!agent) return;
 
   const payload = await readPayload();
+  /**
+   * A Bash call that is a test run, starting or ending: said on this same
+   * report, so that a run's start costs no process of its own. The hook that
+   * runs after a Bash call exists only for this, and for a call that is not a
+   * run it has nothing to say and reads nothing more. See `testReportOf`.
+   */
+  const test = testReportOf(payload);
+  const after = payload?.hook_event_name === "PostToolUse" || payload?.hook_event_name === "PostToolUseFailure";
+  if (after && !test) return;
   // The idle reminder and its kind arrive on the `blocked` hook and are not
   // questions. They still carry the context reading. See `asksNothing`.
   const quiet = asksNothing(payload);
@@ -117,7 +126,7 @@ async function main(): Promise<void> {
 
   // Nothing to say. The endpoint would answer 400, which is correct of it and
   // pointless to provoke.
-  if (!status && !context && !message) return;
+  if (!status && !context && !message && !test) return;
 
   /**
    * Three things the harness wants that only a hook can know, carried along
@@ -139,7 +148,7 @@ async function main(): Promise<void> {
       method: "POST",
       // The token for a server that wants it on loopback too; ignored by one that does not.
       headers: { "content-type": "application/json", ...tokenHeaders() },
-      body: JSON.stringify({ agent, status, context: context ?? undefined, message, transcript: path || undefined, inbox, reply }),
+      body: JSON.stringify({ agent, status, context: context ?? undefined, message, transcript: path || undefined, inbox, reply, test: test ?? undefined }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {

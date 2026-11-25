@@ -12,7 +12,10 @@
  *
  * It holds numbers, ids, model names and folders, and no column a transcript's
  * words could arrive in; `server/test/usageledger.test.ts` writes a transcript
- * full of a marked word through it and fails if the word comes out.
+ * full of a marked word through it and fails if the word comes out. The one
+ * exception is `test_runs.command` (`testlog.ts`): the part of a command line
+ * that is a test run, redacted, because a run nobody can name is a number
+ * nobody can use. The same test writes a secret through it and looks for it.
  *
  * **`daily` is what a page draws**, O(days × keys) however many messages are
  * behind it. It is kept in the transaction that wrote the batch, so the two
@@ -65,6 +68,7 @@ import {
 import type { PulledCell, PulledSession, UsagePart } from "../../../shared/usagepull";
 import { splitDays, type LimitReading, type SessionFact, type UsageCell } from "../../../shared/usagereport";
 import { dataDir } from "../store";
+import { applyTestEvent, settleTestSpend, TEST_RUNS, type TestEvent } from "./testlog";
 
 export function ledgerPath(): string {
   return join(dataDir(), "usage.db");
@@ -175,7 +179,7 @@ create table if not exists node_pulls (node text primary key, name text not null
 `;
 
 /** Each entry takes the file from its index's version to the next. The first makes it. */
-const MIGRATIONS: readonly string[] = [SCHEMA, WAITING, SESSION_DAYS, NODES];
+const MIGRATIONS: readonly string[] = [SCHEMA, WAITING, SESSION_DAYS, NODES, TEST_RUNS];
 
 /** A format that moved would otherwise write a row per line forever; the count stops being useful long before this. */
 const MAX_SKIPPED = 10_000;
@@ -222,6 +226,8 @@ export class LedgerBatch {
   readonly limits = new Map<string, LimitRow>();
   readonly files = new Map<string, FileRow>();
   readonly skipped: { path: string; atByte: number; why: string }[] = [];
+  /** The test runs the pass saw start and end, in the order it saw them. See `testlog.ts`. */
+  readonly tests: TestEvent[] = [];
 
   /** The streamed copies of a message collapse here first: last sighting's counts, first sighting's time. */
   addMessage(row: MessageRow): void {
@@ -258,7 +264,7 @@ export class LedgerBatch {
   }
 
   get size(): number {
-    return this.messages.size + this.sessions.size + this.totals.size + this.limits.size + this.files.size + this.skipped.length;
+    return this.messages.size + this.sessions.size + this.totals.size + this.limits.size + this.files.size + this.skipped.length + this.tests.length;
   }
 }
 
@@ -359,7 +365,8 @@ export class Ledger {
     }
   }
 
-  private stmt(sql: string): StatementSync {
+  /** A prepared statement, kept. Lent to `testlog.ts`, whose table is in this file and whose rows are written in this file's transactions. */
+  stmt(sql: string): StatementSync {
     let prepared = this.statements.get(sql);
     if (!prepared) {
       prepared = this.db.prepare(sql);
@@ -368,7 +375,7 @@ export class Ledger {
     return prepared;
   }
 
-  private tx<T>(fn: () => T): T {
+  tx<T>(fn: () => T): T {
     this.db.exec("begin immediate");
     try {
       const out = fn();
@@ -447,6 +454,13 @@ export class Ledger {
       this.writeSkipped(batch.skipped, at);
       for (const day of days) this.rollup(day);
       this.addMoves(moved, days);
+      // After the messages, since a run's tokens are a sum over them: for the
+      // runs this batch saw, and for those a message in it may be the last of.
+      for (const event of batch.tests) applyTestEvent(this, event);
+      const touched = new Set<string>();
+      for (const row of batch.messages.values()) touched.add(row.sessionId);
+      for (const event of batch.tests) touched.add(event.sessionId);
+      settleTestSpend(this, touched, at);
     });
   }
 
