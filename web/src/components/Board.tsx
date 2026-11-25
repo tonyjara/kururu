@@ -62,6 +62,7 @@ import { isRemote } from "../../../shared/remote";
 import type { DevServer } from "../../../shared/wire";
 import { useCardClick } from "../cardclick";
 import { useCardDone } from "../cardDone";
+import { canPopColumn, popColumnItem, popOutColumn } from "../columns";
 import { referItem } from "../kuru";
 import { noteItem, popOutNote } from "../notes";
 import { isLoopback, previewUrl, projectLinks, serverIn } from "../preview";
@@ -72,7 +73,20 @@ import { datesLabel, datesTense } from "../when";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
-import { AddLane, FoldButton, FoldedLane, isLaneDrag, laneMenuItems, LaneName, NEW_LANE, useLaneDrag } from "./Lanes";
+import {
+  AddLane,
+  FoldButton,
+  FoldedLane,
+  isLaneDrag,
+  laneMenuItems,
+  LaneName,
+  NEW_LANE,
+  PopOutButton,
+  PoppedButtons,
+  poppedReferItem,
+  useLaneDrag,
+  type PoppedColumn,
+} from "./Lanes";
 import { MadeLinks } from "./MadeLinks";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { quotable, selectNotDrag } from "./Quote";
@@ -178,6 +192,7 @@ export function BoardView({
   mascot,
   launchers,
   focusedAgentId,
+  popped,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -194,6 +209,13 @@ export function BoardView({
    * document or nothing, lights nothing.
    */
   focusedAgentId: string | null;
+  /**
+   * Drawn as a popped-out column's window (`ColumnPage.tsx`): that column
+   * alone, open whatever the board's fold says, with the window's fold and
+   * close in its head where the board's fold, grip and width are. Every card
+   * verb is the board's, and the cards' menus still list every column.
+   */
+  popped?: PoppedColumn;
 }) {
   /** The column a new card is being written in, or null. One composer at a time. */
   const [adding, setAddingState] = useState<string | null>(() => openComposers.get(workspaceId)?.adding ?? null);
@@ -274,8 +296,11 @@ export function BoardView({
     setNotes(({ [cardId]: _, ...rest }) => rest);
     setErrors((all) => ({ ...all, [cardId]: err instanceof Error ? err.message : String(err) }));
   };
-  const { devServers } = api.useKururu();
-  const reveal = (agentId: string) => api.revealAgent(agentId);
+  const { devServers, snapshot } = api.useKururu();
+  const reveal = (agentId: string) => {
+    api.revealAgent(agentId);
+    popped?.leave();
+  };
   /** Where a dragged card would land: a column and a place among its cards. */
   const [dropAt, setDropAt] = useState<{ column: string; index: number } | null>(null);
   /**
@@ -482,7 +507,11 @@ export function BoardView({
           run: () => move(card, lane.id),
         })),
       ...(card.worktree ? gitItems(card, card.worktree, status) : []),
-      referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id }),
+      ...(popped
+        ? popped.refer
+          ? [poppedReferItem(popped.refer, card.id)]
+          : []
+        : [referItem({ code: cardCode(workspaceName, card.number), title: card.title, place: cardPlace(workspaceId, api.nodeNameOf), cardId: card.id })]),
       // Not on another node's board: a note is drawn from this node's
       // snapshot, which has that board only while its workspace is on screen.
       ...(isRemote(workspaceId) ? [] : [noteItem(card.id)]),
@@ -524,17 +553,31 @@ export function BoardView({
     setMenu({
       at,
       items: laneMenuItems({
-        lanes,
+        // In its window a column is the only one: no moves along the board.
+        lanes: popped ? [lane] : lanes,
         lane,
         count: columnCards(board, lane.id).length,
         into: laneInto(board, lane.id, "workspace"),
         fixed: laneFixed(lane.id, "workspace"),
+        extra: popOut ? [popColumnItem(() => popOut(lane))] : undefined,
         rename: () => setNaming(lane.id),
-        collapse: () => api.collapseColumn(workspaceId, lane.id, true),
+        collapse: popped ? undefined : () => api.collapseColumn(workspaceId, lane.id, true),
         move: (index) => api.moveColumn(workspaceId, lane.id, index),
         remove: () => api.deleteColumn(workspaceId, lane.id),
       }),
     });
+  /**
+   * A column popped out into a window of its own, from its head's pin or its
+   * menu — in the desktop app, and not from the window it already is.
+   */
+  const profile = snapshot?.profile ?? null;
+  const popOut =
+    !popped && profile && canPopColumn(workspaceId)
+      ? (lane: BoardLane) => {
+          const key = profile.workspaces.find((w) => w.id === workspaceId)?.key;
+          if (key) popOutColumn(profile, { key, name: workspaceName }, lane);
+        }
+      : null;
 
   const dropOn = (event: React.DragEvent, column: string) => {
     if (isLaneDrag(event)) {
@@ -580,11 +623,12 @@ export function BoardView({
 
   return (
     <div className="board" ref={root}>
-      {lanes.map((lane, laneIndex) => {
+      {(popped ? lanes.filter((lane) => lane.id === popped.lane) : lanes).map((lane) => {
+        const laneIndex = lanes.indexOf(lane);
         const column = lane.id;
         const cards = columnCards(board, column);
         const fixed = laneFixed(column, "workspace");
-        const shut = lane.collapsed === true;
+        const shut = !popped && lane.collapsed === true;
         const width = board.widths?.[column];
         // The same drop target folded or open, so that a folded column takes
         // a card and a column exactly as it would standing up.
@@ -619,10 +663,10 @@ export function BoardView({
               className="board-col-head"
               onContextMenu={(event) => {
                 event.preventDefault();
-                laneMenu(lane, { x: event.clientX, y: event.clientY });
+                if (!(popped && fixed)) laneMenu(lane, { x: event.clientX, y: event.clientY });
               }}
             >
-              {grip(column)}
+              {!popped && grip(column)}
               {naming === column ? (
                 <LaneName
                   name={lane.name}
@@ -640,10 +684,12 @@ export function BoardView({
                   >
                     {lane.name}
                   </span>
+                  {popped && <span className="board-col-where">{workspaceName}</span>}
                   <span className="board-col-count">{cards.length}</span>
                 </>
               )}
-              <FoldButton onFold={() => api.collapseColumn(workspaceId, column, true)} />
+              {!popped && <FoldButton onFold={() => api.collapseColumn(workspaceId, column, true)} />}
+              {popOut && <PopOutButton name={lane.name} onPopOut={() => popOut(lane)} />}
               <button
                 className="pane-btn"
                 title={`Add a card to ${lane.name}`}
@@ -652,18 +698,23 @@ export function BoardView({
               >
                 <Icon name="add" />
               </button>
-              <button
-                className="pane-btn"
-                title={fixed ? "Collapse or move this column" : "Rename, move or delete this column"}
-                aria-label="Column menu"
-                aria-haspopup="menu"
-                onClick={(event) => {
-                  const box = event.currentTarget.getBoundingClientRect();
-                  laneMenu(lane, { x: box.left, y: box.bottom + 4 });
-                }}
-              >
-                <Icon name="caret" />
-              </button>
+              {/* In its window one of the four has nothing on its menu — no
+                  rename, no delete, no move, no fold — so it has no menu. */}
+              {!(popped && fixed) && (
+                <button
+                  className="pane-btn"
+                  title={popped ? "Rename or delete this column" : fixed ? "Collapse or move this column" : "Rename, move or delete this column"}
+                  aria-label="Column menu"
+                  aria-haspopup="menu"
+                  onClick={(event) => {
+                    const box = event.currentTarget.getBoundingClientRect();
+                    laneMenu(lane, { x: box.left, y: box.bottom + 4 });
+                  }}
+                >
+                  <Icon name="caret" />
+                </button>
+              )}
+              {popped && <PoppedButtons popped={popped} />}
             </header>
 
             <div
@@ -772,11 +823,13 @@ export function BoardView({
                 </button>
               )}
             </div>
-            <ColumnResizeHandle onResize={(width) => api.resizeColumn(workspaceId, column, width)} onReset={() => api.resizeColumn(workspaceId, column, null)} />
+            {!popped && (
+              <ColumnResizeHandle onResize={(width) => api.resizeColumn(workspaceId, column, width)} onReset={() => api.resizeColumn(workspaceId, column, null)} />
+            )}
           </section>
         );
       })}
-      {lanes.length < LANES_MAX && (
+      {!popped && lanes.length < LANES_MAX && (
         <AddLane naming={naming === NEW_LANE} onNaming={(on) => setNaming(on ? NEW_LANE : null)} onAdd={(name) => api.addColumn(workspaceId, name)} />
       )}
 

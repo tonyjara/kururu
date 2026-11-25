@@ -26,6 +26,12 @@
 const NOTE_MIN = { width: 220, height: 140 };
 /** A new note's size, as in the window. */
 const NOTE_SIZE = { width: 340, height: 280 };
+/**
+ * A board column popped out for the first time: a column's width on the
+ * board, and tall — a column is read down, and one only as tall as a note
+ * shows three cards of it.
+ */
+const COLUMN_SIZE = { width: 300, height: 560 };
 /** A folded note's height until its page says what its title bar measures. */
 const NOTE_HEAD = 36;
 /** Notes remembered, up, away and closed. */
@@ -191,15 +197,16 @@ function fitOnScreen(bounds, displays) {
  * Where a card popped out for the first time goes: the right of `anchor` —
  * the window it was popped out of, or the work area of the display the
  * pointer is on when it came from the menu bar — `top` points down, each up
- * note one step down and left of the last so none hides another.
+ * note one step down and left of the last so none hides another. A column
+ * goes the same way at its own `size`.
  */
-function cascade(anchor, upCount, top) {
+function cascade(anchor, upCount, top, size = NOTE_SIZE) {
   const step = upCount % 8;
   return {
-    x: Math.round(anchor.x + anchor.width - NOTE_SIZE.width - INSET - step * CASCADE),
+    x: Math.round(anchor.x + anchor.width - size.width - INSET - step * CASCADE),
     y: Math.round(anchor.y + top + step * CASCADE),
-    width: NOTE_SIZE.width,
-    height: NOTE_SIZE.height,
+    width: size.width,
+    height: size.height,
   };
 }
 
@@ -222,6 +229,7 @@ function boxOnScreen(box, content) {
 
 module.exports = {
   CASCADE,
+  COLUMN_SIZE,
   NOTE_HEAD,
   NOTE_MIN,
   NOTE_SIZE,

@@ -11506,6 +11506,78 @@ html.note-page #root {
   opacity: 0;
 }
 
+/* A board column as a window of its own, over every application
+   (`ColumnPage.tsx`) — a note window's look for a column. The board is drawn
+   with that one column, and here it fills the window edge to edge: the
+   desktop draws the edge, the corners and the shadow. Its head is the note's
+   bar, tinted by the column's colour where it has one, and is what the
+   window is dragged by, with every button and field in it carved out as
+   `no-drag` — the name too is the bar, so a rename is the menu's here. The fold and close stand back while the window does not have
+   the keys, as a note's do. */
+.column-window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+}
+.column-window .profile-board,
+.column-window .board {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  scroll-snap-type: none;
+}
+.column-window .board-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--tag, var(--accent)) 4%, var(--chrome));
+}
+.column-window .board-col-over {
+  box-shadow: inset 0 0 0 var(--border) var(--accent);
+}
+.column-window .board-col-head,
+.column-window > .note-head {
+  flex: none;
+  min-height: 34px;
+  padding: 0 4px 0 10px;
+  margin-bottom: 6px;
+  background: color-mix(in srgb, var(--tag, var(--accent)) 14%, var(--chrome));
+  border-bottom: var(--border) solid color-mix(in srgb, var(--tag, var(--accent)) 28%, var(--line));
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+.column-window-shut .board-col-head {
+  margin-bottom: 0;
+  border-bottom-color: transparent;
+}
+.column-window .board-col-head :is(button, input) {
+  -webkit-app-region: no-drag;
+}
+.column-window .board-col-where {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dimmer);
+  font-size: var(--fs-xs);
+}
+.column-window-actions {
+  display: flex;
+  align-items: center;
+  -webkit-app-region: no-drag;
+  transition: opacity 120ms;
+}
+.column-window:not(.column-window-focused):not(:hover) .column-window-actions {
+  opacity: 0;
+}
+
 /* --------------------------------------------------------------------------
    The timeline
 

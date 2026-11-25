@@ -45,12 +45,24 @@
  * its card — its title bar's button, or its right-click here, which emits
  * `refer` — brings the window up and hands it the card's id, and the window
  * writes the reference the card's menu writes.
+ *
+ * **A board column is the same window.** The owner wanted a column kept in
+ * sight over everything the way a card is (2026-11-25), and what that takes
+ * — a panel over every space, a page per window with its own socket, a box
+ * kept in `desktop.json`, folding to the bar, coming back after a relaunch —
+ * is all here already, so a column is a second set of these (`kind:
+ * "column"`, loading `/?column=<id>`, which is `ColumnPage.tsx`) rather than
+ * a second mechanism. Its id is its board's key and the column's id
+ * (`web/src/columns.ts`), both minted once and never reused, as a card's is.
+ * Where the two differ is only what a card has and a column has not: Kuru
+ * is pointed at a card, so a column's right-click carries no reference.
  */
 const { BrowserWindow, Menu, screen, shell } = require("electron");
 const { EventEmitter } = require("node:events");
 const { editMenuTemplate } = require("./editmenu");
 const { neverActivates } = require("./stays");
 const {
+  COLUMN_SIZE,
   NOTE_HEAD,
   NOTE_MIN,
   adoptNotes,
@@ -97,13 +109,15 @@ function originOf(url) {
 class NoteWindows extends EventEmitter {
   /**
    * @param {object} options
+   * @param {"note" | "column"} [options.kind]  a card's note, or a board column — see the header
    * @param {string} options.preloadPath
    * @param {boolean} options.debug  relay each note page's console to stderr
    * @param {object[]} options.saved  `notes` from `desktop.json`
    * @param {(notes: object[]) => void} options.save
    */
-  constructor({ preloadPath, debug = false, saved, save }) {
+  constructor({ kind = "note", preloadPath, debug = false, saved, save }) {
     super();
+    this.kind = kind === "column" ? "column" : "note";
     this.preloadPath = preloadPath;
     this.debug = debug;
     this.save = save;
@@ -180,7 +194,7 @@ class NoteWindows extends EventEmitter {
     const entry = this.open.get(cardId);
     if (!entry || !this.page || entry.win.isDestroyed()) return;
     entry.loaded = this.page;
-    void entry.win.loadURL(`${this.page}/?note=${encodeURIComponent(cardId)}`).catch(() => {});
+    void entry.win.loadURL(`${this.page}/?${this.kind}=${encodeURIComponent(cardId)}`).catch(() => {});
   }
 
   // --- the windows ------------------------------------------------------------------
@@ -208,7 +222,7 @@ class NoteWindows extends EventEmitter {
       hasShadow: true,
       // The page reports its own ground once it is drawn; this is the gap before.
       backgroundColor: "#0d0f0e",
-      title: note.title || "Note",
+      title: note.title || (this.kind === "column" ? "Column" : "Note"),
       webPreferences: {
         preload: this.preloadPath,
         contextIsolation: true,
@@ -241,7 +255,7 @@ class NoteWindows extends EventEmitter {
         if (item.id === "replace") item.click = () => contents.replaceMisspelling(/** @type {string} */ (item.word));
         if (item.id === "learn") item.click = () => contents.session.addWordToSpellCheckerDictionary(/** @type {string} */ (item.word));
       }
-      if (!params.isEditable && entry.present === "here") {
+      if (this.kind === "note" && !params.isEditable && entry.present === "here") {
         if (template.length) template.push({ type: "separator" });
         template.push({ label: "Reference in Kuru", click: () => this.emit("refer", note.cardId) });
       }
@@ -249,10 +263,10 @@ class NoteWindows extends EventEmitter {
       Menu.buildFromTemplate(template).popup({ window: win });
     });
     if (this.debug) {
-      contents.on("console-message", (event, ...legacy) => console.log(`kururu note: ${event?.message ?? legacy[1]}`));
+      contents.on("console-message", (event, ...legacy) => console.log(`kururu ${this.kind}: ${event?.message ?? legacy[1]}`));
     }
     contents.on("did-fail-load", (_event, code, text, url) => {
-      if (this.debug) console.error(`kururu note: ${url} failed to load (${code} ${text})`);
+      if (this.debug) console.error(`kururu ${this.kind}: ${url} failed to load (${code} ${text})`);
     });
     // A renderer that went is a note that went blank; one load again, then it is left to the menu bar.
     let revived = 0;
@@ -345,7 +359,7 @@ class NoteWindows extends EventEmitter {
     } else {
       const up = this.records.filter((note) => note.state === "shown").length;
       const place = anchor ?? this.anchorUnderPointer();
-      const box = fitOnScreen(bounds ?? cascade(place, up, fromWindow ? TOP_IN_WINDOW : TOP_ON_DISPLAY), displays());
+      const box = fitOnScreen(bounds ?? cascade(place, up, fromWindow ? TOP_IN_WINDOW : TOP_ON_DISPLAY, this.kind === "column" ? COLUMN_SIZE : undefined), displays());
       next = [
         ...this.records,
         { cardId, profileName: "", title: "", code: "", ...facts, ...box, collapsed: false, state: "shown" },

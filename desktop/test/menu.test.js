@@ -5,7 +5,7 @@
  * both bugs that look like a menu.
  */
 import { describe, expect, it } from "bun:test";
-import { menuTemplate, notesSection, trayTitle, uptimeWords } from "../menu.js";
+import { columnsSection, menuTemplate, notesSection, trayTitle, uptimeWords } from "../menu.js";
 
 const base = {
   appVersion: "0.2.0",
@@ -290,5 +290,45 @@ describe("the notes in the tray menu", () => {
 
   it("puts the section in the menu", () => {
     expect(byId({ ...base, notes: { list: [], cards, why: null } }, "note-pop")).toBeDefined();
+  });
+});
+
+describe("columnsSection", () => {
+  const listed = (cardId, extra = {}) => ({
+    cardId,
+    code: "Kururu",
+    title: "To do",
+    profileName: "Work",
+    state: "shown",
+    away: false,
+    waiting: false,
+    ...extra,
+  });
+
+  it("is nothing at all while no column is popped out", () => {
+    expect(columnsSection([])).toEqual([]);
+    expect(columnsSection(undefined)).toEqual([]);
+  });
+
+  it("ticks each column that is up, says why one is not drawn, and closes one by its id", () => {
+    const items = columnsSection([
+      listed("wkabc:todo"),
+      listed("pkdef:needs", { state: "hidden", code: "Work", title: "Needs you" }),
+      listed("wkghi:doing", { away: true, profileName: "Home", title: "In progress" }),
+    ]);
+    expect(items[0]).toEqual({ id: "columns", label: "Columns", enabled: false });
+    expect(items.find((item) => item.id === "column-toggle:wkabc:todo")).toMatchObject({ type: "checkbox", checked: true, label: "    Kururu  To do" });
+    expect(items.find((item) => item.id === "column-toggle:pkdef:needs").checked).toBe(false);
+    expect(items.find((item) => item.id === "column-toggle:wkghi:doing").label).toContain("waits for Home");
+    const close = items.find((item) => item.id === "columns-close");
+    expect(close.submenu.map((item) => item.id)).toEqual(["column-close:wkabc:todo", "column-close:pkdef:needs", "column-close:wkghi:doing"]);
+    expect(items.at(-1)).toEqual({ type: "separator" });
+  });
+
+  it("follows the notes in the tray's menu", () => {
+    const ids = menuTemplate({ ...base, notes: { list: [], cards: null, why: "needs the server up" }, columns: [listed("wkabc:todo")] })
+      .map((item) => item.id)
+      .filter(Boolean);
+    expect(ids.indexOf("columns")).toBeGreaterThan(ids.indexOf("note-pop"));
   });
 });

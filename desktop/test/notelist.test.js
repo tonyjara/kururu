@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import {
+  COLUMN_SIZE,
   NOTE_MIN,
   NOTE_SIZE,
   NOTES_MAX,
@@ -123,6 +124,19 @@ describe("cascade and boxOnScreen", () => {
     expect(second.x).toBe(first.x - 28);
     expect(second.y).toBe(first.y + 28);
     expect(cascade(anchor, 8, 64)).toEqual(first);
+  });
+
+  it("puts a first column at its own size, tall, the same way along", () => {
+    const anchor = { x: 100, y: 50, width: 1200, height: 800 };
+    const first = cascade(anchor, 0, 64, COLUMN_SIZE);
+    expect(first).toEqual({ x: 100 + 1200 - COLUMN_SIZE.width - 32, y: 50 + 64, width: COLUMN_SIZE.width, height: COLUMN_SIZE.height });
+    expect(COLUMN_SIZE.height).toBeGreaterThan(COLUMN_SIZE.width);
+    expect(cascade(anchor, 1, 64, COLUMN_SIZE).x).toBe(first.x - 28);
+  });
+
+  it("takes a column's id as a record's, board key and lane together", () => {
+    const [kept] = adoptNotes([{ cardId: "wk1a2b3c4d5e6:todo", profileKey: "pk0f0f0f0f0f0", x: 1, y: 2, width: 300, height: 560, state: "shown" }]);
+    expect(kept?.cardId).toBe("wk1a2b3c4d5e6:todo");
   });
 
   it("turns a box in the window's page into one on the screen", () => {

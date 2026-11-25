@@ -429,7 +429,10 @@ Space, loading `/?note=` — `NotePage.tsx`, which draws the same
 `desktop.json`'s, the tray lists them and pops a card out
 (`GET /api/notes/cards`), and only the main window may pop one out and
 only a note's own page may move, fold or close it. A browser and the
-phone keep the in-page note. → [layout](layout.md#notes)
+phone keep the in-page note. **A board column popped out is the same
+window as its second kind** (`kind: "column"`, `/?column=`,
+`ColumnPage.tsx`): the board itself drawn with one column, named by its
+board's key and the lane's id, never a workspace's `id`. → [layout](layout.md#notes)
 
 ## Marks
 

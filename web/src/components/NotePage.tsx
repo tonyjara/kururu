@@ -162,7 +162,7 @@ function noKeys(): void {}
  * the note's ground is a `color-mix` and its computed value is spelt in a way
  * the desktop's `setBackgroundColor` does not read.
  */
-function groundOf(element: Element): string | undefined {
+export function groundOf(element: Element): string | undefined {
   const value = getComputedStyle(element).backgroundColor;
   const canvas = document.createElement("canvas");
   canvas.width = 1;

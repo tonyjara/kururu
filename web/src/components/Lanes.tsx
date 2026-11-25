@@ -140,6 +140,68 @@ export function FoldButton({ onFold }: { onFold: () => void }) {
 }
 
 /**
+ * A column's way out of its board into a window of its own (`columns.ts`),
+ * in its head beside the add — the pin a card's editor pops a card out with.
+ */
+export function PopOutButton({ name, onPopOut }: { name: string; onPopOut: () => void }) {
+  return (
+    <button className="pane-btn" title={`Pop ${name} out as a window over everything`} aria-label="Pop out as a window" onClick={onPopOut}>
+      <Icon name="pin" />
+    </button>
+  );
+}
+
+/**
+ * What a board drawn as a popped-out column's window (`ColumnPage.tsx`) is
+ * told: which column, whether the window is folded to its head, and the
+ * window's own verbs, which go to the desktop rather than to the board — a
+ * fold is the window getting shorter, not the column folding on the board.
+ */
+export interface PoppedColumn {
+  lane: string;
+  collapsed: boolean;
+  fold: () => void;
+  close: () => void;
+  /** Something a card did happens in the main window — an agent revealed — so that is brought up. */
+  leave: () => void;
+  /**
+   * A card pointed at in Kuru's box, which is the main window's: the window
+   * has none, so the card's id goes across and the main window writes the
+   * reference, as a note's does. Absent, the card's menu has no row for it.
+   */
+  refer?: (cardId: string) => void;
+}
+
+/** A card's "Reference in Kuru" in a popped-out column's window — `referItem`'s row, sent across by id. */
+export function poppedReferItem(refer: (cardId: string) => void, cardId: string): MenuItem {
+  return { label: "Reference in Kuru", sep: true, run: () => refer(cardId) };
+}
+
+/**
+ * The window's two buttons, where the board's fold is in a column's head:
+ * fold it to the head and back, and close it — the note window's pair, and
+ * with the same words.
+ */
+export function PoppedButtons({ popped }: { popped: PoppedColumn }) {
+  return (
+    <span className="column-window-actions">
+      <button
+        className="board-icon-btn"
+        title={popped.collapsed ? "Unfold" : "Fold to the title bar"}
+        aria-label={popped.collapsed ? "Unfold" : "Fold"}
+        aria-expanded={!popped.collapsed}
+        onClick={popped.fold}
+      >
+        <Icon name={popped.collapsed ? "unfold" : "fold"} />
+      </button>
+      <button className="board-icon-btn" title="Close the window — the column stays on its board" aria-label="Close" onClick={popped.close}>
+        <Icon name="close" />
+      </button>
+    </span>
+  );
+}
+
+/**
  * The tile after the last column: a button that turns into a column whose
  * name is being typed, and is sent once it has one. `naming` is the board's,
  * since a rename uses the same field and only one is open at a time.
@@ -182,7 +244,8 @@ export function laneMenuItems(args: {
   fixed: boolean;
   extra?: MenuItem[];
   rename: () => void;
-  collapse: () => void;
+  /** Absent in a popped-out column's window, where the board's fold is not the window's. */
+  collapse?: () => void;
   move: (index: number) => void;
   remove: () => void;
 }): MenuItem[] {
@@ -191,7 +254,7 @@ export function laneMenuItems(args: {
   return [
     ...(fixed ? [] : [{ label: "Rename", run: args.rename }]),
     ...(args.extra ?? []),
-    { label: "Collapse", run: args.collapse },
+    ...(args.collapse ? [{ label: "Collapse", run: args.collapse }] : []),
     ...(index > 0 ? [{ label: "Move left", run: () => args.move(index - 1) }] : []),
     ...(index < lanes.length - 1 ? [{ label: "Move right", run: () => args.move(index + 1) }] : []),
     ...(into

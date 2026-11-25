@@ -58,7 +58,7 @@ function undelivered(count) {
  *   `appVersion`, `packaged`, `windowOpen`, `talk` ({ on, status, altSpace }),
  *   `float` ({ on }),
  *   `nodes` ([{ id, name, why }], `why` null when it can be opened),
- *   `notes` — see `notesSection`,
+ *   `notes` — see `notesSection`, `columns` — see `columnsSection`,
  *   `openAtLogin` ({ on, available, status })
  */
 function menuTemplate(view) {
@@ -154,6 +154,7 @@ function menuTemplate(view) {
 
   // --- the notes ------------------------------------------------------------------
   items.push(...notesSection(view.notes));
+  items.push(...columnsSection(view.columns));
 
   // --- actions ------------------------------------------------------------------
   items.push(view.windowOpen ? { id: "close-window", label: "Close Window" } : { id: "open-window", label: "Open Window" });
@@ -298,6 +299,39 @@ function notesSection(notes) {
 }
 
 /**
+ * The board columns popped out as windows, as the notes are listed: each
+ * ticked while it is up, a click to put it away or bring it back, and
+ * closing one. Nothing at all while there are none — a column is popped out
+ * from its board, where its button is, so there is no "Pop Out a Column"
+ * here to stand in for an empty list.
+ *
+ * @param columns  [{ cardId, code, title, state, away, waiting, profileName }] as `notes.js` lists them —
+ *   `cardId` the column's id, `code` its board's name and `title` its own
+ */
+function columnsSection(columns) {
+  const list = Array.isArray(columns) ? columns : [];
+  if (!list.length) return [];
+  const items = [];
+  items.push({ id: "columns", label: "Columns", enabled: false });
+  for (const column of list) {
+    const waits = column.away ? ` — waits for ${column.profileName || "its profile"}` : column.waiting ? " — opening…" : "";
+    items.push({
+      id: `column-toggle:${column.cardId}`,
+      label: `    ${cardLabel(column)}${waits}`,
+      type: "checkbox",
+      checked: column.state === "shown",
+    });
+  }
+  items.push({
+    id: "columns-close",
+    label: "    Close a Column",
+    submenu: list.map((column) => ({ id: `column-close:${column.cardId}`, label: cardLabel(column) })),
+  });
+  items.push({ type: "separator" });
+  return items;
+}
+
+/**
  * "Pop Out a Card": what needs you first — the Needs drawer's cards, a click
  * from a note — and then the profile's board a column at a time. A card that
  * is a note already is ticked, and a click brings it forward.
@@ -369,4 +403,4 @@ function trayTitle(view) {
   return "";
 }
 
-module.exports = { menuTemplate, notesSection, trayTitle, unheard, undelivered, uptimeWords, when };
+module.exports = { menuTemplate, notesSection, columnsSection, trayTitle, unheard, undelivered, uptimeWords, when };

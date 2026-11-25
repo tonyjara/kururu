@@ -57,12 +57,13 @@ const CARDS_WAIT_MS = 350;
  * @param {InstanceType<typeof import("./runner").Runner>} options.runner
  * @param {InstanceType<typeof import("./talkkey").TalkKey>} options.talk
  * @param {InstanceType<typeof import("./notes").NoteWindows>} options.notes
+ * @param {InstanceType<typeof import("./notes").NoteWindows>} options.columns  the board columns popped out, the same windows
  * @param {InstanceType<typeof import("./float").FloatKuru>} options.float
  * @param {string} options.version
  * @param {boolean} options.packaged
  * @param {TrayActions} options.actions
  */
-function createTray({ runner, talk, notes, float, version, packaged, actions }) {
+function createTray({ runner, talk, notes, columns, float, version, packaged, actions }) {
   const image = nativeImage.createFromPath(path.join(__dirname, "icon", "trayTemplate.png"));
   image.setTemplateImage(true);
   const tray = new Tray(image);
@@ -109,6 +110,7 @@ function createTray({ runner, talk, notes, float, version, packaged, actions }) 
         cards: runner.health ? cards : null,
         why: runner.health ? "the server did not answer" : "needs the server up",
       },
+      columns: columns.list(),
       openAtLogin: { on: login.openAtLogin, available: packaged, status: login.status },
     };
   };
@@ -136,6 +138,8 @@ function createTray({ runner, talk, notes, float, version, packaged, actions }) 
     if (!cardId) return null;
     if (verb === "note-toggle") return () => notes.setShown(cardId, !item.checked);
     if (verb === "note-close") return () => notes.close(cardId);
+    if (verb === "column-toggle") return () => columns.setShown(cardId, !item.checked);
+    if (verb === "column-close") return () => columns.close(cardId);
     if (verb === "note-pop") {
       const card = cardsById().get(cardId);
       if (!card || !cards) return null;

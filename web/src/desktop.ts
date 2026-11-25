@@ -309,6 +309,19 @@ export interface NotePopOut {
   box?: { x: number; y: number; w: number; h: number };
 }
 
+/**
+ * What the window asks for when it pops a board column out as a window of
+ * its own (`columns.ts`): the column's id, whose profile it is, and its own
+ * and its board's names for the menu bar's list until the page says them.
+ */
+export interface ColumnPopOut {
+  columnId: string;
+  profileKey: string;
+  profileName: string;
+  title: string;
+  board: string;
+}
+
 /** A note window as the main process lists it. `away` is a note of a profile that is not the active one. */
 export interface NoteWindowView {
   cardId: string;
@@ -350,6 +363,13 @@ export interface DesktopNotes {
    * come from — and the page keeps the card as a note of its own instead.
    */
   popOut(ask: NotePopOut): Promise<boolean>;
+  /**
+   * The window: pop a board column out as a window of its own — the note
+   * windows again, loading `?column=`, whose page says what it is down the
+   * verbs below. Optional: an app from before it has no column windows, and
+   * the board draws no button for one.
+   */
+  popColumn?(ask: ColumnPopOut): Promise<boolean>;
   /** The notes there are, for the menus' "bring it forward". */
   list(): Promise<NoteWindowView[]>;
   /** Told on every change. Returns the unsubscribe. */
@@ -364,7 +384,11 @@ export interface DesktopNotes {
    * it — the note quoted part of its card (`quote`).
    */
   onReferCard?(listener: (cardId: string, quote?: unknown) => void): () => void;
-  /** A note window's page only, here and below: which card it is, or null for any other page. */
+  /**
+   * A note window's page only, here and below: which card it is, or null for
+   * any other page. A column window's page asks the same and is answered
+   * with its column's id in `cardId`.
+   */
   self(): Promise<NoteSelf | null>;
   onSelf(listener: (self: NoteSelf) => void): () => void;
   /** Whether the note's window has the keys — it draws less while it does not. */
@@ -391,6 +415,12 @@ export interface DesktopNotes {
   quote?(quote: CardQuote): void;
   /** The window brought up, for something the note did there — an agent revealed, a file opened. */
   raiseMain(): void;
+  /**
+   * A column window's page only: one of its cards pointed at in Kuru's box,
+   * in the window, by the card's id — `refer`'s road for a window that holds
+   * many cards rather than one.
+   */
+  referCard?(cardId: string): void;
 }
 
 /**

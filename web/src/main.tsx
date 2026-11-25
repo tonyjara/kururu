@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { Crash } from "./components/Crash";
 import { FloatLogo, FloatPanel } from "./components/Float";
+import { ColumnPage } from "./components/ColumnPage";
 import { NotePage } from "./components/NotePage";
 import { Pill } from "./components/Pill";
 import { isLoopback } from "./preview";
@@ -27,12 +28,17 @@ const pill = query.has("pill");
  */
 const note = !pill && query.has("note");
 /**
+ * A board column popped out the same way is `/?column=<id>` — the board
+ * drawn with that column alone, see `components/ColumnPage.tsx`.
+ */
+const column = !pill && !note && query.has("column");
+/**
  * And the floating Kuru's two windows, the same way: `/?float=logo` is the
  * logo over every application and `/?float=panel` the chat behind it — see
  * `components/Float.tsx`. Anything else after the `=` is the app, as no
  * query is.
  */
-const float = !pill && !note ? query.get("float") : null;
+const float = !pill && !note && !column ? query.get("float") : null;
 
 /**
  * Vite's dev client reads a dropped socket as vite restarting: it polls until
@@ -60,6 +66,6 @@ if (import.meta.hot && !isLoopback(location.hostname)) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Crash>{pill ? <Pill /> : note ? <NotePage /> : float === "logo" ? <FloatLogo /> : float === "panel" ? <FloatPanel /> : <App />}</Crash>
+    <Crash>{pill ? <Pill /> : note ? <NotePage /> : column ? <ColumnPage /> : float === "logo" ? <FloatLogo /> : float === "panel" ? <FloatPanel /> : <App />}</Crash>
   </StrictMode>,
 );

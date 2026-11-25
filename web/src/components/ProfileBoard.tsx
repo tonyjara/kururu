@@ -65,6 +65,7 @@ import { cardPlace, cardReference } from "../../../shared/kuru";
 import { useCardClick } from "../cardclick";
 import { cardTimes } from "../cardtimes";
 import { colorValue } from "../colors";
+import { canPopColumn, popColumnItem, popOutColumn } from "../columns";
 import { referItem } from "../kuru";
 import { noteItem, popOutNote } from "../notes";
 import { revealCard } from "../reveal";
@@ -73,7 +74,20 @@ import { ago, CARD_KEEP, CardBody, CardFoot, CardWhen, Composer, dropDraft, show
 import { ColorPicker } from "./ColorPicker";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Icon } from "./Icon";
-import { AddLane, FoldButton, FoldedLane, isLaneDrag, laneMenuItems, LaneName, NEW_LANE, useLaneDrag } from "./Lanes";
+import {
+  AddLane,
+  FoldButton,
+  FoldedLane,
+  isLaneDrag,
+  laneMenuItems,
+  LaneName,
+  NEW_LANE,
+  PopOutButton,
+  PoppedButtons,
+  poppedReferItem,
+  useLaneDrag,
+  type PoppedColumn,
+} from "./Lanes";
 import { Menu, type MenuAt, type MenuItem } from "./Menu";
 import { quotable, selectNotDrag } from "./Quote";
 import { PROFILE_CARD_MIME as CARD_MIME, Timeline } from "./Timeline";
@@ -111,7 +125,12 @@ function useWantedCard(): typeof wanted {
   );
 }
 
-export function ProfileBoard({ profile }: { profile: Profile }) {
+/**
+ * `popped` is the board drawn as a popped-out column's window
+ * (`ColumnPage.tsx`), as `BoardView`'s is: that column alone, with no header,
+ * search or timeline, and the window's fold and close in its head.
+ */
+export function ProfileBoard({ profile, popped }: { profile: Profile; popped?: PoppedColumn }) {
   const board = profile.board;
   const lanes = boardLanes(board);
   /**
@@ -187,7 +206,11 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
       at,
       items: [
         ...profileCardMoves(profile, card, setSent),
-        referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id }),
+        ...(popped
+          ? popped.refer
+            ? [poppedReferItem(popped.refer, card.id)]
+            : []
+          : [referItem({ code: cardCode(profile.name, card.number), title: card.title, place: cardPlace(null, api.nodeNameOf), cardId: card.id })]),
         // A note floats over the board as over everything, and cards are
         // often popped out several at a time.
         noteItem(card.id),
@@ -207,14 +230,18 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
     setMenu({
       at,
       items: laneMenuItems({
-        lanes,
+        // In its window a column is the only one: no moves along the board.
+        lanes: popped ? [lane] : lanes,
         lane,
         count: columnCards(board, lane.id).length,
         into: laneInto(board, lane.id, "profile"),
         fixed: laneFixed(lane.id, "profile"),
-        extra: [{ label: "Colour", hint: lane.color ?? "none", run: () => setPicking({ column: lane.id, at }) }],
+        extra: [
+          ...(popOut ? [popColumnItem(() => popOut(lane))] : []),
+          { label: "Colour", hint: lane.color ?? "none", run: () => setPicking({ column: lane.id, at }) },
+        ],
         rename: () => setNaming(lane.id),
-        collapse: () => api.collapseProfileColumn(profile.id, lane.id, true),
+        collapse: popped ? undefined : () => api.collapseProfileColumn(profile.id, lane.id, true),
         move: (index) => api.moveProfileColumn(profile.id, lane.id, index),
         remove: () => api.deleteProfileColumn(profile.id, lane.id),
       }),
@@ -231,39 +258,44 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
     if (anywhere || event.target === event.currentTarget) setDropAt({ column, index: foot });
   };
 
+  /** A column popped out into a window of its own — `BoardView`'s, for this board. */
+  const popOut = !popped && canPopColumn() ? (lane: BoardLane) => popOutColumn(profile, { key: profile.key, name: profile.name }, lane) : null;
+
   const addingList = useComposerInView(adding, adding ? columnCards(board, adding).length : 0);
 
   return (
     <div className="profile-board" aria-label={`${profile.name}'s board`} ref={sheet}>
-      <header className="profile-board-head">
-        <Icon name="board" />
-        <h2 className="dialog-title">{profile.name}</h2>
-        <span className="board-seg" role="tablist" aria-label="View">
-          {(["board", "timeline"] as const).map((name) => (
-            <button
-              key={name}
-              role="tab"
-              aria-selected={view === name}
-              className={`board-seg-btn ${view === name ? "board-seg-btn-on" : ""}`}
-              onClick={() => setView(name)}
-            >
-              {name === "board" ? "Board" : "Timeline"}
-            </button>
-          ))}
-        </span>
-        <span className="profile-board-note" role="status">
-          {sent ? `Sent: ${sent}` : "Cards for any workspace — send one to its board from the card's menu"}
-        </span>
-        <button
-          className={`board-seg-btn board-search-toggle ${searching ? "board-seg-btn-on" : ""}`}
-          onClick={() => setSearching((on) => !on)}
-          aria-pressed={searching}
-          title="Search every board and the conversations"
-        >
-          Search
-        </button>
-      </header>
-      {searching && (
+      {!popped && (
+        <header className="profile-board-head">
+          <Icon name="board" />
+          <h2 className="dialog-title">{profile.name}</h2>
+          <span className="board-seg" role="tablist" aria-label="View">
+            {(["board", "timeline"] as const).map((name) => (
+              <button
+                key={name}
+                role="tab"
+                aria-selected={view === name}
+                className={`board-seg-btn ${view === name ? "board-seg-btn-on" : ""}`}
+                onClick={() => setView(name)}
+              >
+                {name === "board" ? "Board" : "Timeline"}
+              </button>
+            ))}
+          </span>
+          <span className="profile-board-note" role="status">
+            {sent ? `Sent: ${sent}` : "Cards for any workspace — send one to its board from the card's menu"}
+          </span>
+          <button
+            className={`board-seg-btn board-search-toggle ${searching ? "board-seg-btn-on" : ""}`}
+            onClick={() => setSearching((on) => !on)}
+            aria-pressed={searching}
+            title="Search every board and the conversations"
+          >
+            Search
+          </button>
+        </header>
+      )}
+      {!popped && searching && (
         <BoardSearch
           profileId={profile.id}
           onPickCard={(workspaceId, cardId) => {
@@ -281,16 +313,17 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
         />
       )}
 
-      {view === "timeline" && (
+      {!popped && view === "timeline" && (
         <Timeline profile={profile} editing={editing} onEdit={setEditing} onMenu={cardMenu} draft={draft} />
       )}
 
-      {view === "board" && (
+      {(popped || view === "board") && (
         <div className="board profile-board-cols">
-          {lanes.map((lane, laneIndex) => {
+          {(popped ? lanes.filter((lane) => lane.id === popped.lane) : lanes).map((lane) => {
+            const laneIndex = lanes.indexOf(lane);
             const column = lane.id;
             const cards = columnCards(board, column);
-            const shut = lane.collapsed === true;
+            const shut = !popped && lane.collapsed === true;
             const laneClass = [
               "board-col",
               shut ? "board-col-shut" : "",
@@ -346,7 +379,7 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                     laneMenu(lane, { x: event.clientX, y: event.clientY });
                   }}
                 >
-                  {grip(column)}
+                  {!popped && grip(column)}
                   {naming === column ? (
                     <LaneName
                       name={lane.name}
@@ -380,10 +413,12 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                       >
                         {lane.name}
                       </span>
+                      {popped && <span className="board-col-where">{profile.name}</span>}
                       <span className="board-col-count">{cards.length}</span>
                     </>
                   )}
-                  <FoldButton onFold={() => api.collapseProfileColumn(profile.id, column, true)} />
+                  {!popped && <FoldButton onFold={() => api.collapseProfileColumn(profile.id, column, true)} />}
+                  {popOut && <PopOutButton name={lane.name} onPopOut={() => popOut(lane)} />}
                   <button
                     className="pane-btn"
                     title={`Add a card to ${lane.name}`}
@@ -394,7 +429,15 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                   </button>
                   <button
                     className="pane-btn"
-                    title={laneFixed(column, "profile") ? "Colour, collapse or move this column" : "Rename, move or delete this column"}
+                    title={
+                      popped
+                        ? laneFixed(column, "profile")
+                          ? "Colour this column"
+                          : "Rename, colour or delete this column"
+                        : laneFixed(column, "profile")
+                          ? "Colour, collapse or move this column"
+                          : "Rename, move or delete this column"
+                    }
                     aria-label="Column menu"
                     aria-haspopup="menu"
                     onClick={(event) => {
@@ -404,6 +447,7 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                   >
                     <Icon name="caret" />
                   </button>
+                  {popped && <PoppedButtons popped={popped} />}
                 </header>
 
                 <div
@@ -473,14 +517,16 @@ export function ProfileBoard({ profile }: { profile: Profile }) {
                     </button>
                   )}
                 </div>
-                <ColumnResizeHandle
-                  onResize={(w) => api.resizeProfileColumn(profile.id, column, w)}
-                  onReset={() => api.resizeProfileColumn(profile.id, column, null)}
-                />
+                {!popped && (
+                  <ColumnResizeHandle
+                    onResize={(w) => api.resizeProfileColumn(profile.id, column, w)}
+                    onReset={() => api.resizeProfileColumn(profile.id, column, null)}
+                  />
+                )}
               </section>
             );
           })}
-          {lanes.length < LANES_MAX && (
+          {!popped && lanes.length < LANES_MAX && (
             <AddLane
               naming={naming === NEW_LANE}
               onNaming={(on) => setNaming(on ? NEW_LANE : null)}

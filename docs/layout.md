@@ -910,10 +910,33 @@ a Note, and **Pop Out a Card** from `GET /api/notes/cards`
 (`shared/notecards.ts`): the Needs drawer's cards by its own rule, then the
 profile's board a column at a time.
 
-Not done: a note in a window of its own, always on top of other
-applications. It would be a second page mode (as `?pill` is), a window type
-in `desktop/main.js` with its own saved bounds, and a bridge in the preload,
-and it reaches nobody until the app is rebuilt.
+**A board column pops out the same way** (the owner, 2026-11-25: "pop out
+a column of a board, same way we do with a card, so I can see it all the
+time on top of stuff and resize it"). In the desktop app every column of a
+workspace's board and of the profile's, Needs you among them, has a pin in
+its head beside the add, and **Pop out as a window** on its menu. It is the
+same windows as a second kind — `desktop/notes.js` with `kind: "column"`,
+kept in `desktop.json` as `columns` beside `notes`, so on top of every
+application, on every Space, moved by its head, resized from its edges
+(starting 300×560), folded to its head, closed by its ✕, put back after a
+relaunch and listed in the tray under **Columns**. Its id is its board's
+key and the lane's (`<wk…|pk…>:<lane>`, `web/src/columns.ts`), never a
+workspace's `id`, which is minted afresh at each cold start. The page is
+`/?column=<id>`, `ColumnPage.tsx`, which draws the board itself —
+`BoardView` or `ProfileBoard` — told to draw that one column (`popped`):
+cards open, edit, run, move and are dragged within it as on the board, the
+add at its foot is the board's composer, and the cards' menus still list
+every column. What gives way to the window in its head is the board's
+grip, fold and width handle, and the column menu's moves and fold; one of
+the four fixed columns, which has nothing else on its menu, has no menu
+there. It says what it shows down the note's verbs (`windowOf` in
+`main.js` asks both sets which window a page is): `here`, `away` for a
+profile that is not the active one, or gone for a column deleted or a
+workspace gone, which it draws so it can be closed. A card's "Pop out as a
+note" from a column window goes up beside it — the one other page that may
+pop a card out — and its "Reference in Kuru" names the card to the main
+window by id (`kururu:column-refer`), which writes the words from its own
+snapshot. A browser, the phone and another node's board draw no pin.
 
 ## The two halves
 

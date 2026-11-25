@@ -40,7 +40,7 @@ const path = require("node:path");
 const { readDesktop, writeDesktop } = require("./desktop");
 const { Runner, hostSocket } = require("./runner");
 const { candidates, forget, normalize, remember } = require("./servers");
-const { boxOnScreen } = require("./notelist");
+const { boxOnScreen, isCardId } = require("./notelist");
 const { NoteWindows } = require("./notes");
 const { fetchNodes, nodeChoices, whyNot } = require("./nodes");
 const { TalkKey } = require("./talkkey");
@@ -300,6 +300,18 @@ const notes = new NoteWindows({
 });
 
 /**
+ * The board columns popped out the same way: the same windows, kept beside
+ * the notes in `desktop.json` and loading `/?column=` — see `notes.js`.
+ */
+const columns = new NoteWindows({
+  kind: "column",
+  preloadPath: PRELOAD,
+  debug: !PACKAGED,
+  saved: readDesktop().columns,
+  save: (list) => writeDesktop({ columns: list }),
+});
+
+/**
  * The floating Kuru: Kuru's logo over every application, the conversation
  * behind a click on it, and — while it is on — the pill's window docked to
  * its row, where the pill's page draws the voice as a waveform. Its pages
@@ -368,6 +380,7 @@ function pointPill() {
   if (!base) {
     talk.setPage(null);
     notes.setPage(null);
+    columns.setPage(null);
     float.setPage(null);
     return;
   }
@@ -377,6 +390,7 @@ function pointPill() {
   if (page) {
     talk.setPage(page);
     notes.setPage(page);
+    columns.setPage(page);
     float.setPage(page);
   }
 }
@@ -1345,44 +1359,78 @@ ipcMain.on("ink:points", (event, raw) => ink.points(event.sender, raw));
 ipcMain.on("ink:end", (event, raw) => ink.lift(event.sender, raw));
 
 /**
- * The notes, across the bridge. Only the main window pops a card out, and
- * only a card of the server the notes come from, since that is the page a
- * note loads — the window on another server keeps its notes in the page,
- * which is what `false` tells it. Every other verb is a note's own, about
- * the note whose page sent it: `cardOf` is the check.
+ * The notes, across the bridge. Only the main window pops a card out — or a
+ * popped-out column's page, whose cards are the board's — and only a card of
+ * the server the notes come from, since that is the page a note loads: the
+ * window on another server keeps its notes in the page, which is what
+ * `false` tells it. Every other verb is a note's own, about the note whose
+ * page sent it: `cardOf` is the check. A column window's page says the same
+ * things down the same channels (`ColumnPage.tsx`), and `windowOf` asks both
+ * sets which window it is.
  */
+function windowOf(sender) {
+  const cardId = notes.cardOf(sender);
+  if (cardId) return { set: notes, id: cardId };
+  const columnId = columns.cardOf(sender);
+  return columnId ? { set: columns, id: columnId } : null;
+}
+
 ipcMain.handle("kururu:note-pop", (event, ask) => {
-  if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id) return false;
-  if (!notes.page || originOf(event.sender.getURL()) !== originOf(notes.page)) return false;
+  const main = win && !win.isDestroyed() && event.sender.id === win.webContents.id ? win : null;
+  const from = main ?? (columns.cardOf(event.sender) ? BrowserWindow.fromWebContents(event.sender) : null);
+  if (!from || !notes.page || originOf(event.sender.getURL()) !== originOf(notes.page)) return false;
   if (!ask || typeof ask !== "object") return false;
-  const content = win.getContentBounds();
+  const content = from.getContentBounds();
   return notes.popOut({
     cardId: ask.cardId,
     profileKey: ask.profileKey,
     profileName: ask.profileName,
     title: ask.title,
     code: ask.code,
-    bounds: boxOnScreen(ask.box, content) ?? undefined,
+    // A box handed over is a place in the main window's page; a column's
+    // card goes up beside the column instead.
+    bounds: main ? (boxOnScreen(ask.box, content) ?? undefined) : undefined,
     anchor: content,
+    fromWindow: Boolean(main),
+  });
+});
+/**
+ * A board column popped out: from the main window's board, never from a
+ * column's own page, which is that column already. Its id is the page's
+ * word, held to what a card's id may be (`isCardId`), and names nothing the
+ * page could not already draw: the window it opens shows the column only
+ * while the snapshot has it.
+ */
+ipcMain.handle("kururu:column-pop", (event, ask) => {
+  if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id) return false;
+  if (!columns.page || originOf(event.sender.getURL()) !== originOf(columns.page)) return false;
+  if (!ask || typeof ask !== "object") return false;
+  return columns.popOut({
+    cardId: ask.columnId,
+    profileKey: ask.profileKey,
+    profileName: ask.profileName,
+    title: ask.title,
+    code: ask.board,
+    anchor: win.getContentBounds(),
     fromWindow: true,
   });
 });
 ipcMain.handle("kururu:note-list", () => notes.list());
 ipcMain.handle("kururu:note-self", (event) => {
-  const cardId = notes.cardOf(event.sender);
-  return cardId ? notes.self(cardId) : null;
+  const found = windowOf(event.sender);
+  return found ? found.set.self(found.id) : null;
 });
 ipcMain.on("kururu:note-report", (event, state) => {
-  const cardId = notes.cardOf(event.sender);
-  if (cardId) notes.report(cardId, state);
+  const found = windowOf(event.sender);
+  if (found) found.set.report(found.id, state);
 });
 ipcMain.on("kururu:note-fold", (event, collapsed) => {
-  const cardId = notes.cardOf(event.sender);
-  if (cardId) notes.fold(cardId, collapsed === true);
+  const found = windowOf(event.sender);
+  if (found) found.set.fold(found.id, collapsed === true);
 });
 ipcMain.on("kururu:note-close", (event) => {
-  const cardId = notes.cardOf(event.sender);
-  if (cardId) notes.close(cardId);
+  const found = windowOf(event.sender);
+  if (found) found.set.close(found.id);
 });
 ipcMain.on("kururu:note-board", (event) => {
   const cardId = notes.cardOf(event.sender);
@@ -1394,10 +1442,16 @@ ipcMain.on("kururu:note-refer", (event, quote) => {
 });
 // The same, from a note's right-click, which `notes.js` builds for the note it is on.
 notes.on("refer", (cardId) => referCard(cardId));
+// A column window holds many cards, so its page names the one — and the
+// window writes the reference from its own snapshot, so an id that is no
+// card of the profile on screen puts nothing in the box.
+ipcMain.on("kururu:column-refer", (event, cardId) => {
+  if (columns.cardOf(event.sender) && isCardId(cardId)) referCard(cardId);
+});
 // A note's run line or made link acted in the window — an agent revealed, a
-// file opened — so the window is what comes up.
+// file opened — so the window is what comes up. A column's card, likewise.
 ipcMain.on("kururu:note-raise", (event) => {
-  if (notes.cardOf(event.sender)) openWindow();
+  if (windowOf(event.sender)) openWindow();
 });
 notes.on("change", (list) => {
   if (win && !win.isDestroyed()) win.webContents.send("kururu:note-list", list);
@@ -1533,6 +1587,7 @@ app.whenReady().then(async () => {
     version: app.getVersion(),
     packaged: PACKAGED,
     notes,
+    columns,
     float,
     actions: {
       openWindow,
@@ -1558,6 +1613,7 @@ app.whenReady().then(async () => {
       webRebuilt: () => {
         if (talk.page === LOCAL) talk.reloadPanel();
         if (notes.page === LOCAL) notes.reloadAll();
+        if (columns.page === LOCAL) columns.reloadAll();
         if (float.page === LOCAL) float.reloadAll();
       },
     },
@@ -1680,6 +1736,7 @@ function finishQuit(alsoAgents) {
   ink.dispose();
   talk.dispose();
   notes.dispose();
+  columns.dispose();
   float.dispose();
   tray?.destroy();
   tray = null;
@@ -1691,6 +1748,7 @@ app.on("will-quit", () => {
   ink.dispose();
   talk.dispose();
   notes.dispose();
+  columns.dispose();
   float.dispose();
 });
 
@@ -1828,6 +1886,7 @@ function installUpdate() {
   ink.dispose();
   talk.dispose();
   notes.dispose();
+  columns.dispose();
   float.dispose();
   tray?.destroy();
   tray = null;
@@ -1850,6 +1909,7 @@ function stopOnSignals() {
     ink.dispose();
     talk.dispose();
     notes.dispose();
+    columns.dispose();
     float.dispose();
     void runner.stop(`the app was stopped by ${signal}`).finally(() => app.quit());
   });

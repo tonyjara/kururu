@@ -342,6 +342,8 @@ if (isPicker) {
     },
     notes: {
       popOut: (ask) => ipcRenderer.invoke("kururu:note-pop", ask && typeof ask === "object" ? ask : {}),
+      /** The window only: a board column popped out as a window of its own — the same windows (`notes.js`, `kind: "column"`). */
+      popColumn: (ask) => ipcRenderer.invoke("kururu:column-pop", ask && typeof ask === "object" ? ask : {}),
       list: () => ipcRenderer.invoke("kururu:note-list"),
       onList: (listener) => {
         const relay = (_event, list) => listener(Array.isArray(list) ? list : []);
@@ -391,6 +393,8 @@ if (isPicker) {
       /** Part of the card quoted with a comment: "Reference in Kuru"'s road, with the words beside the id. */
       quote: (quote) => ipcRenderer.send("kururu:note-refer", quote),
       raiseMain: () => ipcRenderer.send("kururu:note-raise"),
+      /** A column window's page only: one of its cards in Kuru's box, in the window, by id. */
+      referCard: (cardId) => ipcRenderer.send("kururu:column-refer", typeof cardId === "string" ? cardId : ""),
     },
   });
 }

@@ -15,6 +15,18 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **A board column can float over everything, like a popped-out card.**
+  Every column of a workspace's board and of your own board, Needs you
+  included, has a pin in its head and **Pop out as a window** on its menu.
+  The column opens in a window of its own that stays on top of other apps
+  and on every Space. Drag it by its head and resize it from its edges; it
+  remembers its size and place, column by column, and comes back after
+  Kururu is relaunched. It is the column itself, live: cards arrive, move
+  and change in it at once, and you can open a card, drag cards into a new
+  order, add a card at its foot, run one, or pop one out as a note. Fold it
+  to its head or close it from the head's buttons; the menu bar lists the
+  open ones under **Columns**. Desktop app only, so it needs the new app.
+
 - **Agents can keep a key a command makes without seeing it.** `vault
   capture` runs a command such as `aws iam create-access-key` itself and
   keeps what it prints in the vault — the fields you name, read as JSON —

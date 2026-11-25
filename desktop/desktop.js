@@ -54,6 +54,12 @@ const DEFAULTS = {
    */
   notes: [],
   /**
+   * The board columns popped out the same way (`notes.js` again, as
+   * `kind: "column"`), each by its board's key and the column's id — the
+   * same records, for the same reason.
+   */
+  columns: [],
+  /**
    * The floating Kuru (`float.js`): whether its logo is over the desktop,
    * where it was left as a share of a display, and how tall its chat was
    * dragged. Off until switched on, from the menu bar or Settings → Voice:
@@ -98,6 +104,7 @@ function adopt(raw) {
     pill,
     talkKey: typeof r.talkKey === "string" && /^[A-Za-z0-9]{1,32}$/.test(r.talkKey) ? r.talkKey : DEFAULTS.talkKey,
     notes: adoptNotes(r.notes),
+    columns: adoptNotes(r.columns),
     float: adoptFloat(r.float),
     inkWithVoice: r.inkWithVoice !== false,
     inkDeny: Array.isArray(r.inkDeny) ? [...new Set(r.inkDeny.filter((b) => typeof b === "string" && /^[A-Za-z0-9.-]{1,200}$/.test(b)))].slice(0, 200) : null,
