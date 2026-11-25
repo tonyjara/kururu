@@ -113,7 +113,7 @@ export function MachinesChip({ onSettings }: { onSettings: (page: "machines" | "
  */
 function MachineRow({ machine, onShell, onSpecs }: { machine: MachineStatus; onShell: () => void; onSpecs: () => void }) {
   const reading = machine.reading;
-  const title = [machine.host, machine.error && `Last attempt: ${machine.error}`].filter(Boolean).join("\n");
+  const title = [machine.name, machine.host !== machine.name && machine.host, machine.error && `Last attempt: ${machine.error}`].filter(Boolean).join("\n");
   const name = machine.panel ? (
     <a className="machine-name" href={machine.panel} target="_blank" rel="noreferrer noopener" title={`${title}\n→ ${machine.panel}`}>
       {machine.name}

@@ -4531,10 +4531,12 @@ a.button {
 .sb-machines .sb-usage-chip {
   gap: 5px;
 }
-/* Wider than the allowances' popover: a row is a name, three rings and a
-   Shell. */
+/* Wider than the allowances' popover: a row is a name, three rings, a Shell
+   and a Specs, and at 320px those left the name a dozen pixels — "MV" and
+   "omarchy1" came out as one letter and an ellipsis (the owner, 2026-11-25).
+   420px leaves "Steam Deck" whole beside the rings and both buttons. */
 .sb-machines .usage-pop {
-  width: 320px;
+  width: 420px;
 }
 .machines-head-words {
   margin-left: auto;
@@ -4552,11 +4554,17 @@ a.button {
   flex-direction: column;
   gap: 4px;
 }
+/* The name takes whatever room the rings and buttons leave, and is held to
+   eight characters at the least: a long one is cut with an ellipsis and said
+   in full by its title, but a name is never squeezed down to a letter — a
+   phone's narrower sheet wraps the rings and buttons under it instead. */
 .machines-row .gauge-item {
   justify-content: flex-start;
+  flex-wrap: wrap;
 }
 .machines-row .machine-name {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 8ch;
 }
 .machines-shell {
   flex: none;
