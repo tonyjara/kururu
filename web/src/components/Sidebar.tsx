@@ -794,6 +794,7 @@ export function Sidebar({
           "agent-item",
           focused ? "agent-item-on" : "",
           agent.made?.length ? "agent-item-made" : "",
+          agent.testing && !agent.exited ? "agent-item-testing" : "",
           insert ? (insert.after ? "agent-under" : "agent-over") : "",
         ]
           .filter(Boolean)
@@ -942,8 +943,17 @@ export function Sidebar({
           <MadeLinks className="agent-made" files={agent.made} workspaceId={at?.workspaceId ?? null} onOpened={navigated} />
         ) : null}
         {/* A test run it has going, from its hooks, counting up. A line of its own
-            for the links' reason: a row with nothing running keeps its height. */}
-        {agent.testing && !agent.exited ? <TestChip className="agent-testing" testing={agent.testing} /> : null}
+            for the links' reason: a row with nothing running keeps its height. The
+            wrapper is the line and the chip keeps its own width inside it: a chip
+            sized to its words could fit beside the row's button, whose basis is
+            nothing, and did, squeezing the agent's title down to its mascot (the
+            owner, 2026-11-25: "it's covering the name of whatever the agent is
+            doing"). */}
+        {agent.testing && !agent.exited ? (
+          <span className="agent-testing-line">
+            <TestChip testing={agent.testing} />
+          </span>
+        ) : null}
         {/* A tunnel typed into this terminal, with whether its address answers. */}
         {!agent.exited && <TerminalTunnels agentId={agent.id} />}
       </li>

@@ -1196,9 +1196,12 @@ kbd {
   font-size: var(--fs-md);
 }
 
-/* The positioned ancestor the drop line below is drawn against. */
+/* The positioned ancestor the drop line below is drawn against. It wraps so
+   that whatever hangs under the row — what it made, a test run, a tunnel —
+   takes a line of its own below the button and never a place beside it. */
 .agent-list .agent-item {
   position: relative;
+  flex-wrap: wrap;
 }
 
 /* Where the keyboard is. Deliberately not the same treatment as :hover — the
@@ -1315,10 +1318,8 @@ kbd {
    is a flex line with the button stretched across it, so it wraps, and the
    links take the whole of the second line; the button gives up the bottom of
    its padding so the two read as one row and not as a row and a stray. */
-.agent-list .agent-item-made {
-  flex-wrap: wrap;
-}
-.agent-item-made .agent-row {
+.agent-item-made .agent-row,
+.agent-item-testing .agent-row {
   padding-bottom: 2px;
 }
 .agent-made {
@@ -1376,9 +1377,11 @@ kbd {
   font-variant-numeric: tabular-nums;
   opacity: 0.8;
 }
-.agent-testing {
-  margin: 0 8px 6px;
-  max-width: calc(100% - 16px);
+.agent-testing-line {
+  flex-basis: 100%;
+  min-width: 0;
+  display: flex;
+  padding: 0 8px 6px;
 }
 .board-testing {
   margin-top: 2px;
