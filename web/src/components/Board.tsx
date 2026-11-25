@@ -64,6 +64,7 @@ import { useCardClick } from "../cardclick";
 import { useCardDone } from "../cardDone";
 import { canPopColumn, popColumnItem, popOutColumn } from "../columns";
 import { referItem } from "../kuru";
+import { movesFrom } from "../needsorder";
 import { noteItem, popOutNote } from "../notes";
 import { isLoopback, previewUrl, projectLinks, serverIn } from "../preview";
 import { revealCard } from "../reveal";
@@ -499,11 +500,14 @@ export function BoardView({
   };
 
   const cardMenu = (card: Card, at: MenuAt) => {
+    const ends = columnEndItems(board, card, (index) => move(card, card.column, index));
     const items = (status: WorktreeStatus | null): MenuItem[] => [
+      ...ends,
       ...lanes
         .filter((lane) => lane.id !== card.column)
-        .map((lane) => ({
+        .map((lane, index) => ({
           label: `Move to ${lane.name}`,
+          sep: index === 0 && ends.length > 0,
           run: () => move(card, lane.id),
         })),
       ...(card.worktree ? gitItems(card, card.worktree, status) : []),
@@ -1078,6 +1082,27 @@ const CardView = memo(function CardView({
     </>
   );
 }, sameJson);
+
+/**
+ * "Send to top" and "Send to bottom": a card put at an end of its own column,
+ * by the very `moveCard` index a drag gives (counted with the card taken
+ * out), so it is the same verb on the server, kept and seen by every client
+ * as a drag is. A drag across a long column means scrolling with a card
+ * held, and the top is where the card to take next is kept. A row that
+ * would move nothing is left out rather than greyed, since the menu it sits
+ * at the head of is long already; the Needs drawer's own place moves
+ * (`placeMoves`) are greyed because they come in fours and their shape is
+ * what is read. Shared by both boards, and so by a popped-out column, whose
+ * window is the same board drawn with one column.
+ */
+export function columnEndItems(board: Board, card: Card, move: (index: number) => void): MenuItem[] {
+  const ids = columnCards(board, card.column).map((one) => one.id);
+  const ends = movesFrom(ids.indexOf(card.id), ids.length);
+  const rows: MenuItem[] = [];
+  if (ends.top !== undefined) rows.push({ label: "Send to top", run: () => move(ends.top!) });
+  if (ends.bottom !== undefined) rows.push({ label: "Send to bottom", run: () => move(ends.bottom!) });
+  return rows;
+}
 
 /**
  * The last line of a card: its key, whatever else is only ever read about it

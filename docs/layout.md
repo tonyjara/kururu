@@ -350,6 +350,15 @@ menu past it opens nothing; once open, a pointer heading for it may cross the
 rows below (the triangle from where it was to the list's near edge) and only
 one that turns away, or stops on a row for `AIM_MS`, closes it. A hover never
 draws a list in the menu's place: with no room beside, the row waits for a click.
+
+Every card's menu, on both boards and in a popped-out column, opens with
+**Send to top** and **Send to bottom** (`columnEndItems` in `Board.tsx`):
+`move-card` or `move-profile-card` into the card's own column at index 0 or
+at the column's length less one — the index a drag gives, counted with the
+card out, so the end is kept and seen everywhere as a drag's place is. Done
+included, since a named index is honoured there and only a missing one means
+the top. A row that would move nothing is left out. The Needs drawer keeps its
+own four place moves instead (`placeMoves`).
 `send-profile-card` moves the card onto that workspace's board in one change (`transferCard` — new number
 there, same id, and its To do if it sat in a column the workspace does not
 have), making the board if the workspace had none. It rides the blob

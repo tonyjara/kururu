@@ -98,6 +98,20 @@ describe("cards", () => {
     expect(titles(b, "done")).toEqual(["b", "a", "c"]);
   });
 
+  it("sends a card to either end of its own column by movesFrom's indices, Done too", () => {
+    // The card menu's "Send to top" and "Send to bottom": index 0, and the
+    // column's length less one, counted with the card out.
+    for (const column of ["todo", "done"] as const) {
+      let b = board("a", "b", "c");
+      for (const id of ["c0", "c1", "c2"]) b = moveCard(b, id, column, 2);
+      expect(titles(b, column)).toEqual(["a", "b", "c"]);
+      b = moveCard(b, "c2", column, 0);
+      expect(titles(b, column)).toEqual(["c", "a", "b"]);
+      b = moveCard(b, "c2", column, 2);
+      expect(titles(b, column)).toEqual(["a", "b", "c"]);
+    }
+  });
+
   it("refuses an index that is not a place, through JSON", () => {
     const b = board("a");
     for (const bad of [NaN, -1, 0.5, "0"]) {

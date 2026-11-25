@@ -15,6 +15,12 @@ shows, so it is written once and read in three places — see
 
 ### Added
 
+- **Send a card to the top of its column from its menu.** Every card's
+  right-click menu, on your own board, a workspace's board and a
+  popped-out column, starts with **Send to top** and **Send to bottom**,
+  which put the card at that end of the column it is in, as a drag would.
+  A card already at an end has only the other.
+
 - **A board column can float over everything, like a popped-out card.**
   Every column of a workspace's board and of your own board, Needs you
   included, has a pin in its head and **Pop out as a window** on its menu.

@@ -70,7 +70,7 @@ import { referItem } from "../kuru";
 import { noteItem, popOutNote } from "../notes";
 import { revealCard } from "../reveal";
 import * as api from "../session";
-import { ago, CARD_KEEP, CardBody, CardFoot, CardWhen, Composer, dropDraft, showCardNext, useCardOpen, useComposerInView } from "./Board";
+import { ago, CARD_KEEP, CardBody, CardFoot, CardWhen, columnEndItems, Composer, dropDraft, showCardNext, useCardOpen, useComposerInView } from "./Board";
 import { ColorPicker } from "./ColorPicker";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Icon } from "./Icon";
@@ -198,14 +198,19 @@ export function ProfileBoard({ profile, popped }: { profile: Profile; popped?: P
   };
 
   /**
-   * The card's menu: its moves (`profileCardMoves` — the other columns, then
-   * Send to and the profile's workspaces), then the verbs every card has.
+   * The card's menu: its place in its column (`columnEndItems`), its moves
+   * (`profileCardMoves` — the other columns, then Send to and the profile's
+   * workspaces), then the verbs every card has. The ends are not in
+   * `profileCardMoves` because the Needs drawer, which shares it, has its own.
    */
-  const cardMenu = (card: Card, at: MenuAt) =>
+  const cardMenu = (card: Card, at: MenuAt) => {
+    const ends = columnEndItems(board, card, (index) => api.moveProfileCard(profile.id, card.id, card.column, index));
+    const [first, ...moves] = profileCardMoves(profile, card, setSent);
     setMenu({
       at,
       items: [
-        ...profileCardMoves(profile, card, setSent),
+        ...ends,
+        ...(first ? [{ ...first, sep: first.sep || ends.length > 0 }, ...moves] : []),
         ...(popped
           ? popped.refer
             ? [poppedReferItem(popped.refer, card.id)]
@@ -221,6 +226,7 @@ export function ProfileBoard({ profile, popped }: { profile: Profile; popped?: P
         { label: "Delete card", danger: true, run: () => api.deleteProfileCard(profile.id, card.id) },
       ],
     });
+  };
 
   /**
    * A column's menu — `laneMenuItems`, with the colour this board's columns
