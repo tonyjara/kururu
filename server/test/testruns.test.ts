@@ -9,7 +9,7 @@
  * all through a test's output.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { noFacts } from "../../shared/usage";
@@ -118,7 +118,9 @@ describe("a transcript's test runs", () => {
     // The unasked-for line was passed over, not parsed and refused.
     expect(ledger.counts().skipped).toBe(0);
     ledger.close();
+    // The log beside it too, where a closed database has left one: some builds of SQLite fold it in on close.
     for (const file of ["usage.db", "usage.db-wal"]) {
+      if (!existsSync(join(dir, file))) continue;
       const bytes = readFileSync(join(dir, file));
       expect(bytes.includes(SECRET)).toBe(false);
     }
