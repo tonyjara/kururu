@@ -73,6 +73,7 @@ import * as api from "../session";
 import { datesLabel, datesTense } from "../when";
 import { ColumnResizeHandle } from "./ColumnResize";
 import { Dialog } from "./Dialog";
+import { HeadFold } from "./Fold";
 import { Icon } from "./Icon";
 import {
   AddLane,
@@ -670,7 +671,7 @@ export function BoardView({
                 if (!(popped && fixed)) laneMenu(lane, { x: event.clientX, y: event.clientY });
               }}
             >
-              {!popped && grip(column)}
+              {popped ? <HeadFold folded={popped.collapsed} onFold={popped.fold} /> : grip(column)}
               {naming === column ? (
                 <LaneName
                   name={lane.name}

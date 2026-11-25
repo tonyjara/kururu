@@ -8,8 +8,8 @@
  * the one gesture that costs nothing until it is used.
  *
  * It closes on the first thing that happens next: a click anywhere (including
- * inside itself, after the item has run), a second right-click, escape, or a
- * scroll. A menu left open over a moving layout is pointing at the wrong row,
+ * inside itself, after the item has run), a second right-click, escape, a
+ * scroll, or the window losing the focus. A menu left open over a moving layout is pointing at the wrong row,
  * and the backdrop that catches those clicks is also what stops one reaching
  * the terminal underneath.
  *
@@ -476,10 +476,11 @@ function Row({
  * labelled items — a grid of swatches has no `label`, and bending `MenuItem`
  * into a shape that could carry one would have made every caller of it carry the
  * possibility. What is actually shared is smaller than a menu and duller: where
- * the box goes when it does not fit, and the four ways it closes. Those are
+ * the box goes when it does not fit, and the ways it closes — a press outside
+ * it, escape, a resize, a scroll, and the window losing the focus. Those are
  * exactly the parts that are easy to get subtly wrong twice.
  *
- * `closeOnScroll` is the escape hatch from the fourth way: a box with its own
+ * `closeOnScroll` is the escape hatch from the scroll: a box with its own
  * scrolling content (the missed-replies list) needs a wheel over *it* to
  * scroll the list, not close the box — only a wheel over the backdrop, outside
  * it, still means "the layout underneath moved."
@@ -552,11 +553,29 @@ export function Popover({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
+    /**
+     * A click in another application is a click outside the box too, and the
+     * backdrop never hears it. It mattered first in a popped-out column, a
+     * small window over everything whose menu stayed up over the owner's
+     * other work (2026-11-25). Asked a turn later, because the focus going
+     * into a frame of this page blurs the window as well, and that is not
+     * leaving it.
+     */
+    let left: ReturnType<typeof setTimeout> | undefined;
+    const onBlur = () => {
+      clearTimeout(left);
+      left = setTimeout(() => {
+        if (!document.hasFocus()) onClose();
+      });
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("resize", onClose);
+    window.addEventListener("blur", onBlur);
     return () => {
+      clearTimeout(left);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", onClose);
+      window.removeEventListener("blur", onBlur);
     };
   }, [onClose]);
 

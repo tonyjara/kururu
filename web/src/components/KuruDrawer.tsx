@@ -186,6 +186,7 @@ import * as api from "../session";
 import { useKururu } from "../session";
 import { dictate, dictateStop, dictateToggled, dismissVoice, useDictation, useOutgoing, useVoiceUi, voiceIsRemote, voiceNow } from "../voice";
 import { CHIP_ICONS, CHIP_WORD, ChipField, type ChipFieldHandle } from "./ChipField";
+import { FoldIcon } from "./Fold";
 import { Icon } from "./Icon";
 import { KuruInline, KuruMarkdown, type MarkdownDoors } from "./KuruMarkdown";
 import { PinButton, PinsButton, PinsList } from "./KuruPins";
@@ -2976,15 +2977,6 @@ function KeysIcon() {
     <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
-    </svg>
-  );
-}
-
-/** A minus on an open line, to collapse it, and a plus on a folded one, to expand it — drawn here for `KeysIcon`'s reason. */
-function FoldIcon({ folded }: { folded: boolean }) {
-  return (
-    <svg className="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-      <path d={folded ? "M5 12h14M12 5v14" : "M5 12h14"} />
     </svg>
   );
 }

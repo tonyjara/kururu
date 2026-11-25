@@ -82,6 +82,7 @@ import {
 } from "../notes";
 import * as api from "../session";
 import { CardWhen, Composer, dropDraft, endedAgo, RunLine, showCardNext, TreeLine } from "./Board";
+import { HeadFold } from "./Fold";
 import { Icon } from "./Icon";
 import { MadeLinks } from "./MadeLinks";
 import { NeedsByMark } from "./ProfileBoard";
@@ -472,6 +473,7 @@ export function NoteInside({
   return (
     <>
       <header className="note-head" {...head}>
+        <HeadFold folded={collapsed} onFold={onFold} />
         {card ? (
           <>
             {agent && <Status agent={agent} mascot={mascot} />}
@@ -508,15 +510,6 @@ export function NoteInside({
               <ReferIcon />
             </button>
           )}
-          <button
-            className="board-icon-btn"
-            title={collapsed ? "Unfold" : "Fold to the title bar"}
-            aria-label={collapsed ? "Unfold" : "Fold"}
-            aria-expanded={!collapsed}
-            onClick={onFold}
-          >
-            <Icon name={collapsed ? "unfold" : "fold"} />
-          </button>
           <button className="board-icon-btn" title="Close the note — the card stays on its board" aria-label="Close" onClick={close}>
             <Icon name="close" />
           </button>

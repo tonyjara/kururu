@@ -5425,11 +5425,18 @@ html.pill-page #root {
    -------------------------------------------------------------------------- */
 
 /* Invisible, but it is what catches the click that closes the menu — and what
-   stops that click reaching the terminal underneath. */
+   stops that click reaching the terminal underneath. It is `no-drag` because
+   a bar a window is dragged by (`-webkit-app-region: drag`) is the system's
+   before it is the page's: a press there moved the window and never reached
+   the backdrop, so a popped-out column's menu stayed up under a click on its
+   own head (the owner, 2026-11-25). The backdrop is drawn last in the body,
+   so while a menu is open it carves every bar out, and a press anywhere is
+   the page's again. */
 .menu-backdrop {
   position: fixed;
   inset: 0;
   z-index: 60;
+  -webkit-app-region: no-drag;
 }
 
 .menu {
@@ -11504,6 +11511,30 @@ html.note-page #root {
 }
 .note-window:not(.note-focused):not(:hover) .note-actions {
   opacity: 0;
+}
+
+/* A window's fold, first in its bar (`Fold.tsx`): the Kuru chat's minus and
+   plus, in the bar's quiet ink, lit under the pointer. It stays drawn while
+   the bar's other buttons stand back, since a folded window is only its bar.
+   It sits into the bar's left padding so the title keeps its place. */
+.head-fold {
+  --icon-size: var(--icon-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-left: -5px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  color: var(--dimmer);
+  -webkit-app-region: no-drag;
+}
+.head-fold:hover,
+.head-fold:focus-visible {
+  color: var(--text);
+  background: var(--chrome-high);
 }
 
 /* A board column as a window of its own, over every application

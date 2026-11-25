@@ -892,7 +892,9 @@ open window), kept out of the Dock and ⌘-Tab. It loads the same build as
 draws `NoteInside` — the very bar, body, editor and foot the window's notes
 draw — filling the window. The window is moved by the title bar
 (`-webkit-app-region`, its buttons carved out) and resized from its edges,
-folding it makes the window as short as its bar, its ✕ closes it, and "show
+folding it — the minus at the bar's left end, Kuru's chat's fold, a plus
+once folded, kept a bar's width from the ✕ — makes the window as short as
+its bar, its ✕ closes it, and "show
 it on its board" brings the main window up (made if there is none) with the
 card lit, as is a button in its foot that acts there. "Reference in Kuru" —
 the speech bubble on the bar, and a right-click on the card outside its
@@ -936,7 +938,8 @@ workspace's `id`, which is minted afresh at each cold start. The page is
 cards open, edit, run, move and are dragged within it as on the board, the
 add at its foot is the board's composer, and the cards' menus still list
 every column. What gives way to the window in its head is the board's
-grip, fold and width handle, and the column menu's moves and fold; one of
+grip (where the window's minus stands, as on a note), fold and width
+handle, and the column menu's moves and fold; one of
 the four fixed columns, which has nothing else on its menu, has no menu
 there. It says what it shows down the note's verbs (`windowOf` in
 `main.js` asks both sets which window a page is): `here`, `away` for a

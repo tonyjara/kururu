@@ -178,22 +178,13 @@ export function poppedReferItem(refer: (cardId: string) => void, cardId: string)
 }
 
 /**
- * The window's two buttons, where the board's fold is in a column's head:
- * fold it to the head and back, and close it — the note window's pair, and
- * with the same words.
+ * The window's close, at the end of a column's head, where the note window
+ * has its own. Its fold is not here but first in the head (`HeadFold`), a
+ * bar's width from the ×, as the note's is.
  */
 export function PoppedButtons({ popped }: { popped: PoppedColumn }) {
   return (
     <span className="column-window-actions">
-      <button
-        className="board-icon-btn"
-        title={popped.collapsed ? "Unfold" : "Fold to the title bar"}
-        aria-label={popped.collapsed ? "Unfold" : "Fold"}
-        aria-expanded={!popped.collapsed}
-        onClick={popped.fold}
-      >
-        <Icon name={popped.collapsed ? "unfold" : "fold"} />
-      </button>
       <button className="board-icon-btn" title="Close the window — the column stays on its board" aria-label="Close" onClick={popped.close}>
         <Icon name="close" />
       </button>

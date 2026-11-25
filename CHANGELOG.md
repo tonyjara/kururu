@@ -249,6 +249,10 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **A popped-out note or column folds from the left end of its bar,** with
+  the minus and plus Kuru's chat folds its lines with, instead of a chevron
+  pair right beside the ✕ that closes it.
+
 - **The floating Kuru's chat stays put around its logo.** The logo is
   always at the same corner of the chat — the bottom right — wherever you
   drag it, where the chat used to flip above, below, left or right of it to
@@ -393,6 +397,11 @@ shows, so it is written once and read in three places — see
   longer part of a backup.
 
 ### Fixed
+
+- **A menu closes on a click outside it in a popped-out column.** A click on
+  the column's own head, or in another application, left its menu up. Any
+  menu now closes when its window loses the focus, and a click on a bar the
+  window is dragged by reaches the menu first.
 
 - **Mascots keep the tops of their heads.** Beside an agent's name in the
   sidebar, a tab, a board card or a drawer, the mascot is raised to stand

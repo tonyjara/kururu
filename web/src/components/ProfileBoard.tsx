@@ -73,6 +73,7 @@ import * as api from "../session";
 import { ago, CARD_KEEP, CardBody, CardFoot, CardWhen, columnEndItems, Composer, dropDraft, showCardNext, useCardOpen, useComposerInView } from "./Board";
 import { ColorPicker } from "./ColorPicker";
 import { ColumnResizeHandle } from "./ColumnResize";
+import { HeadFold } from "./Fold";
 import { Icon } from "./Icon";
 import {
   AddLane,
@@ -385,7 +386,7 @@ export function ProfileBoard({ profile, popped }: { profile: Profile; popped?: P
                     laneMenu(lane, { x: event.clientX, y: event.clientY });
                   }}
                 >
-                  {!popped && grip(column)}
+                  {popped ? <HeadFold folded={popped.collapsed} onFold={popped.fold} /> : grip(column)}
                   {naming === column ? (
                     <LaneName
                       name={lane.name}
