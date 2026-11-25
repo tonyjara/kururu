@@ -138,6 +138,28 @@ holds them; `bun run status` prints the host's `ptys` against its running
 terminals, one each, and `lsof /dev/ptmx` counts every holder. Only a host
 restart gives back what a host leaked, and it ends every agent.
 
+**Links from every app opening in the agent Chrome meant it was a second
+copy of the owner's Google Chrome.** It was started with `open -na "Google
+Chrome" --args --user-data-dir=…/agent-chrome --remote-debugging-port=9222`,
+and macOS knows apps by bundle, not by profile: it hands a clicked link to the
+copy of the default browser opened most recently, and that was the agent's
+(2026-11-25). The agent Chrome is now **Google Chrome Beta**, a different
+bundle and so never the default browser's stand-in, while still Google's own
+build with its keys and its updater, which keeps the sign-in and bot checks
+the agents drive through (Cloudflare, Google) treating it as ordinary Chrome.
+Chromium and Chrome for Testing were turned down for those two reasons. The
+line is:
+
+```sh
+open -na "Google Chrome Beta" --args --user-data-dir="$HOME/.local/share/kururu/agent-chrome" --remote-debugging-port=9222 --no-first-run
+```
+
+Its sign-ins do not cross between the two apps: Beta opened on the old
+profile came up signed out of every site, since the key the cookies are
+sealed with is Google Chrome's own, so the move started from a fresh profile
+at the same path and the owner signed in again. Kururu itself starts no browser; this is what Kuru and the briefs run, and
+anything that only connects to `127.0.0.1:9222` did not change.
+
 ## A black window is a symptom with several causes
 
 Flat `--bg` with nothing on it is what you get from a React root that unmounted, a
