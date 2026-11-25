@@ -276,6 +276,16 @@ export function BoardView({
    * is still that card's when it arrives.
    */
   const [menu, setMenu] = useState<{ at: MenuAt; items: MenuItem[]; cardId?: string } | null>(null);
+  /**
+   * A popped-out column folded to its bar is only that bar, and a menu left
+   * open would hang below it over whatever is underneath. A click on the fold
+   * already lands on the menu's backdrop first; this is for a fold that comes
+   * from anywhere else.
+   */
+  const shutAway = popped?.collapsed === true;
+  useEffect(() => {
+    if (shutAway) setMenu(null);
+  }, [shutAway]);
   /** A spawn that failed, by card, until the next try. The snapshot cannot say this. */
   const [errors, setErrors] = useState<Record<string, string>>({});
   /**
@@ -668,7 +678,7 @@ export function BoardView({
               className="board-col-head"
               onContextMenu={(event) => {
                 event.preventDefault();
-                if (!(popped && fixed)) laneMenu(lane, { x: event.clientX, y: event.clientY });
+                if (!(popped && (fixed || popped.collapsed))) laneMenu(lane, { x: event.clientX, y: event.clientY });
               }}
             >
               {popped ? <HeadFold folded={popped.collapsed} onFold={popped.fold} /> : grip(column)}
@@ -695,17 +705,23 @@ export function BoardView({
               )}
               {!popped && <FoldButton onFold={() => api.collapseColumn(workspaceId, column, true)} />}
               {popOut && <PopOutButton name={lane.name} onPopOut={() => popOut(lane)} />}
-              <button
-                className="pane-btn"
-                title={`Add a card to ${lane.name}`}
-                aria-label="Add a card"
-                onClick={() => setAdding(column)}
-              >
-                <Icon name="add" />
-              </button>
+              {/* Folded, a window is its bar: the fold, the title and the ×.
+                  A card cannot be added to a column that is not showing, nor
+                  a menu dropped from a bar with nothing under it (the owner,
+                  2026-11-25: "please hide those buttons while collapsed"). */}
+              {!popped?.collapsed && (
+                <button
+                  className="pane-btn"
+                  title={`Add a card to ${lane.name}`}
+                  aria-label="Add a card"
+                  onClick={() => setAdding(column)}
+                >
+                  <Icon name="add" />
+                </button>
+              )}
               {/* In its window one of the four has nothing on its menu — no
                   rename, no delete, no move, no fold — so it has no menu. */}
-              {!(popped && fixed) && (
+              {!(popped && (fixed || popped.collapsed)) && (
                 <button
                   className="pane-btn"
                   title={popped ? "Rename or delete this column" : fixed ? "Collapse or move this column" : "Rename, move or delete this column"}

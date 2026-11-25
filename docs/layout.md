@@ -894,7 +894,9 @@ draw — filling the window. The window is moved by the title bar
 (`-webkit-app-region`, its buttons carved out) and resized from its edges,
 folding it — the minus at the bar's left end, Kuru's chat's fold, a plus
 once folded, kept a bar's width from the ✕ — makes the window as short as
-its bar, its ✕ closes it, and "show
+its bar, and leaves only the fold, the title and the ✕ on it (a column's
+add and menu, a note's board and Kuru buttons, come back on opening; a menu
+open at the fold is closed); its ✕ closes it, and "show
 it on its board" brings the main window up (made if there is none) with the
 card lit, as is a button in its foot that acts there. "Reference in Kuru" —
 the speech bubble on the bar, and a right-click on the card outside its

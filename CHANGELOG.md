@@ -249,6 +249,11 @@ shows, so it is written once and read in three places — see
 
 ### Changed
 
+- **A folded note or column window is only its bar:** the fold, the title
+  and the ✕. The column's add and menu, and the note's "show on its board"
+  and "Reference in Kuru", come back when it opens, and a menu open when it
+  folds is closed.
+
 - **A popped-out note or column folds from the left end of its bar,** with
   the minus and plus Kuru's chat folds its lines with, instead of a chevron
   pair right beside the ✕ that closes it.

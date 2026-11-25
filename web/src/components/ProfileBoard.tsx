@@ -175,6 +175,13 @@ export function ProfileBoard({ profile, popped }: { profile: Profile; popped?: P
   const { overLane, dropLane, laneClasses, grip } = useLaneDrag(lanes, (laneId, index) => api.moveProfileColumn(profile.id, laneId, index));
   /** The column whose colour is being picked, and where its swatches open. */
   const [picking, setPicking] = useState<{ column: string; at: MenuAt } | null>(null);
+  /** A popped-out column folded to its bar drops what was open below it — `BoardView`'s reason. */
+  const shutAway = popped?.collapsed === true;
+  useEffect(() => {
+    if (!shutAway) return;
+    setMenu(null);
+    setPicking(null);
+  }, [shutAway]);
   /** The column whose name is an input, for a rename; `NEW_LANE` for the one being made. */
   const [naming, setNaming] = useState<string | null>(null);
   /**
@@ -383,7 +390,7 @@ export function ProfileBoard({ profile, popped }: { profile: Profile; popped?: P
                   className="board-col-head"
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    laneMenu(lane, { x: event.clientX, y: event.clientY });
+                    if (!popped?.collapsed) laneMenu(lane, { x: event.clientX, y: event.clientY });
                   }}
                 >
                   {popped ? <HeadFold folded={popped.collapsed} onFold={popped.fold} /> : grip(column)}
@@ -426,34 +433,39 @@ export function ProfileBoard({ profile, popped }: { profile: Profile; popped?: P
                   )}
                   {!popped && <FoldButton onFold={() => api.collapseProfileColumn(profile.id, column, true)} />}
                   {popOut && <PopOutButton name={lane.name} onPopOut={() => popOut(lane)} />}
-                  <button
-                    className="pane-btn"
-                    title={`Add a card to ${lane.name}`}
-                    aria-label="Add a card"
-                    onClick={() => setAdding(column)}
-                  >
-                    <Icon name="add" />
-                  </button>
-                  <button
-                    className="pane-btn"
-                    title={
-                      popped
-                        ? laneFixed(column, "profile")
-                          ? "Colour this column"
-                          : "Rename, colour or delete this column"
-                        : laneFixed(column, "profile")
-                          ? "Colour, collapse or move this column"
-                          : "Rename, move or delete this column"
-                    }
-                    aria-label="Column menu"
-                    aria-haspopup="menu"
-                    onClick={(event) => {
-                      const box = event.currentTarget.getBoundingClientRect();
-                      laneMenu(lane, { x: box.left, y: box.bottom + 4 });
-                    }}
-                  >
-                    <Icon name="caret" />
-                  </button>
+                  {/* Folded, the window is its bar — `BoardView`'s rule. */}
+                  {!popped?.collapsed && (
+                    <>
+                      <button
+                        className="pane-btn"
+                        title={`Add a card to ${lane.name}`}
+                        aria-label="Add a card"
+                        onClick={() => setAdding(column)}
+                      >
+                        <Icon name="add" />
+                      </button>
+                      <button
+                        className="pane-btn"
+                        title={
+                          popped
+                            ? laneFixed(column, "profile")
+                              ? "Colour this column"
+                              : "Rename, colour or delete this column"
+                            : laneFixed(column, "profile")
+                              ? "Colour, collapse or move this column"
+                              : "Rename, move or delete this column"
+                        }
+                        aria-label="Column menu"
+                        aria-haspopup="menu"
+                        onClick={(event) => {
+                          const box = event.currentTarget.getBoundingClientRect();
+                          laneMenu(lane, { x: box.left, y: box.bottom + 4 });
+                        }}
+                      >
+                        <Icon name="caret" />
+                      </button>
+                    </>
+                  )}
                   {popped && <PoppedButtons popped={popped} />}
                 </header>
 

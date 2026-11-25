@@ -490,7 +490,7 @@ export function NoteInside({
               <Icon name="edit" />
             </button>
           )}
-          {card && (
+          {card && !collapsed && (
             <button
               className="board-icon-btn"
               title={workspace ? `Show it on ${workspace.name}'s board` : "Show it on your board"}
@@ -500,7 +500,7 @@ export function NoteInside({
               <Icon name="board" />
             </button>
           )}
-          {card && onRefer && (
+          {card && !collapsed && onRefer && (
             <button
               className="board-icon-btn"
               title="Reference in Kuru — this card, in Kuru's box"
