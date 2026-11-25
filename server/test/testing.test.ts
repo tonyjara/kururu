@@ -139,6 +139,11 @@ describe("parseTestCounts", () => {
   for (const [name, output, [passed, failed, skipped], runner] of cases) {
     test(name, () => expect(parseTestCounts(output)).toEqual({ passed: passed!, failed: failed!, skipped: skipped!, runner }));
   }
+  test("half a summary is half the counts", () => {
+    expect(parseTestCounts(" 0 fail\n")).toEqual({ passed: null, failed: 0, skipped: 0, runner: "bun" });
+    expect(parseTestCounts(" 12 pass\n")).toEqual({ passed: 12, failed: null, skipped: 0, runner: "bun" });
+    expect(parseTestCounts("  2 failed\n")).toEqual({ passed: null, failed: 2, skipped: 0, runner: "playwright" });
+  });
   test("no summary is no counts", () => {
     expect(parseTestCounts("$ tsc --noEmit\n")).toBeNull();
     expect(parseTestCounts("")).toBeNull();

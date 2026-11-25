@@ -664,7 +664,8 @@ export function parseTestCounts(output: unknown): TestCounts | null {
   const bunPass = last(text, /^\s*(\d+) pass\s*$/gm);
   const bunFail = last(text, /^\s*(\d+) fail\s*$/gm);
   if (bunPass || bunFail) {
-    return { passed: num(bunPass?.[1]), failed: num(bunFail?.[1]), skipped: num(last(text, /^\s*(\d+) skip\s*$/gm)?.[1]) + num(last(text, /^\s*(\d+) todo\s*$/gm)?.[1]), runner: "bun" };
+    // Half a summary, as `| tail -1` leaves it, says only what it says: a count that was cut off is not a zero.
+    return { passed: bunPass ? num(bunPass[1]) : null, failed: bunFail ? num(bunFail[1]) : null, skipped: num(last(text, /^\s*(\d+) skip\s*$/gm)?.[1]) + num(last(text, /^\s*(\d+) todo\s*$/gm)?.[1]), runner: "bun" };
   }
   const pytest = last(text, /^=+ (.*?) in [\d.]+s.*?=+\s*$/gm);
   if (pytest) {
@@ -709,7 +710,7 @@ export function parseTestCounts(output: unknown): TestCounts | null {
   const pwPassed = last(text, /^\s+(\d+) passed \([\d.]+(?:ms|s|m|h)\)\s*$/gm);
   const pwFailed = last(text, /^\s+(\d+) failed\s*$/gm);
   if (pwPassed || pwFailed) {
-    return { passed: num(pwPassed?.[1]), failed: num(pwFailed?.[1]), skipped: num(last(text, /^\s+(\d+) skipped\s*$/gm)?.[1]), runner: "playwright" };
+    return { passed: pwPassed ? num(pwPassed[1]) : null, failed: num(pwFailed?.[1]), skipped: num(last(text, /^\s+(\d+) skipped\s*$/gm)?.[1]), runner: "playwright" };
   }
   const passing = last(text, /^\s*(\d+) passing\b/gm);
   if (passing) return { passed: num(passing[1]), failed: num(last(text, /^\s*(\d+) failing\b/gm)?.[1]), skipped: num(last(text, /^\s*(\d+) pending\b/gm)?.[1]), runner: "mocha" };
