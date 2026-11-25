@@ -36,8 +36,9 @@
  * of the voice is relayed or drawn twice, and switching this off is the pill
  * exactly as it was.
  *
- * Only the logo's own webContents may press or drag it, and only the chat's
- * may resize or close it, both checked in `main.js`.
+ * Only the logo's own webContents may press it, the logo's or the chat's
+ * (by its head) may drag it, and only the chat's may resize or close the
+ * chat, all checked in `main.js`.
  */
 const { BrowserWindow, Menu, screen, shell } = require("electron");
 const { EventEmitter } = require("node:events");

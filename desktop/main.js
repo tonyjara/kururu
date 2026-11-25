@@ -1461,7 +1461,8 @@ notes.on("change", (list) => {
  * The floating Kuru, across the bridge. Every page of ours may ask what it
  * is — the pill's page changes its shape with it, and Settings shows the
  * switch — and only the main window may switch it. The logo's verbs are
- * taken from the logo's page and the chat's from the chat's, and no other:
+ * taken from the logo's page and the chat's from the chat's (the drag from
+ * either, since the chat's head moves the pair), and no other:
  * a served page in the window cannot drag the logo about or open a chat
  * over somebody's screen.
  *
@@ -1477,8 +1478,9 @@ ipcMain.on("kururu:float-set", (event, on) => {
 ipcMain.on("kururu:float-press", (event) => {
   if (float.isLogo(event.sender)) float.toggle();
 });
+// The chat's head drags the logo too: the chat is anchored to it, so moving one is moving both (`FloatPanel`'s head).
 ipcMain.on("kururu:float-drag", (event, phase) => {
-  if (float.isLogo(event.sender) && ["start", "move", "end"].includes(phase)) float.drag(phase);
+  if ((float.isLogo(event.sender) || float.isPanel(event.sender)) && ["start", "move", "end"].includes(phase)) float.drag(phase);
 });
 /** The logo's corners as its right-click names them, the default first (`CORNERS` in `floatshape.js`). */
 const CORNER_LABELS = [

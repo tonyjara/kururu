@@ -613,6 +613,55 @@ export function FloatPanel() {
     onLostPointerCapture: gripEnd,
   });
 
+  /**
+   * The chat moved by its head (the owner, 2026-11-25: "I wanna be able to
+   * drag it from this part and move it around"). The chat is anchored to the
+   * logo and its place is the logo's, so moving the chat is moving the logo
+   * — the logo's own drag across the bridge (`FloatKuru.drag`), which holds
+   * the pair on the display and writes the place down; a second place kept
+   * for the chat would only argue with the first.
+   *
+   * Not a draggable region, for the logo's reason: the head is mostly chips
+   * and buttons, and `-webkit-app-region` would swallow their clicks. So a
+   * press anywhere in the head is only a press until it has travelled the
+   * logo's slop; then it is a drag, the pointer is captured (the window is
+   * about to move under it), and the click its release would make is
+   * thrown away, so a tab pressed and dragged is not also a tab pressed.
+   * The search field, should a head ever carry one, is left to be typed in.
+   */
+  const moveHeld = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const headDown = (event: React.PointerEvent) => {
+    moveHeld.current = null;
+    if (event.button !== 0 || !(event.target instanceof Element)) return;
+    if (!event.target.closest(".kuru-head") || event.target.closest("input, textarea, [contenteditable]")) return;
+    moveHeld.current = { x: event.clientX, y: event.clientY, moved: false };
+  };
+  const headMove = (event: React.PointerEvent) => {
+    const from = moveHeld.current;
+    if (!from) return;
+    if (!from.moved) {
+      // Still in the window's own coordinates: until the drag begins the window has not moved.
+      if (Math.hypot(event.clientX - from.x, event.clientY - from.y) < SLOP_PX) return;
+      from.moved = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      bridge?.drag("start");
+    }
+    bridge?.drag("move");
+  };
+  const headUp = () => {
+    const from = moveHeld.current;
+    moveHeld.current = null;
+    if (!from?.moved) return;
+    bridge?.drag("end");
+    // The click that follows this release, wherever it lands, was the drag's.
+    const swallow = (click: MouseEvent) => {
+      click.stopPropagation();
+      click.preventDefault();
+    };
+    window.addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+  };
+
   const side = float?.side ?? "above";
   const ready = snapshot && profile && mascot;
   const chips = ready ? (
@@ -639,6 +688,11 @@ export function FloatPanel() {
       ref={root}
       className={`float-panel float-panel-${side} float-panel-${float?.reach ?? "left"} ${open ? "float-panel-open" : "float-panel-shut"} ${entering ? "float-panel-entering" : ""} ${float?.pen ? "float-panel-pen" : ""}`}
       onClick={onClick}
+      onPointerDown={headDown}
+      onPointerMove={headMove}
+      onPointerUp={headUp}
+      onPointerCancel={headUp}
+      onLostPointerCapture={headUp}
     >
       {/* The edges away from the logo: the ones that move when the chat is
           made taller, shorter, wider or narrower. The width's and the

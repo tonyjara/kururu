@@ -232,6 +232,13 @@ html.float-panel-page #root {
   display: none;
 }
 
+/* The head moves the chat, from anywhere in it once a press has travelled
+   (`headMove` in `Float.tsx`); the empty part of it says so, and the chips
+   and buttons keep the hand that says they are pressed. */
+.float-panel .kuru-head {
+  cursor: move;
+}
+
 /* The handle: the far edge, which is what moves. Over the drawer's head
    when it is the top — laid on the head's own top padding rather than
    stacked above it, so the chat does not grow a band for it — and a strip of

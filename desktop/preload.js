@@ -309,7 +309,7 @@ if (isPicker) {
      * told when that changes — the pill's page draws the voice as a waveform
      * beside the logo while it is on. The window switches it, from Settings.
      * The logo's page (`?float=logo`) says it was pressed, dragged or
-     * right-clicked; the chat's (`?float=panel`) drags its own far edges,
+     * right-clicked; the chat's (`?float=panel`) drags its own far edges and, by its head, the logo with it,
      * closes or opens itself, and asks for the window to be brought up for
      * what only the window can show. The window hands the chat what goes to
      * Kuru's box while it is open (`give`), which the chat's page hears
