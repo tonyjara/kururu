@@ -23,8 +23,9 @@
  * forgets the chips, which is right: what was running a server ago is the
  * claim least worth keeping, and the row in the ledger is still there.
  *
- * The hook's times are also the better ones, so its start and end are written
- * into the same row the reader writes, and win there. See `testlog.ts`.
+ * The hook also brings Claude Code's own measure of how long the call took,
+ * which is the better length, so its start and end are written into the same
+ * row the reader writes. See `testlog.ts` for who is believed for what.
  */
 import { adoptTestReport, isSuiteKind, type LiveTest } from "../../shared/testing";
 import { BASELINE_DAYS, buildTestingReport, cardTestLines, rangeStart, testingText, type LiveRow, type TestingNames, type TestingRange, type TestingReport } from "../../shared/testreport";

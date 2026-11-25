@@ -2,16 +2,19 @@
  * The test runs, in the ledger: one row per run, written by whichever of two
  * witnesses spoke, and added to by the other.
  *
- * A run is seen twice. The hook sees it live (`server/src/testing.ts`): the
- * moment before the command starts and the moment it returns, with Claude
- * Code's own measure of how long it took. The transcript sees it for certain
- * (`sweep.ts`): the call and its result are lines the reader was reading
- * anyway. Neither is enough alone. A hook reaches only agents on this node
- * whose launch carried it; a transcript is read a second or a few minutes
- * late and its two timestamps include a permission prompt. So both write the
- * same row, keyed by session and call id, and the merge below says who is
- * believed for what: **the hook for times, either for the outcome, and the
- * first to arrive for everything a command line says.**
+ * A run is seen twice. The hook sees it live (`server/src/testing.ts`): about
+ * when the command starts and when it returns, with Claude Code's own measure
+ * of how long it took. The transcript sees it for certain (`sweep.ts`): the
+ * call and its result are lines the reader was reading anyway. Neither is
+ * enough alone. A hook reaches only agents on this node whose launch carried
+ * it, and it is a process started beside the tool, so the moment it reports
+ * is late by however long it took to start. A transcript is read a second or
+ * a few minutes after the fact, and the gap between its two timestamps has
+ * any permission prompt in it. So both write the same row, keyed by session
+ * and call id, and the merge below says who is believed for what: **the
+ * transcript for the two instants, the hook's `duration_ms` for the length,
+ * either for the outcome, and the first to arrive for what the command line
+ * says.**
  *
  * In `usage.db` rather than a file of its own, because a run's tokens are a
  * sum over that file's `messages` and whose it was is that file's `sessions`
@@ -79,25 +82,43 @@ export interface OpenRun {
   startedAt: number;
 }
 
-/** An end is believed over what is there when it is the hook's, or when nothing better has spoken. */
-function endWins(by: TestWitness, held: Row): boolean {
-  if (held.ended_at === null || held.ended_at === undefined) return true;
-  if (by === "hook") return held.timed_by !== "hook";
-  if (by === "log") return held.timed_by === "next";
-  return false;
+/**
+ * When a run ended and how long it took, from what is on record and one more
+ * witness. The instant is the transcript's whenever it has spoken, since a
+ * hook's is the moment its report arrived; the length is Claude Code's own
+ * when a hook brought it (`timed_by` is then `hook`), and the gap between the
+ * two instants otherwise. A session's next message is believed only until
+ * anybody else speaks.
+ */
+function timingOf(held: Row, event: { by: TestWitness; at: number; durationMs: number | null }): { endedAt: number; durationMs: number; timedBy: TestWitness } {
+  const startedAt = held.started_at as number;
+  const ended = (held.ended_at as number | null) ?? null;
+  const by = held.timed_by as TestWitness;
+  const measured = ended !== null && by === "hook" ? (held.duration_ms as number | null) : null;
+  const span = (endedAt: number) => Math.max(0, endedAt - startedAt);
+  if (event.by === "next") return ended === null ? { endedAt: event.at, durationMs: span(event.at), timedBy: "next" } : { endedAt: ended, durationMs: (held.duration_ms as number | null) ?? span(ended), timedBy: by };
+  if (event.by === "log") {
+    // The instant is this one's. The length stays the hook's if it brought one, and is a stated wall time (Codex) before it is a gap.
+    if (measured !== null) return { endedAt: event.at, durationMs: measured, timedBy: "hook" };
+    return { endedAt: event.at, durationMs: Math.max(0, event.durationMs ?? span(event.at)), timedBy: "log" };
+  }
+  const endedAt = ended !== null && by === "log" ? ended : event.at;
+  if (event.durationMs !== null) return { endedAt, durationMs: Math.max(0, event.durationMs), timedBy: "hook" };
+  return ended !== null && by === "log" ? { endedAt, durationMs: (held.duration_ms as number | null) ?? span(endedAt), timedBy: "log" } : { endedAt, durationMs: span(endedAt), timedBy: "hook" };
 }
 
 /** One event, written. Inside a transaction of the caller's. */
 export function applyTestEvent(ledger: Ledger, event: TestEvent): void {
   if (event.type === "start") {
+    // The earlier of the two starts: the transcript's is when the call was made, the hook's when its report got here.
     ledger.stmt(
       `insert into test_runs (session_id, call_id, program, kind, runner, suite, command, focused, background, cwd, started_at, start_by, timed_by)
        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        on conflict(session_id, call_id) do update set
          cwd = coalesce(test_runs.cwd, excluded.cwd),
          background = max(test_runs.background, excluded.background),
-         started_at = case when excluded.start_by = 'hook' and test_runs.start_by != 'hook' then excluded.started_at else test_runs.started_at end,
-         start_by = case when excluded.start_by = 'hook' then 'hook' else test_runs.start_by end`,
+         started_at = min(test_runs.started_at, excluded.started_at),
+         start_by = case when excluded.start_by = 'log' then 'log' else test_runs.start_by end`,
     ).run(event.sessionId, event.callId, event.program, event.call.kind, event.call.runner, event.call.suite, event.call.command, event.call.focused ? 1 : 0, event.background ? 1 : 0, event.cwd, event.at, event.by, event.by);
     return;
   }
@@ -113,10 +134,7 @@ export function applyTestEvent(ledger: Ledger, event: TestEvent): void {
     applyTestEvent(ledger, { type: "start", by: event.by === "next" ? "log" : event.by, sessionId: event.sessionId, callId: event.callId, program: event.program ?? "claude", call: event.call, background: false, cwd: event.cwd ?? null, at: started });
     held = ledger.stmt("select * from test_runs where session_id = ? and call_id = ?").get(event.sessionId, event.callId) as Row;
   }
-  const timed = endWins(event.by, held);
-  const startedAt = held.started_at as number;
-  const endedAt = timed ? event.at : (held.ended_at as number);
-  const duration = timed ? Math.max(0, event.durationMs ?? event.at - startedAt) : (held.duration_ms as number | null);
+  const timing = timingOf(held, event);
   // The outcome is whichever witness knew more: counts from either, an exit code from either.
   const exit = event.exit ?? (held.exit_code as number | null) ?? null;
   const counts: TestCounts | null = event.counts ?? (held.passed !== null || held.failed !== null ? { passed: held.passed as number | null, failed: held.failed as number | null, skipped: held.skipped as number | null } : null);
@@ -125,9 +143,9 @@ export function applyTestEvent(ledger: Ledger, event: TestEvent): void {
     `update test_runs set ended_at = ?, duration_ms = ?, timed_by = ?, exit_code = ?, outcome = ?, passed = ?, failed = ?, skipped = ?, runner = ?
      where session_id = ? and call_id = ?`,
   ).run(
-    endedAt,
-    duration,
-    timed ? event.by : (held.timed_by as string),
+    timing.endedAt,
+    timing.durationMs,
+    timing.timedBy,
     exit,
     outcome,
     counts?.passed ?? null,

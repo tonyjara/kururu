@@ -669,7 +669,7 @@ function testingNames(): TestingNames {
 /** An agent as a line about testing names it, or null for one that is gone. */
 function testingAgentName(agentId: string): string | null {
   const agent = host.find(agentId);
-  return agent && !agent.exited ? agentLabel(overlay(agent)) : null;
+  return agent && !agent.exited ? agentLabel(overlay(agent)).slice(0, 60) : null;
 }
 
 export function testingReportFor(range: TestingRange): TestingReport | null {

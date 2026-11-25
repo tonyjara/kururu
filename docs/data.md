@@ -494,8 +494,10 @@ agent's row and card (`server/src/testing.ts`). `PostToolUse` and
 `PostToolUseFailure` on Bash alone say it ended, with Claude Code's own
 `duration_ms`; that hook is a shell `case` over the call that starts node
 only for something test-shaped. Both witnesses write the same row, keyed by
-session and call id: the hook's times win, since a transcript's two
-timestamps include a permission prompt, and either's outcome is kept.
+session and call id: the transcript's two timestamps are the run's instants,
+since a hook's report arrives a little after the fact; the hook's
+`duration_ms` is its length, since the gap between the two timestamps has
+any permission prompt in it; and either's outcome is kept.
 
 **The one column of words.** `command` holds the part of the line that is the
 run, never the `cd` or heredoc around it, through `redactCommand`: an

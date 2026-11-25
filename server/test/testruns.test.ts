@@ -183,14 +183,22 @@ describe("a transcript's test runs", () => {
 
 describe("a hook and a transcript on one run", () => {
   const call = { kind: "unit" as const, runner: "bun", suite: "bun test", command: "bun test", focused: false };
-  it("keeps the hook's times and takes the transcript's counts", async () => {
+  it("keeps the hook's length, the transcript's instants and the transcript's counts", async () => {
     const at = Date.parse("2026-11-25T15:00:03.000Z");
     recordTestEvent(ledger, { type: "start", by: "hook", sessionId: SESSION, callId: "toolu_1", program: "claude", call, background: false, cwd: "/repo", at });
     recordTestEvent(ledger, { type: "end", by: "hook", sessionId: SESSION, callId: "toolu_1", at: at + 30_500, durationMs: 30_000, exit: 0, stopped: false, counts: null });
     writeFileSync(path(), assistant("m1", "2026-11-25T15:00:00.000Z", [bash("toolu_1", "bun test")]) + result("toolu_1", "2026-11-25T15:00:40.000Z", " 10 pass\n 1 fail\n"));
     await sweep();
     expect(runs()).toHaveLength(1);
-    expect(runs()[0]).toMatchObject({ startedAt: at, durationMs: 30_000, timedBy: "hook", passed: 10, failed: 1, outcome: "fail", cwd: "/repo" });
+    expect(runs()[0]).toMatchObject({ startedAt: Date.parse("2026-11-25T15:00:00.000Z"), endedAt: Date.parse("2026-11-25T15:00:40.000Z"), durationMs: 30_000, timedBy: "hook", passed: 10, failed: 1, outcome: "fail", cwd: "/repo" });
+  });
+
+  it("times a run by the transcript when the hook only said it started", async () => {
+    // An agent started before the end hook existed: the start arrives late, as a hook's does, and no end comes.
+    recordTestEvent(ledger, { type: "start", by: "hook", sessionId: SESSION, callId: "toolu_1", program: "claude", call, background: false, cwd: "/repo", at: Date.parse("2026-11-25T15:00:00.700Z") });
+    writeFileSync(path(), assistant("m1", "2026-11-25T15:00:00.000Z", [bash("toolu_1", "bun test")]) + result("toolu_1", "2026-11-25T15:00:40.000Z", " 10 pass\n 0 fail\n"));
+    await sweep();
+    expect(runs()[0]).toMatchObject({ startedAt: Date.parse("2026-11-25T15:00:00.000Z"), durationMs: 40_000, timedBy: "log", outcome: "pass" });
   });
 
   it("makes a row from an end whose start nobody wrote down", () => {

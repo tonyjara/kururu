@@ -112,6 +112,8 @@ export const agentRoutes: Route[] = [
           const named = (body as Record<string, unknown> | null)?.agent;
           const who = typeof named === "string" && host.find(named) ? named : null;
           if (tested !== undefined && who && testing.hook(who, tested)) {
+            // The run's result is in the transcript by now, and is what gives the row its counts.
+            usageReader?.nudge((body as Record<string, unknown>).transcript);
             json(res, { ok: true });
             return;
           }

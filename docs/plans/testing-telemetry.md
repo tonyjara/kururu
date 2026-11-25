@@ -43,8 +43,9 @@ as a test it adds a `test` field to the report it was sending anyway. That is
 the chip. A second hook, `PostToolUse` and `PostToolUseFailure` on `Bash`
 only, says the run ended, with Claude Code's own `duration_ms`, the exit code
 and the counts parsed inside the hook's process, so no output crosses to the
-server. Hook and transcript write the same row, keyed by session and call id;
-the hook's times win because they exclude a permission prompt.
+server. Hook and transcript write the same row, keyed by session and call id:
+the transcript's two timestamps are the run's instants, and Claude Code's own
+`duration_ms`, which only the hook has, is its length.
 
 A directory that runs hand-installed reporter hooks has no `PostToolUse` one,
 and kururu does not write into a login directory. So `hookSettingsFlag` now
@@ -205,6 +206,13 @@ changed:
   agent ran a test while this was built.
 - **A machine's run** ends at its session's next message (`timed_by` is
   `next`). Not exercised against a real machine.
+
+- **Who is believed for a run's times changed on the first real run.** The
+  design had the hook's times win. But the start hook is a process started
+  beside the tool, so its report arrives after the command has begun (a
+  130 ms `bun test` read as 156 ms from a start that was 700 ms late), and
+  `PreToolUse` fires before a permission prompt, not after. So the instants
+  are the transcript's and only the length is the hook's.
 
 Not built: pulling a child node's runs to its parent, a chip for Codex, a
 backfill of history, and a chart of minutes per day (the page has the table).

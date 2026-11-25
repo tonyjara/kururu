@@ -711,10 +711,12 @@ export class UsageReader {
 
   private waitFor(callId: string, run: WaitingRun, needles: Buffer[] | null): void {
     const waiting = this.waiting();
-    if (waiting.has(callId)) return;
-    waiting.set(callId, run);
-    // The rest of this file is searched for the id from the next line on. See `scanLines`.
-    needles?.push(Buffer.from(callId));
+    const held = waiting.get(callId);
+    if (held) held.messageId ??= run.messageId;
+    else waiting.set(callId, run);
+    // The rest of this file is searched for the id from the next line on (`scanLines`). Also for a run
+    // already waited on, which a hook may have written down before this file had been read at all.
+    if (needles && !needles.some((each) => each !== RETIRED && each.length === callId.length && each.toString("utf8") === callId)) needles.push(Buffer.from(callId));
     if (waiting.size > MAX_WAITING_RUNS) waiting.delete(waiting.keys().next().value!);
   }
 
