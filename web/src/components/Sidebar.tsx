@@ -286,6 +286,14 @@ export function Sidebar({
    * workspace id and a group name are two vocabularies that could collide.
    */
   const [foldedGroups, toggleGroup, foldGroups] = useFolded("kururu.sidebar.groups.folded");
+  /**
+   * Whether the Workspaces and Agents sections are open, per device, on the
+   * foot sections' terms and with their hook. Folding one only stops drawing
+   * its rows: the workspace you are in and the agent you are on are the
+   * server's, and nothing here is told of it.
+   */
+  const [workspacesOpen, toggleWorkspaces] = useDisclosure("kururu.sidebar.workspaces", true);
+  const [agentsOpen, toggleAgents] = useDisclosure("kururu.sidebar.agents", true);
   /** The workspace group whose name is being typed, if any. */
   const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
   /** Where a group heading's menu is open, and which group it is. */
@@ -1042,13 +1050,19 @@ export function Sidebar({
 
       <section className="side-section">
         <h2>
-          Workspaces
+          <SectionToggle open={workspacesOpen} onToggle={toggleWorkspaces} label="Workspaces">
+            {/* Shut, the heading says what the rows would have: that something
+                in one of them needs you. The rows' own dot, so it reads the same. */}
+            {!workspacesOpen && profile.workspaces.some((w) => needsYou.has(w.id)) && (
+              <span className="unread side-toggle-dot" aria-label="needs you" />
+            )}
+          </SectionToggle>
           {/* Every group of workspaces folded at once, or opened again once
               they all are. The workspace you are in stays standing under its
               folded group, as it does when one heading is clicked. Drawn only
               while there is a group to fold, on the drawer's argument: a button
               that can do nothing is chrome saying that a feature exists. */}
-          {groupNames.length > 0 && (
+          {workspacesOpen && groupNames.length > 0 && (
             <button
               className="mini side-fold-all"
               onClick={() => foldGroups(groupNames, !groupsFolded)}
@@ -1062,6 +1076,7 @@ export function Sidebar({
             <Icon name="add" />
           </button>
         </h2>
+        {workspacesOpen && (
         <ul className={`ws-list ${mascotted ? "ws-list-mascots" : ""}`}>
           {profile.workspaces.map((workspace, index) => {
             const head = heads.get(workspace.id);
@@ -1247,13 +1262,20 @@ export function Sidebar({
             );
           })}
         </ul>
+        )}
       </section>
 
-      <section className="side-section side-agents">
+      <section className={`side-section side-agents ${agentsOpen ? "" : "side-agents-shut"}`}>
         <h2>
-          Agents
+          <SectionToggle open={agentsOpen} onToggle={toggleAgents} label="Agents">
+            {/* The same for the agents, the put-away ones included, since the
+                drawer folds with the section. */}
+            {!agentsOpen && listed.some((agent) => agent.unread) && (
+              <span className="unread side-toggle-dot" aria-label="waiting for you" />
+            )}
+          </SectionToggle>
           {/* The same, for every workspace's group of agents. */}
-          {groups.length > 0 && (
+          {agentsOpen && groups.length > 0 && (
             <button
               className="mini side-fold-all"
               onClick={() => foldAgents(groups.map((group) => group.id), !agentsFolded)}
@@ -1264,6 +1286,8 @@ export function Sidebar({
             </button>
           )}
         </h2>
+        {agentsOpen && (
+        <>
         <ul className="agent-list">
           {shown.length === 0 && (
             <li className="muted sidebar-empty">
@@ -1368,6 +1392,8 @@ export function Sidebar({
               </ul>
             )}
           </div>
+        )}
+        </>
         )}
       </section>
 

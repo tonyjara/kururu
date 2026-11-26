@@ -854,6 +854,12 @@ kbd {
   flex: 1;
   min-height: 25vh;
 }
+/* Folded, it is a heading and nothing else, and the floor would be a quarter
+   of the window kept empty under it. */
+.side-agents-shut {
+  flex: none;
+  min-height: 0;
+}
 /* And the two boxes under it are pinned, which is what every comment about them
    already says they are. They are small and fixed — a row a node and a handful
    of links — so when the window is short they are the wrong place to find
