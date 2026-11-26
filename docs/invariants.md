@@ -229,6 +229,23 @@ having none, a run slower than its usual, reruns in a card) are worked out
 when asked, never stored and never announced. Codex, machines and other
 nodes are best effort. → [data](data.md#test-runs)
 
+## The guard
+
+**No agent kururu starts may aim a destructive command at a system path.**
+A `PreToolUse` hook on Bash, `~/.local/state/kururu/bin/rmguard` (written on
+each server start by `server/src/guardbin.ts`, running `guard.mjs` from
+`server/src/guard-cli.ts`), refuses `rm`, `mv`, `cp` onto, `chmod -R`,
+`dd of=`, `find -delete`, `> ` and their kind aimed at `/`, `/dev`, `/etc`,
+`/usr`, `/var` and the rest of `shared/rmguard.ts`'s list, reading into
+`ssh '…'`, `sh -c`, `docker exec`, `$( )` and here-documents; it was
+written after an `rm -rf /dev/null` inside an ssh string broke a VPS on
+2026-11-26. Every Claude launch carries it in its `--settings`, Kuru's
+included, whatever the profile runs by hand; Codex gets it as a `-c`
+override and asks the owner to trust it once per login (and runs no hook at
+all under `[features] hooks = false`); Antigravity, OpenCode and agents on a
+machine get none. **To run one refused command, run it yourself in a shell
+tab**: the guard is on the agents' Bash tool, never on a terminal.
+
 ## Stored credentials
 
 **The OpenRouter key is one of the credentials kururu stores — a

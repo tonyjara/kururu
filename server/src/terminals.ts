@@ -72,7 +72,7 @@ import { processCwd } from "./cwd";
 import { closeDatabasePools } from "./databases";
 import { allowRoot } from "./files";
 import { kuruLaunchFlags } from "./harnesshome";
-import { hookSettingsFlag, hookSettingsFor } from "./hooks";
+import { codexGuardFlags, hookSettingsFlag, hookSettingsFor } from "./hooks";
 import { web } from "./sweeps";
 import { claudeDirOf, codexHomeOf, spawnEnv, spawnEnvFor, tokenInPtys } from "./lending";
 import { endSession, findMachine, machinesSnapshot, sessionsEnding, sessionsOn } from "./machines";
@@ -712,10 +712,14 @@ export function noteReported(agentId: string, body: Record<string, unknown>): vo
  * Kururu's hooks for a Claude launch whose config directory does not already
  * run them — a profile's own, or the machine's on a box nobody installed them
  * on by hand, which is every child. `hookSettingsFlag` steps aside for a
- * directory that has them, so the Mac's hand-installed hooks are not doubled.
+ * directory that has them, so the Mac's hand-installed hooks are not doubled,
+ * and keeps the guard on regardless (`shared/rmguard.ts`). Codex gets the
+ * guard alone, as `-c` overrides (`codexGuardFlags`).
  */
 export function hooksFor(launcher: Launcher, profileId: string): string {
-  if (launcher.cli !== "claude" || !workspaces.profile(profileId)) return "";
+  if (!workspaces.profile(profileId)) return "";
+  if (launcher.cli === "codex") return codexGuardFlags();
+  if (launcher.cli !== "claude") return "";
   return hookSettingsFlag(claudeDirOf(profileId));
 }
 

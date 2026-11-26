@@ -24,6 +24,7 @@ in this folder.
 | `usage.ts` | The ledger's rows, the count that refuses a non-count, the Mac's days, and whose a session was: `attributionFor` and which reading wins |
 | `usagepull.ts` | What a node tells its parent it spent, by the quarter hour, and how the parent checks it off the wire |
 | `testing.ts` | Knowing a test run from its command line (`classifyCommand`), what may be kept of it (`redactCommand`), and the counts on a runner's summary line (`parseTestCounts`). Pure, shared by the hook, the reader and the page |
+| `rmguard.ts` | Whether a command line aims a destructive verb at a system path, read the way a shell would, into `ssh '…'`, `sh -c`, `docker exec` and `$( )`; an unknown variable is empty. Pure, tested (`server/test/rmguard.test.ts`). See [more](invariants.md#the-guard) |
 | `testreport.ts` | What the recorded runs add up to: by project and suite, the slowest, the flags (no test suite here, slower than usual, rerun in a card), and the lines Kuru is given |
 | `usagereport.ts` | What the Usage page draws, from the ledger's cells: ranges and their edges, buckets, whose a cell is, who keeps which colour |
 | `chartcolor.ts` | The colours a chart may wear, Kuru's moved into the band, and the arithmetic that says they can be told apart |
@@ -180,6 +181,7 @@ in this folder.
 | `src/opencode.ts` | Kuru on OpenCode, the half that touches the disk: kururu's plugin, which posts the same `/api/report`s Claude Code's hooks do, and the config and role written into Kuru's folder before each start. See [harness](harness.md#on-opencode) |
 | `src/testing.ts` | What is testing now, from the agents' hooks, as the chip on a row and card; and the door to the recorded runs for the Testing page, Kuru's `testing` tool and a card's history. Types into nothing |
 | `src/hooks.ts` | The hooks kururu hands a Claude Code it starts in a profile with a login of its own, whose empty `settings.json` would otherwise run it with none |
+| `src/guard-cli.ts`, `src/guardbin.ts` | The guard on agents' shell commands: the hook that refuses a destructive verb aimed at a system path, bundled to `guard.mjs`, and `~/.local/state/kururu/bin/rmguard`, the one path Claude's `--settings` and Codex's `-c` name. The reading is `shared/rmguard.ts`. See [more](invariants.md#the-guard) |
 | `src/outbox.ts` | Your words on their way to Kuru, kept on the disk from the moment they arrive until Kuru's own hook says it has them. See [voice](voice.md) |
 | `src/mcp.ts` | Five methods of MCP over JSON-RPC, written out rather than the SDK. Pure; served at `POST /mcp` for the harness and `POST /mcp/web` for every agent |
 | `src/voice.ts` | The harness's ears and mouth: a clip through Hex (`hex.ts`), or `yap` once per language, the words into the harness; a reply through Kokoro (or `say`) a sentence at a time, Spanish phonemised by `espeak-ng`. `/api/voice/hear`, `/api/speech` (`shared/voice.ts`) |

@@ -43,6 +43,14 @@
  * events are layered onto a directory that runs the hand-installed reporter
  * as well, since no hand-installed set has them; the other five still step
  * aside there. See `shared/testing.ts`.
+ *
+ * **The guard rides with them, and never steps aside.** A `PreToolUse` on
+ * `Bash` that refuses a destructive command aimed at a system path
+ * (`shared/rmguard.ts`, run through `guardbin.ts`'s stable command), on every
+ * launch, whatever the directory runs by hand: a second copy would refuse
+ * the same command twice, which is harmless, and a missing one is the
+ * accident it is for. So a directory that reports everything itself still
+ * gets a `--settings` file, with only the guard in it.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,6 +58,7 @@ import { fileURLToPath } from "node:url";
 import { shq } from "../../shared/text";
 import { classifyCommand, exitCodeIn, parseTestCounts, wasRefused, type TestHookReport } from "../../shared/testing";
 import { stateDir } from "./fsutil";
+import { guardCommand } from "./guardbin";
 
 /** Claude Code's event, and the status `report-cli.ts` is told for it. */
 const EVENTS: [event: string, status: string | null][] = [
@@ -141,15 +150,30 @@ export function testEndCommand(base: string): string {
   return `p=$(cat); c=\${p%%\\"tool_response\\"*}; c=\${c%%\\"error\\":*}; case "$c" in *tool_input*) ;; *) c=$p;; esac; case "$c" in ${words}) printf '%s' "$p" | ${base} >/dev/null 2>&1;; esac; true`;
 }
 
-/** The settings layered over a Claude Code launch. Pure, for the test. `only` keeps it to the test run's end, for a directory that reports the rest itself. */
-export function hookSettings(runtime: string, script: string, only?: "tests"): object {
+/**
+ * The guard's hook: before every `Bash` call, and waited for, since a
+ * refusal has to arrive before the command runs. Claude Code's and Codex's
+ * shape alike. Pure, for the test.
+ */
+export function guardHook(command: string): { matcher: string; hooks: object[] } {
+  return { matcher: "Bash", hooks: [{ type: "command", command: shq(command), timeout: 10 }] };
+}
+
+/**
+ * The settings layered over a Claude Code launch. Pure, for the test. `only`
+ * keeps it to the test run's end, for a directory that reports the rest
+ * itself, or to the guard alone, for one that reports that too. `guard` is
+ * the guard's command, or null while there is none.
+ */
+export function hookSettings(runtime: string, script: string, only?: "tests" | "guard", guard?: string | null): object {
   const base = `ELECTRON_RUN_AS_NODE=1 ${shq(runtime)} ${shq(script)}`;
-  const hooks: Record<string, unknown> = {};
+  const hooks: Record<string, object[]> = {};
   for (const [event, status] of only ? [] : EVENTS) {
     const command = `${status ? `${base} ${status}` : base} >/dev/null 2>&1 || true`;
     hooks[event] = [{ hooks: [{ type: "command", async: true, command }] }];
   }
-  for (const event of TEST_END_EVENTS) hooks[event] = [{ matcher: "Bash", hooks: [{ type: "command", async: true, command: testEndCommand(base) }] }];
+  if (only !== "guard") for (const event of TEST_END_EVENTS) hooks[event] = [{ matcher: "Bash", hooks: [{ type: "command", async: true, command: testEndCommand(base) }] }];
+  if (guard) hooks.PreToolUse = [...(hooks.PreToolUse ?? []), guardHook(guard)];
   return { hooks };
 }
 
@@ -193,14 +217,16 @@ export function testReportOf(payload: Record<string, unknown> | null): TestHookR
  * no script to point it at — a server run from source without a build, which
  * gets an agent without a ring rather than a hook that fails on every turn.
  */
-export function hookSettingsFile(only?: "tests"): string | null {
+export function hookSettingsFile(only?: "tests" | "guard"): string | null {
   const script = reportScript();
-  if (!existsSync(script)) return null;
+  const guard = guardCommand();
+  const mode = existsSync(script) ? only : "guard";
+  if (mode === "guard" && !guard) return null;
   const dir = stateDir();
-  const path = join(dir, only ? "claude-hooks-tests.json" : "claude-hooks.json");
+  const path = join(dir, mode ? `claude-hooks-${mode}.json` : "claude-hooks.json");
   try {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path, `${JSON.stringify(hookSettings(process.execPath, script, only), null, 2)}\n`, "utf8");
+    writeFileSync(path, `${JSON.stringify(hookSettings(process.execPath, script, mode, guard), null, 2)}\n`, "utf8");
     return path;
   } catch {
     return null;
@@ -248,15 +274,15 @@ export function runsReporter(settings: unknown, script: string, events?: readonl
  *
  * When the directory Claude is about to read already runs the reporter, only
  * the test run's end is layered on, which no hand-installed set has (and
- * nothing at all if that directory has it too). A settings file that will
+ * only the guard if that directory has it too). A settings file that will
  * not parse counts as not running it: the cost of that guess is a doubled
  * report, and the cost of the other is no ring.
  */
 export function hookSettingsFlag(claudeDir: string): string {
   const own = ownSettings(claudeDir);
   const script = reportScript();
-  if (own !== null && runsReporter(own, script) && runsReporter(own, script, TEST_END_EVENTS)) return "";
-  const file = hookSettingsFile(own !== null && runsReporter(own, script) ? "tests" : undefined);
+  const reports = own !== null && runsReporter(own, script);
+  const file = hookSettingsFile(reports && runsReporter(own, script, TEST_END_EVENTS) ? "guard" : reports ? "tests" : undefined);
   return file ? ` --settings ${shq(file)}` : "";
 }
 
@@ -264,13 +290,34 @@ export function hookSettingsFlag(claudeDir: string): string {
  * The same decision as the settings themselves, for a launch that writes one
  * `--settings` file of its own and has to put the hooks in it — Kuru's
  * (`kuruLaunchFlags`), since a second `--settings` on a line replaces the
- * first. Null when the directory runs the reporter already, or there is no
- * script to point at.
+ * first. The guard alone when the directory runs the reporter already, and
+ * null when there is nothing to point at.
  */
 export function hookSettingsFor(claudeDir: string): object | null {
-  if (runsOwnReporter(claudeDir)) return null;
   const script = reportScript();
-  return existsSync(script) ? hookSettings(process.execPath, script) : null;
+  const guard = guardCommand();
+  const mode = runsOwnReporter(claudeDir) || !existsSync(script) ? "guard" : undefined;
+  if (mode === "guard" && !guard) return null;
+  return hookSettings(process.execPath, script, mode, guard);
+}
+
+/**
+ * The guard for a Codex launch, as `-c` overrides, or nothing. Codex reads
+ * hooks from the line as a layer of their own and asks the owner to trust
+ * one before it runs (its "Hooks need review" screen, once per login,
+ * since the definition does not change); and a login whose `config.toml`
+ * has `[features] hooks = false` runs none. Neither is kururu's to answer
+ * for the owner, so both are left to them: see docs/invariants.md#the-guard.
+ */
+export function codexGuardFlags(): string {
+  const guard = guardCommand();
+  return guard ? ` ${codexGuardFlag(guard)}` : "";
+}
+
+/** Pure, for the test. TOML's basic string is JSON's for a path. */
+export function codexGuardFlag(command: string): string {
+  const line = /^[A-Za-z0-9_./~-]+$/.test(command) ? command : shq(command);
+  return `-c ${shq(`hooks.PreToolUse=[{matcher="Bash",hooks=[{type="command",command=${JSON.stringify(line)},timeout=10}]}]`)}`;
 }
 
 function runsOwnReporter(claudeDir: string): boolean {

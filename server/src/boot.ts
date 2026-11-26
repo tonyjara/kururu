@@ -126,6 +126,7 @@ import { Slots, writeSlotCommand } from "./slots";
 import { machineStore } from "./keychain";
 import { readAsksFile, Vault, writeAsksFile } from "./vaultstore";
 import { vaultAskpassPath, writeVaultCommand } from "./vaultbin";
+import { writeGuardCommand } from "./guardbin";
 import { sweepRunFiles, usesPath, vaultFilesDir, VaultRuns } from "./vaultrun";
 import { specsSnapshot } from "./specs";
 import { dataDir, dbPath, Store } from "./store";
@@ -782,6 +783,8 @@ export async function attach(port: Port): Promise<void> {
     if (swept) console.log(`kururu: vault: removed ${swept} file cop${swept === 1 ? "y" : "ies"} a run before this server left behind`);
   }
   writeVaultCommand();
+  // The guard's hook command, before any agent is launched with it named.
+  writeGuardCommand();
   provide("automations", new Automations({
     store,
     // Off in an isolated instance unless asked for: a scratch server on a
