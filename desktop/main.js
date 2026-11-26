@@ -1504,8 +1504,8 @@ ipcMain.on("kururu:float-menu", (event) => {
 });
 ipcMain.on("kururu:float-grip", (event, phase, edge) => {
   if (!float.isPanel(event.sender) || !["start", "move", "end"].includes(phase)) return;
-  // A page from before the chat's width could be dragged names no edge, and means its height.
-  float.grip(phase, ["height", "width", "both"].includes(edge) ? edge : "height");
+  // A compass name for any edge or corner; a page from before those names the far ones by what they change, and one from before the width names nothing and means the height (`adoptEdge`).
+  float.grip(phase, typeof edge === "string" ? edge : "height");
 });
 ipcMain.on("kururu:float-show", (event) => {
   if (float.isPanel(event.sender)) float.show();

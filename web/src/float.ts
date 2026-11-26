@@ -35,6 +35,7 @@ function adopt(raw: unknown): FloatState | null {
     wave: typeof r.wave === "number" && Number.isFinite(r.wave) ? Math.max(60, Math.min(2000, r.wave)) : 132,
     role: r.role === "logo" || r.role === "panel" ? r.role : (state?.role ?? null),
     wide: r.wide === true,
+    edges: r.edges === true,
     pen: r.pen === true,
     logo: typeof r.logo === "number" && Number.isFinite(r.logo) ? Math.max(48, Math.min(240, r.logo)) : undefined,
     give: r.give === true,

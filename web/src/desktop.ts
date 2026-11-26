@@ -128,6 +128,8 @@ export interface FloatState {
    * Missing from an app from before either.
    */
   wide?: boolean;
+  /** Every edge and corner of the chat can be dragged, the logo's side carrying the logo with it; missing from an app where only the far ones could. */
+  edges?: boolean;
   pen?: boolean;
   /** How big the logo's window is, a side, in CSS pixels: what the logo's page fills. Missing from an app whose logo was 64. */
   logo?: number;
@@ -149,8 +151,12 @@ export interface DesktopFloat {
   drag(phase: "start" | "move" | "end"): void;
   /** The logo's page only: it was right-clicked. */
   menu(): void;
-  /** The chat's page only: one of its far edges is being dragged — its height's, its width's, or the corner between them. */
-  grip(phase: "start" | "move" | "end", edge?: "height" | "width" | "both"): void;
+  /**
+   * The chat's page only: one of its edges or corners is being dragged, by
+   * compass. An app from before `FloatState.edges` knows only the far ones,
+   * by what they change: its height's, its width's, or the corner between.
+   */
+  grip(phase: "start" | "move" | "end", edge?: "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw" | "height" | "width" | "both"): void;
   /** The chat's page only: put it away. */
   close(): void;
   /** The chat's page only: open it, for something that landed in its box while it was shut. Optional: an app from before it. */

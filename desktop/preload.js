@@ -324,7 +324,7 @@ if (isPicker) {
       press: () => ipcRenderer.send("kururu:float-press"),
       drag: (phase) => ipcRenderer.send("kururu:float-drag", String(phase)),
       menu: () => ipcRenderer.send("kururu:float-menu"),
-      /** `edge` is `height`, `width` or `both`: which of the chat's far edges is being dragged. */
+      /** `edge` is which of the chat's edges or corners is being dragged, by compass (`n`, `se`, …); an older page's `height`, `width` or `both` still means the far ones. */
       grip: (phase, edge) => ipcRenderer.send("kururu:float-grip", String(phase), typeof edge === "string" ? edge : "height"),
       close: () => ipcRenderer.send("kururu:float-close"),
       /** The chat's page only: open the chat, for something that landed in its box while it was shut. */

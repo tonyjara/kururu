@@ -185,10 +185,7 @@ function heldInside(x, y, area) {
  * the display for it brings the logo out with it.
  *
  * `side` is where the chat is from the logo, and `reach` which way it
- * extends; the two edges away from the logo, and the corner between them,
- * are what the page lets be dragged. `room` and `roomAcross` are the most
- * each drag may ask for: from the logo's side of the chat to the edge of the
- * work area, with the logo where it is.
+ * extends.
  */
 function panelBox(logo, area, wantedHeight, wantedWidth, corner = CORNERS[0]) {
   const side = sideOf(corner);
@@ -214,8 +211,6 @@ function panelBox(logo, area, wantedHeight, wantedWidth, corner = CORNERS[0]) {
   const top = at.y + LOGO_MARGIN - GAP;
   const foot = at.y + near;
   const anchor = way === "left" ? at.x + LOGO - LOGO_MARGIN : at.x + LOGO_MARGIN;
-  const room = Math.max(PANEL_FLOOR, side === "above" ? top - area.y : bottom - foot);
-  const roomAcross = Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, way === "left" ? anchor - area.x : right - anchor));
   return {
     x: way === "left" ? anchor - width : anchor,
     y: side === "above" ? top - height : foot,
@@ -225,10 +220,6 @@ function panelBox(logo, area, wantedHeight, wantedWidth, corner = CORNERS[0]) {
     reach: way,
     /** Where the logo is for this box: where it was, or moved in so the chat fits. */
     logo: at,
-    /** The tallest this side lets it be dragged, for the handle. */
-    room: Math.round(room),
-    /** And the widest. */
-    roomAcross: Math.round(roomAcross),
   };
 }
 
@@ -243,25 +234,70 @@ function logoFor(box, corner) {
 }
 
 /**
- * The chat's height while its far edge is dragged to `pointerY`: the logo's
- * side of it stays where it is, so above the logo it is the top that follows
- * the pointer, and below it the bottom. Held between the floor and the room.
+ * The handles the chat is resized by: its four edges and four corners, by
+ * compass, as a note's are (`Edge` in `web/src/notes.ts`). Only the two far
+ * edges and the corner between them could be dragged at first, the logo's
+ * side being where the chat is anchored; the owner, 2026-11-26, at the top
+ * right of a chat whose logo is at its bottom right: "I want to be able to
+ * resize the floating kuru from any corner, like that one doesn't allow
+ * horizontal resize, all should allow it."
  */
-function draggedHeight(box, pointerY) {
-  const raw = box.side === "above" ? box.y + box.height - pointerY : pointerY - box.y;
-  if (!finite(raw)) return box.height;
-  return Math.round(clamp(raw, Math.min(PANEL_MIN, box.room), box.room));
+const EDGES = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+
+/**
+ * The handle a page names. A page from before every edge could be dragged
+ * names the far ones by what they change — `height`, `width`, or `both` for
+ * the corner between them — and anything else is the far horizontal edge,
+ * which is what a page that named nothing meant.
+ */
+function adoptEdge(raw, corner = CORNERS[0]) {
+  if (EDGES.includes(raw)) return raw;
+  const across = sideOf(corner) === "above" ? "n" : "s";
+  const along = reachOf(corner) === "left" ? "w" : "e";
+  if (raw === "width") return along;
+  if (raw === "both") return across + along;
+  return across;
 }
 
 /**
- * The same across: the edge away from the logo follows `pointerX` — the left
- * one of a chat that extends leftwards, the right one of one that extends
- * rightwards — between the least width and what the display has that way.
+ * The chat's box while `edge` is dragged to `at`: the edges named follow the
+ * pointer and the ones across from them stay where they are, so the chat
+ * grows or shrinks from the side that was taken hold of, as any window does.
+ *
+ * The far edges are the easy half: nothing hangs off them. A near edge — the
+ * logo's side — carries the logo with it, since the logo is always at its
+ * corner of the chat (`logoFor` gives where it goes); the alternative, the
+ * near edge pinned and the far one moved instead, is a handle that drags the
+ * wrong side, which is the thing that was asked to be gone. So the box is
+ * held inside the work area less what the logo's window hangs past the chat
+ * on its two sides — `LOGO_MARGIN` along the row, the logo's row itself
+ * across — which is exactly the room `panelBox` keeps, and the box comes
+ * back from it unchanged once the logo is put where `logoFor` says.
+ *
+ * Each size is held between its least and its most (the width's ceiling is
+ * `PANEL_WIDTH_MAX`, the height has only the display's), and where the room
+ * left is less than the least, the room wins: a chat is never pushed off its
+ * display to be the size a rule says. A pointer that is nowhere moves nothing.
  */
-function draggedWidth(box, pointerX) {
-  const raw = box.reach === "left" ? box.x + box.width - pointerX : pointerX - box.x;
-  if (!finite(raw)) return box.width;
-  return Math.round(clamp(raw, Math.min(PANEL_WIDTH_MIN, box.roomAcross), box.roomAcross));
+function grippedBox(box, edge, at, area, corner = CORNERS[0]) {
+  const near = LOGO - LOGO_MARGIN + GAP;
+  const logoBelow = sideOf(corner) === "above";
+  const logoRight = reachOf(corner) === "left";
+  const top = area.y + (logoBelow ? 0 : near);
+  const bottom = area.y + area.height - (logoBelow ? near : 0);
+  const left = area.x + (logoRight ? 0 : LOGO_MARGIN);
+  const right = area.x + area.width - (logoRight ? LOGO_MARGIN : 0);
+  let x0 = box.x;
+  let x1 = box.x + box.width;
+  let y0 = box.y;
+  let y1 = box.y + box.height;
+  if (edge.includes("w") && finite(at.x)) x0 = Math.max(left, x1 - PANEL_WIDTH_MAX, Math.min(at.x, x1 - PANEL_WIDTH_MIN));
+  if (edge.includes("e") && finite(at.x)) x1 = Math.min(right, x0 + PANEL_WIDTH_MAX, Math.max(at.x, x0 + PANEL_WIDTH_MIN));
+  if (edge.includes("n") && finite(at.y)) y0 = Math.max(top, Math.min(at.y, y1 - PANEL_MIN));
+  if (edge.includes("s") && finite(at.y)) y1 = Math.min(bottom, Math.max(at.y, y0 + PANEL_MIN));
+  x0 = Math.round(x0);
+  y0 = Math.round(y0);
+  return { x: x0, y: y0, width: Math.round(x1) - x0, height: Math.round(y1) - y0 };
 }
 
 /**
@@ -316,6 +352,7 @@ function waveBox(logo, area, size, corner = CORNERS[0], open = false) {
 
 module.exports = {
   CORNERS,
+  EDGES,
   GAP,
   HOME_INSET,
   LOGO,
@@ -330,10 +367,10 @@ module.exports = {
   WAVE_GAP,
   WAVE_WIDTH,
   adoptCorner,
+  adoptEdge,
   adoptFloat,
   adoptPlace,
-  draggedHeight,
-  draggedWidth,
+  grippedBox,
   heldInside,
   logoBox,
   logoFor,

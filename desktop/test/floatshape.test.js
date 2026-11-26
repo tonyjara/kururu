@@ -22,9 +22,10 @@ import {
   PILL_MARGIN,
   WAVE_GAP,
   WAVE_WIDTH,
+  EDGES,
+  adoptEdge,
   adoptFloat,
-  draggedHeight,
-  draggedWidth,
+  grippedBox,
   heldInside,
   logoBox,
   logoFor,
@@ -240,14 +241,12 @@ describe("which way the chat opens", () => {
     expect(box.width).toBe(700);
     expect(box.x).toBe(0);
     expect(box.logo.x).toBe(700 - LOGO + LOGO_MARGIN);
-    expect(box.roomAcross).toBe(700);
   });
 
   it("fills a display too short for the height it was dragged to", () => {
     const short = { x: 0, y: 25, width: 1512, height: 440 };
     const box = panelBox(logoAt(700, 25 + 200), short, 520);
     expect(box.height).toBe(440 - (LOGO - LOGO_MARGIN + GAP));
-    expect(box.room).toBe(box.height);
     expect(inside(box, short)).toBe(true);
   });
 });
@@ -270,60 +269,106 @@ describe("picking another corner", () => {
   });
 });
 
-describe("dragging the chat's far side", () => {
-  it("follows the pointer with its left edge when it extends leftwards", () => {
-    const logo = logoBox(null, [main], main);
-    const box = panelBox(logo, main.workArea, 520, 420);
-    const anchor = box.x + box.width;
-    expect(draggedWidth(box, anchor - 600)).toBe(600);
-    expect(draggedWidth(box, anchor - 10)).toBe(PANEL_WIDTH_MIN);
-    expect(draggedWidth(box, -99999)).toBe(PANEL_WIDTH_MAX);
+/** The box `panelBox` gives back for a logo put where `logoFor` says of `box`: the box again, if the drag kept the pair inside. */
+const settled = (box, area, corner) => {
+  const to = logoFor(box, corner);
+  const again = panelBox({ ...to, width: LOGO, height: LOGO }, area, box.height, box.width, corner);
+  return { x: again.x, y: again.y, width: again.width, height: again.height };
+};
+
+describe("resizing the chat from any edge", () => {
+  // The default corner: the logo at the chat's bottom right, the chat above it and extending left.
+  const area = main.workArea;
+  const box = panelBox(logoAt(1000, 600), area, 520, 420);
+  const right = box.x + box.width;
+  const foot = box.y + box.height;
+
+  it("names every edge and corner, and reads an older page's names as the far ones", () => {
+    for (const edge of EDGES) expect(adoptEdge(edge)).toBe(edge);
+    expect(adoptEdge("height")).toBe("n");
+    expect(adoptEdge("width")).toBe("w");
+    expect(adoptEdge("both")).toBe("nw");
+    expect(adoptEdge(undefined)).toBe("n");
+    expect(adoptEdge("both", "top-left")).toBe("se");
+    expect(adoptEdge("width", "bottom-left")).toBe("e");
+    expect(adoptEdge("height", "top-right")).toBe("s");
   });
 
-  it("follows the pointer with its right edge when it extends rightwards", () => {
-    const box = panelBox(logoAt(100, 700), main.workArea, 520, 420, "bottom-left");
-    expect(draggedWidth(box, box.x + 555)).toBe(555);
-    expect(draggedWidth(box, box.x + 1)).toBe(PANEL_WIDTH_MIN);
-    expect(draggedWidth(box, 99999)).toBe(PANEL_WIDTH_MAX);
+  it("moves the far edges and leaves the logo's side where it is", () => {
+    const next = grippedBox(box, "nw", { x: right - 600, y: foot - 300 }, area);
+    expect(next).toEqual({ x: right - 600, y: foot - 300, width: 600, height: 300 });
   });
 
-  it("stops at the edge of a display with less than the most that way", () => {
-    const area = { x: 0, y: 25, width: 900, height: 900 };
-    const box = panelBox(logoAt(500 - LOGO + LOGO_MARGIN, 700), area, 520, 420);
-    expect(draggedWidth(box, -4000)).toBe(500);
+  it("moves a near edge and leaves the far one where it is, which the owner's top right asked for", () => {
+    // The top right corner: the top is far, the right is the logo's side.
+    const next = grippedBox(box, "ne", { x: right + 100, y: box.y - 40 }, area);
+    expect(next).toEqual({ x: box.x, y: box.y - 40, width: box.width + 100, height: box.height + 40 });
+    // The logo goes along to its corner of the new box, and the box is what panelBox then gives.
+    expect(logoFor(next, "bottom-right").x).toBe(logoFor(box, "bottom-right").x + 100);
+    expect(settled(next, area, "bottom-right")).toEqual(next);
   });
 
-  it("keeps the width it has for a pointer that is nowhere", () => {
-    const box = panelBox(logoAt(100, 700), main.workArea, 520, 480);
-    expect(draggedWidth(box, Number.NaN)).toBe(480);
-  });
-});
-
-describe("dragging the chat's far edge", () => {
-  it("follows the pointer with its top when it is above the logo", () => {
-    const logo = logoBox(null, [main], main);
-    const box = panelBox(logo, main.workArea, 520);
-    const foot = box.y + box.height;
-    expect(draggedHeight(box, foot - 300)).toBe(300);
-    expect(draggedHeight(box, foot - 10)).toBe(PANEL_MIN);
-    expect(draggedHeight(box, -5000)).toBe(box.room);
+  it("moves the bottom with the logo under it, and narrows from the right", () => {
+    const next = grippedBox(box, "se", { x: right - 50, y: foot + 30 }, area);
+    expect(next).toEqual({ x: box.x, y: box.y, width: box.width - 50, height: box.height + 30 });
+    expect(settled(next, area, "bottom-right")).toEqual(next);
   });
 
-  it("follows the pointer with its foot when it is below the logo", () => {
-    const box = panelBox(logoAt(0, 25), main.workArea, 520, 420, "top-left");
-    expect(draggedHeight(box, box.y + 340)).toBe(340);
-    expect(draggedHeight(box, 99999)).toBe(box.room);
+  it("drags one axis from an edge and both from a corner", () => {
+    expect(grippedBox(box, "e", { x: right + 20, y: 0 }, area)).toEqual({ x: box.x, y: box.y, width: box.width + 20, height: box.height });
+    expect(grippedBox(box, "s", { x: 0, y: foot - 20 }, area)).toEqual({ x: box.x, y: box.y, width: box.width, height: box.height - 20 });
   });
 
-  it("keeps the height it has for a pointer that is nowhere", () => {
-    const box = panelBox(logoAt(0, 25), main.workArea, 520);
-    expect(draggedHeight(box, Number.NaN)).toBe(box.height);
+  it("holds each size between its least and its most", () => {
+    expect(grippedBox(box, "w", { x: right - 10, y: 0 }, area).width).toBe(PANEL_WIDTH_MIN);
+    expect(grippedBox(box, "e", { x: box.x + 10, y: 0 }, area).width).toBe(PANEL_WIDTH_MIN);
+    expect(grippedBox(box, "n", { x: 0, y: foot - 10 }, area).height).toBe(PANEL_MIN);
+    expect(grippedBox(box, "s", { x: 0, y: box.y + 10 }, area).height).toBe(PANEL_MIN);
+    expect(grippedBox(box, "w", { x: -99999, y: 0 }, area).width).toBe(PANEL_WIDTH_MAX);
   });
 
-  it("never asks for less than the floor", () => {
-    const box = panelBox(logoAt(700, 25 + 200), { x: 0, y: 25, width: 1512, height: 200 }, 520);
-    expect(box.room).toBeGreaterThanOrEqual(PANEL_FLOOR);
-    expect(draggedHeight(box, box.y)).toBe(box.room);
+  it("stops where the logo would leave the display, on the logo's sides", () => {
+    const near = LOGO - LOGO_MARGIN + GAP;
+    const wide = grippedBox(box, "e", { x: 99999, y: 0 }, area);
+    expect(wide.x + wide.width).toBe(area.x + area.width - LOGO_MARGIN);
+    const tall = grippedBox(box, "s", { x: 0, y: 99999 }, area);
+    expect(tall.y + tall.height).toBe(area.y + area.height - near);
+    for (const next of [wide, tall]) {
+      const to = logoFor(next, "bottom-right");
+      expect(inside({ ...to, width: LOGO, height: LOGO }, area)).toBe(true);
+      expect(settled(next, area, "bottom-right")).toEqual(next);
+    }
+  });
+
+  it("stops at the display's edge on the far sides", () => {
+    expect(grippedBox(box, "n", { x: 0, y: -5000 }, area).y).toBe(area.y);
+    const short = { x: 0, y: 25, width: 900, height: 900 };
+    const narrow = panelBox(logoAt(500 - LOGO + LOGO_MARGIN, 700), short, 520, 420);
+    expect(grippedBox(narrow, "w", { x: -4000, y: 0 }, short).x).toBe(0);
+  });
+
+  it("knows the logo's sides at every corner", () => {
+    const near = LOGO - LOGO_MARGIN + GAP;
+    for (const corner of CORNERS) {
+      const at = panelBox(logoAt(700, 400), area, 520, 420, corner);
+      const out = { x: at.x, y: at.y, width: at.width, height: at.height };
+      for (const edge of EDGES) {
+        const next = grippedBox(out, edge, { x: edge.includes("w") ? -99999 : 99999, y: edge.includes("n") ? -99999 : 99999 }, area, corner);
+        expect(inside(next, area)).toBe(true);
+        const to = logoFor(next, corner);
+        expect(inside({ ...to, width: LOGO, height: LOGO }, area)).toBe(true);
+        expect(settled(next, area, corner)).toEqual(next);
+      }
+      // The logo's own row is kept clear on its side: below the chat for a bottom corner, above it for a top one.
+      const down = grippedBox(out, "s", { x: 0, y: 99999 }, area, corner);
+      const up = grippedBox(out, "n", { x: 0, y: -99999 }, area, corner);
+      if (corner.startsWith("bottom")) expect(down.y + down.height).toBe(area.y + area.height - near);
+      else expect(up.y).toBe(area.y + near);
+    }
+  });
+
+  it("keeps the box it has for a pointer that is nowhere", () => {
+    expect(grippedBox(box, "nw", { x: Number.NaN, y: Number.NaN }, area)).toEqual({ x: box.x, y: box.y, width: box.width, height: box.height });
   });
 });
 

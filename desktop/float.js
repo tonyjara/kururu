@@ -44,7 +44,7 @@ const { BrowserWindow, Menu, screen, shell } = require("electron");
 const { EventEmitter } = require("node:events");
 const { editMenuTemplate } = require("./editmenu");
 const { neverActivates, staysUp } = require("./stays");
-const { LOGO, PANEL_FLOOR, adoptCorner, adoptFloat, draggedHeight, draggedWidth, heldInside, logoBox, logoFor, panelBox, placeOf, reachOf, sideOf, waveBox, waveReach, waveWidth } = require("./floatshape");
+const { LOGO, PANEL_FLOOR, adoptCorner, adoptEdge, adoptFloat, grippedBox, heldInside, logoBox, logoFor, panelBox, placeOf, reachOf, sideOf, waveBox, waveReach, waveWidth } = require("./floatshape");
 
 /** As in `talkkey.js`: macOS is still moving windows for a while after a display changes. */
 const SETTLE_MS = [600, 2500];
@@ -132,9 +132,11 @@ class FloatKuru extends EventEmitter {
     /** The logo is being dragged: where in it the pointer took hold. @type {{ dx: number, dy: number } | null} */
     this.dragging = null;
     /**
-     * The chat's far edge or corner is being dragged: which of its two sizes
-     * follow the pointer, and how far from each edge the pointer took hold.
-     * @type {{ tall: boolean, wide: boolean, offY: number, offX: number } | null}
+     * An edge or corner of the chat is being dragged: which, by compass, how
+     * far from the edges it names the pointer took hold, and whether the
+     * logo has been carried along (a near edge's drag), so its place is
+     * written down when the drag ends.
+     * @type {{ edge: string, offX: number, offY: number, carried: boolean } | null}
      */
     this.gripping = null;
     /**
@@ -173,10 +175,12 @@ class FloatKuru extends EventEmitter {
       wave: waveWidth(box),
       // What this build of the app is and can do, for pages that may be
       // newer than the app they are drawn in: how big the logo's window is,
-      // which its page has to fill exactly; and that the chat's width can
-      // be dragged as well as its height, and a screen pen started from it.
+      // which its page has to fill exactly; that the chat's width can be
+      // dragged as well as its height, and by every edge and corner rather
+      // than the two far from the logo; and a screen pen started from it.
       logo: LOGO,
       wide: true,
+      edges: true,
       pen: true,
       // And that what is handed to Kuru in the window can be put in the
       // chat's box (`give`), and when the chat last had the keyboard.
@@ -629,12 +633,13 @@ class FloatKuru extends EventEmitter {
   }
 
   /**
-   * The chat's far edges dragged, by the page's handles: the edge away from
-   * the logo follows the pointer and the logo's side stays, so the chat
-   * never comes off the thing it is anchored to. `edge` is which — `height`
-   * for the far horizontal edge, `width` for the far vertical one, `both`
-   * for the corner between them. As with the logo's drag, the pointer is
-   * read from `screen`.
+   * The chat resized by the page's handles, one on each edge and corner:
+   * the edges `edge` names follow the pointer and the ones across from them
+   * stay, and a near edge — the logo's side — carries the logo with it, so
+   * the logo is still at its corner (`grippedBox`). `edge` is a compass
+   * name, or what a page from before every edge could be dragged called the
+   * far ones (`adoptEdge`). As with the logo's drag, the pointer is read
+   * from `screen`.
    */
   grip(phase, edge = "height") {
     const panel = this.panel;
@@ -642,23 +647,34 @@ class FloatKuru extends EventEmitter {
     if (phase === "start") {
       const at = screen.getCursorScreenPoint();
       const box = this.box;
+      const named = adoptEdge(edge, this.corner);
       this.gripping = {
-        tall: edge !== "width",
-        wide: edge === "width" || edge === "both",
-        offY: at.y - (box.side === "above" ? box.y : box.y + box.height),
-        offX: at.x - (box.reach === "left" ? box.x : box.x + box.width),
+        edge: named,
+        offX: named.includes("w") ? at.x - box.x : named.includes("e") ? at.x - (box.x + box.width) : 0,
+        offY: named.includes("n") ? at.y - box.y : named.includes("s") ? at.y - (box.y + box.height) : 0,
+        carried: false,
       };
       return;
     }
     const held = this.gripping;
     if (!held) return;
     if (phase === "move") {
+      const logo = this.logoBounds();
+      if (!logo) return;
       const at = screen.getCursorScreenPoint();
-      const height = held.tall ? draggedHeight(this.box, at.y - held.offY) : this.box.height;
-      const width = held.wide ? draggedWidth(this.box, at.x - held.offX) : this.box.width;
-      if (height === this.box.height && width === this.box.width) return;
-      if (held.tall) this.height = height;
-      if (held.wide) this.width = width;
+      const box = this.box;
+      const next = grippedBox(box, held.edge, { x: at.x - held.offX, y: at.y - held.offY }, this.areaOf(logo), this.corner);
+      if (next.x === box.x && next.y === box.y && next.width === box.width && next.height === box.height) return;
+      this.height = next.height;
+      this.width = next.width;
+      const to = logoFor(next, this.corner);
+      if (to.x !== logo.x || to.y !== logo.y) {
+        // The logo's side moved: the logo goes with it, and the chat and the waveform are put against it where it went.
+        this.moveLogo(to.x, to.y);
+        held.carried = true;
+        this.follow();
+        return;
+      }
       const was = this.state().wave;
       this.placePanel();
       // The waveform runs the chat's width, so a width that changed is told.
@@ -669,6 +685,7 @@ class FloatKuru extends EventEmitter {
       return;
     }
     this.gripping = null;
+    if (held.carried) this.rememberPlace();
     this.keep();
   }
 

@@ -61,6 +61,7 @@ import { installInk } from "../ink";
 import { closeKuru, kuruLive, leaveKuruSearch, listenForGifts, openKuru, quoteInKuru, referCardIn, toggleKuru, useKuruDrawer, type KuruLive } from "../kuru";
 import { closeNeeds, toggleNeeds, useNeedsDrawer } from "../needs";
 import { arrangedNeeds, useNeedsView } from "../needsorder";
+import { EDGES, type Edge as Compass } from "../notes";
 import * as api from "../session";
 import { useKururu } from "../session";
 import { dismissVoice, installTalkKey, setVoiceProfile, setVoiceRemote, useMine, useOutgoing, useVoiceUi, type Outgoing, type VoicePhase } from "../voice";
@@ -583,9 +584,10 @@ export function FloatPanel() {
   };
 
   /**
-   * A handle's drag, told to the main process as it happens: the far
-   * horizontal edge for the height, the far vertical one for the width, the
-   * corner between them for both. Whether one is under way is kept here and
+   * A handle's drag, told to the main process as it happens: an edge or a
+   * corner by compass, or — in an app from before every edge could be
+   * dragged — the far horizontal edge for the height, the far vertical one
+   * for the width, the corner between them for both. Whether one is under way is kept here and
    * not asked of the pointer's capture, so that however it ends — the button
    * up, the press cancelled, the capture taken away — the main process is
    * told once that it has, and the size is written down.
@@ -694,18 +696,33 @@ export function FloatPanel() {
       onPointerCancel={headUp}
       onLostPointerCapture={headUp}
     >
-      {/* The edges away from the logo: the ones that move when the chat is
-          made taller, shorter, wider or narrower. The width's and the
-          corner's only in an app that can drag them. */}
-      <div
-        className="float-grip"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Make the conversation taller or shorter"
-        title="Drag to make the conversation taller or shorter"
-        {...gripFor("height")}
-      />
-      {float?.wide && (
+      {/* Every edge and corner, in an app that can drag them all: thin
+          bands at the very edge, so the head's buttons beside them are
+          still pressed rather than taken hold of. The far horizontal edge
+          keeps the bar that says a resize is there. */}
+      {float?.edges &&
+        EDGES.map((edge) => (
+          <div
+            key={edge}
+            className={`float-edge float-edge-${edge}${edge === (side === "above" ? "n" : "s") ? " float-edge-far" : ""}`}
+            aria-hidden="true"
+            title={`Resize from the ${EDGE_NAMES[edge]}`}
+            {...gripFor(edge)}
+          />
+        ))}
+      {/* In an app from before: the edges away from the logo only, the
+          width's and the corner's only in one that can drag them. */}
+      {!float?.edges && (
+        <div
+          className="float-grip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Make the conversation taller or shorter"
+          title="Drag to make the conversation taller or shorter"
+          {...gripFor("height")}
+        />
+      )}
+      {!float?.edges && float?.wide && (
         <div
           className="float-grip-side"
           role="separator"
@@ -715,7 +732,7 @@ export function FloatPanel() {
           {...gripFor("width")}
         />
       )}
-      {float?.wide && <div className="float-grip-corner" aria-hidden="true" title="Drag to resize the conversation" {...gripFor("both")} />}
+      {!float?.edges && float?.wide && <div className="float-grip-corner" aria-hidden="true" title="Drag to resize the conversation" {...gripFor("both")} />}
       {shown && ready && kuruDrawer.open && (
         <KuruDrawer
           profile={profile}
@@ -889,8 +906,20 @@ function AgentRow({ row, mascot, onGo }: { row: CountedAgent; mascot: MascotConf
   );
 }
 
-/** Which of the chat's far edges a handle drags. */
-type Edge = "height" | "width" | "both";
+/** Which of the chat's edges a handle drags: by compass, or by what an older app's far ones change. */
+type Edge = Compass | "height" | "width" | "both";
+
+/** Each handle's place, for the pointer's tooltip. */
+const EDGE_NAMES: Record<Compass, string> = {
+  n: "top edge",
+  s: "bottom edge",
+  e: "right edge",
+  w: "left edge",
+  ne: "top right corner",
+  nw: "top left corner",
+  se: "bottom right corner",
+  sw: "bottom left corner",
+};
 
 // ---------------------------------------------------------------------------
 // The waveform, in the pill's page

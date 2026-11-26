@@ -343,6 +343,132 @@ html.float-panel-page #root {
   cursor: nwse-resize;
 }
 
+/* Every edge and corner, in an app that can drag them all (`FloatState.edges`):
+   a band along each edge and a square at each corner, at the very edge of
+   the window and thin, because the head's Search, Filter and ✕ sit a few
+   pixels in from its top right and must stay buttons. The sides are the
+   narrowest, since the right one lies over the list's scrollbar. Nothing is
+   drawn but the far horizontal edge's bar, which is where a resize was
+   always looked for, and a line along an edge under the pointer. */
+.float-edge {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+}
+.float-edge-n,
+.float-edge-s {
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.float-edge-n {
+  top: 0;
+}
+.float-edge-s {
+  bottom: 0;
+}
+.float-edge-e,
+.float-edge-w {
+  top: 10px;
+  bottom: 10px;
+  width: 5px;
+  cursor: ew-resize;
+}
+.float-edge-e {
+  right: 0;
+}
+.float-edge-w {
+  left: 0;
+}
+.float-edge-ne,
+.float-edge-nw,
+.float-edge-se,
+.float-edge-sw {
+  z-index: 6;
+  width: 10px;
+  height: 10px;
+}
+.float-edge-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+.float-edge-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+.float-edge-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+.float-edge-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+.float-edge-n::after,
+.float-edge-s::after,
+.float-edge-e::after,
+.float-edge-w::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+  transition: background 120ms;
+}
+.float-edge-n::after,
+.float-edge-s::after {
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+.float-edge-n::after {
+  top: 0;
+}
+.float-edge-s::after {
+  bottom: 0;
+}
+.float-edge-e::after,
+.float-edge-w::after {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+.float-edge-e::after {
+  right: 0;
+}
+.float-edge-w::after {
+  left: 0;
+}
+.float-edge:hover::after,
+.float-edge:active::after {
+  background: var(--accent);
+}
+/* The far edge's bar, as the old handle drew it, a little in from the edge. */
+.float-edge-far::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 36px;
+  height: 4px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: var(--line);
+  transition: background 120ms;
+}
+.float-edge-n.float-edge-far::before {
+  top: 3px;
+}
+.float-edge-s.float-edge-far::before {
+  bottom: 3px;
+}
+.float-edge-far:hover::before,
+.float-edge-far:active::before {
+  background: var(--accent);
+}
+
 .float-panel-wait {
   margin: auto;
   font-size: var(--fs-md);
