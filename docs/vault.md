@@ -333,6 +333,14 @@ a restart; a caller that is no agent kururu knows is not offered it, since
 there is nothing to hold it to. The log says which: `owner`, `lasting` or
 `denied`.
 
+Under the command, **Don't ask again for this item** (the owner,
+2026-11-26). Ticked, an Allow also makes the items free, as Settings → Vault's
+switch does, and a line goes in each item's history (`how: "free"`, by "you,
+from the use dialog"); Deny ignores it, and a capture's Replace dialog has
+none. It rides on the page's `vault-allow` as `free: true` and on nothing
+else: no tool, CLI verb or MCP call can make an item free. Settings' switch
+writes its own history line both ways, and is where it is undone.
+
 ## Settings → Vault
 
 Above the census, **Kept in the vault**: every item by label and name, where

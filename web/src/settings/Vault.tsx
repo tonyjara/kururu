@@ -23,7 +23,7 @@
  */
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { NEVER_SHARED } from "../../../shared/secrets";
-import { kindWords, type CaptureEvent, type VaultPage as StorePage, type VaultUse } from "../../../shared/vaultitems";
+import { kindWords, lastKept, lastSwitch, type CaptureEvent, type VaultPage as StorePage, type VaultUse } from "../../../shared/vaultitems";
 import { envLentTo, lentRows, lentTo, type VaultKey, type VaultLogin, type VaultPage as KeyPage, type VaultView, type VaultWorkspace } from "../../../shared/vaultview";
 import * as api from "../session";
 import { useKururu } from "../session";
@@ -165,19 +165,22 @@ function Kept({ readOnly }: { readOnly: boolean }) {
             What you pasted into the vault's dialog, and what agents kept from a command that made a key (<Mono>vault capture</Mono>), kept in {where}. Agents use an item with <Mono>vault run</Mono>, which gives the command the value and the agent only its output, masked.
           </>
         }
-        foot="An item that asks opens a dialog each time a command would use it: Allow once, Allow for 15 minutes, or Deny. Removing an item leaves any env file it was written to as it is. Anything running as you can still read the Keychain directly; see docs/vault.md."
+        foot="An item that asks opens a dialog each time a command would use it: Allow once, Allow for 15 minutes, or Deny, with Don't ask again to make it free. Removing an item leaves any env file it was written to as it is. Anything running as you can still read the Keychain directly; see docs/vault.md."
       >
         {page.items.length === 0 ? (
           <Empty>Nothing yet. Kuru or an agent asks for a key and you paste it into the dialog that opens.</Empty>
         ) : (
           page.items.map((item) => {
+            const kept = lastKept(item.history);
+            const switched = lastSwitch(item.history);
             const parts = [
               item.file ? kindWords(item.file) : null,
               item.env.length ? `also in ${item.env.map((e) => `${e.variable} in ${e.file}`).join(", ")}` : null,
               item.lastUse ? `last used ${when(item.lastUse.at)} by ${item.lastUse.by}` : "never used",
-              item.history?.[0]?.how === "captured"
-                ? `captured ${when(item.updatedAt)}${item.by ? ` by ${item.by}` : ""} from ${item.history[0].command ?? "a command"}`
+              kept?.how === "captured"
+                ? `captured ${when(kept.at)}${kept.by ? ` by ${kept.by}` : ""} from ${kept.command ?? "a command"}`
                 : `saved ${when(item.updatedAt)}${item.by ? ` for ${item.by}` : ""}`,
+              switched ? `made ${switched.how === "free" ? "free" : "to ask"} ${when(switched.at)} by ${switched.by}` : null,
             ].filter(Boolean);
             return (
               <Readout

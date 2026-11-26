@@ -1732,7 +1732,8 @@ export type ClientMessage =
    */
   | { type: "vault-answer"; id: number; ask: string; values: Record<string, WireValue> | null; uses?: Record<string, UseRule> }
   /** The owner's answer to a command waiting to use an item. Replied to with nothing. */
-  | { type: "vault-allow"; id: number; ask: string; answer: UseAnswer }
+  /** `free`: the owner ticked "Don't ask again for this item"; read only with an allow, never with Deny. */
+  | { type: "vault-allow"; id: number; ask: string; answer: UseAnswer; free?: boolean }
   /** Settings → Vault: the items, their rules, recent uses. Replied to with a `VaultPage` (`shared/vaultitems.ts`). */
   | { type: "vault-page"; id: number }
   /** An item's rule, from its switch. Replied to with the page. */

@@ -53,7 +53,7 @@ export function vaultVerbs(ws: WebSocket, st: ClientState, msg: ClientMessage): 
     case "vault-allow":
       reply(ws, msg.id, () => {
         if (typeof msg.ask !== "string" || (msg.answer !== "once" && msg.answer !== "lasting" && msg.answer !== "deny")) throw new Error("That answer could not be read.");
-        vault.allow(msg.ask, msg.answer);
+        vault.allow(msg.ask, msg.answer, msg.free === true);
       });
       return true;
     case "vault-page":

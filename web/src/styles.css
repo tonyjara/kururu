@@ -5351,6 +5351,9 @@ html.pill-page #root {
   font-size: var(--fs-sm);
   color: var(--dim);
 }
+.vault-free {
+  margin-top: 12px;
+}
 .vault-outcomes {
   margin: 8px 0 0;
   padding-left: 18px;

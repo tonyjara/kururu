@@ -41,6 +41,7 @@ import {
   type EnvTarget,
   type FieldOutcome,
   type FileFacts,
+  EVENT_HOWS,
   type ItemEvent,
   type UseAnswer,
   type UseRule,
@@ -156,7 +157,7 @@ function adoptItems(raw: unknown): Map<string, ItemMeta> {
       ? m.history
           .filter((e): e is ItemEvent => {
             const v = e as Partial<ItemEvent> | null;
-            return Boolean(v) && typeof v!.at === "number" && Number.isFinite(v!.at) && typeof v!.by === "string" && (v!.how === "pasted" || v!.how === "captured" || v!.how === "converted");
+            return Boolean(v) && typeof v!.at === "number" && Number.isFinite(v!.at) && typeof v!.by === "string" && EVENT_HOWS.includes(v!.how as ItemEvent["how"]);
           })
           .map((e) => ({ at: e.at, by: e.by, how: e.how, ...(typeof e.command === "string" ? { command: e.command } : {}) }))
           .slice(0, HISTORY_KEPT)
@@ -558,13 +559,24 @@ export class Vault {
     open.resolve(approval);
   }
 
-  /** The owner's answer to a command waiting to use items. */
-  allow(id: string, answer: UseAnswer): void {
+  /**
+   * The owner's answer to a command waiting to use items. `free` is the
+   * dialog's "Don't ask again for this item", and it is the only way besides
+   * Settings that an item stops asking: it arrives with the owner's Allow on
+   * a page's socket (`vault-allow`), which is why no tool, CLI verb or MCP
+   * call is given it — what a caller may ask for is `ask`, never free. Deny
+   * leaves the rule alone, and so does a replace, which has no rule to free.
+   */
+  allow(id: string, answer: UseAnswer, free = false): void {
     const open = this.openUses.get(id);
     if (!open) throw new Error("That ask is closed: it was answered elsewhere, ran out of time, or its command was stopped.");
     if (answer === "lasting" && open.agentId && !open.view.replace) {
       const until = this.now() + LASTING_MS;
       for (const name of open.names) this.lasting.set(`${open.agentId} ${name}`, until);
+    }
+    if (free && answer !== "deny" && !open.view.replace) {
+      for (const name of open.names) this.switchUse(name, "free", "you, from the use dialog");
+      this.persist();
     }
     this.endUse(id, answer === "deny" ? "denied" : "owner", answer === "deny" ? "the owner pressed Deny" : answer === "lasting" ? "the owner allowed it for 15 minutes" : "the owner allowed it once");
   }
@@ -657,11 +669,19 @@ export class Vault {
 
   /** The owner's switch, from Settings. */
   setUse(name: string, use: UseRule): VaultItemView {
-    const meta = this.items.get(name);
-    if (!meta) throw new Error(`No item ${name} in the vault.`);
-    meta.use = use;
+    if (!this.items.has(name)) throw new Error(`No item ${name} in the vault.`);
+    this.switchUse(name, use, "you, in Settings");
     this.persist();
     return this.item(name)!;
+  }
+
+  /** A rule changed, and a line in the item's history when it really did change. The caller persists. */
+  private switchUse(name: string, use: UseRule, by: string): void {
+    const meta = this.items.get(name);
+    if (!meta || meta.use === use) return;
+    meta.use = use;
+    meta.history = withEvent(meta.history, { at: this.now(), by, how: use });
+    this.log(`${name} made ${use === "free" ? "free to use" : "to ask each use"} by ${by}`);
   }
 
   /** The item and its value gone. An env file it was written to keeps its copy, and the page says so. */

@@ -39,7 +39,9 @@
  *
  * A `use` ask — a command waiting for the owner to allow an item — is drawn
  * here too, in the same place, with Allow once, Allow for 15 minutes and
- * Deny; one that would replace items with what a command prints (`vault
+ * Deny, and "Don't ask again for this item", which an Allow carries to the
+ * server to make the item free (as Settings → Vault's switch does, and
+ * undone there); Deny ignores it. One that would replace items with what a command prints (`vault
  * capture`) has Replace and Deny only. A capture that replaces nothing is
  * not drawn at all: it asks the owner nothing, so it is written in the
  * vault's history (Settings → Vault) and interrupts nobody — the owner,
@@ -390,9 +392,10 @@ function Outcomes({ ask, outcomes, onClose }: { ask: Values; outcomes: FieldOutc
 function UseAsk({ ask, more }: { ask: Use; more: string | null }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [free, setFree] = useState(false);
   const answer = (a: UseAnswer) => {
     setBusy(true);
-    void api.allowVault(ask.id, a).catch((err: unknown) => {
+    void api.allowVault(ask.id, a, free && !ask.replace).catch((err: unknown) => {
       setBusy(false);
       setError(err instanceof Error ? err.message : String(err));
     });
@@ -413,6 +416,11 @@ function UseAsk({ ask, more }: { ask: Use; more: string | null }) {
       <p className="vault-where">
         in <code>{ask.cwd}</code> · {ask.items.map((i) => i.name).join(", ")}
       </p>
+      {!ask.replace && (
+        <label className="vault-use vault-free">
+          <input type="checkbox" checked={free} disabled={busy} onChange={(event) => setFree(event.target.checked)} /> Don't ask again for {ask.items.length === 1 ? "this item" : "these items"}
+        </label>
+      )}
       {error && <p className="dialog-move-refused">{error}</p>}
       <div className="dialog-actions vault-use-actions">
         <button type="button" className="button button-quiet" onClick={() => answer("deny")} disabled={busy}>

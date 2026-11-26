@@ -12,7 +12,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, sy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { envShape, quoteEnv, setVariable } from "../../shared/envfile";
-import { adoptAskRequest, adoptValues, defaultUse, FILE_MAX, itemLine, outcomeLines, sizeWords, validItemName, type AnswerValue, type AskRequest, type VaultAsk } from "../../shared/vaultitems";
+import { adoptAskRequest, adoptValues, defaultUse, FILE_MAX, itemLine, lastKept, outcomeLines, sizeWords, validItemName, type AnswerValue, type AskRequest, type VaultAsk } from "../../shared/vaultitems";
 import { decodePieces, encodePieces, piecesOf, type SecretStore } from "../src/keychain";
 import { envPath, writeEnvVariable } from "../src/vaultfile";
 import { Vault } from "../src/vaultstore";
@@ -428,6 +428,26 @@ describe("approval", () => {
     timers.at(-1)!();
     expect(await slow).toBe("denied");
     expect(() => vault.allow(ask.id, "once")).toThrow(/closed/);
+  });
+
+  it("makes an item free on an Allow with Don't ask again, writes it in its history, and ignores it on Deny", async () => {
+    await vault.capture([{ name: "a/prod", label: "prod", value: "FAKE", use: "ask" }, { name: "a/live", label: "live", value: "FAKE", use: "ask" }], { by: "a shell", command: "mint", cwd: "~" }, new Set());
+    const denied = vault.approve(run("a12", vault.item("a/prod")!), () => {});
+    vault.allow((shown.at(-1)!.at(-1) as VaultAsk).id, "deny", true);
+    expect(await denied).toBe("denied");
+    expect(vault.item("a/prod")!.use).toBe("ask");
+    const allowed = vault.approve(run("a12", vault.item("a/prod")!, vault.item("a/live")!), () => {});
+    vault.allow((shown.at(-1)!.at(-1) as VaultAsk).id, "once", true);
+    expect(await allowed).toBe("owner");
+    for (const name of ["a/prod", "a/live"]) {
+      const it = vault.item(name)!;
+      expect(it.use).toBe("free");
+      expect(it.history![0]).toMatchObject({ how: "free", by: "you, from the use dialog" });
+      expect(lastKept(it.history)!.how).toBe("captured");
+    }
+    expect(await vault.approve(run("a12", vault.item("a/prod")!), () => {})).toBe("free");
+    // Reversible in Settings, and that is written down too.
+    expect(vault.setUse("a/prod", "ask").history![0]).toMatchObject({ how: "ask", by: "you, in Settings" });
   });
 });
 

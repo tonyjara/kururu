@@ -356,15 +356,30 @@ export interface FileFacts {
 }
 
 /**
- * How an item's value came to be kept, newest first in its history: pasted
+ * An item's history, newest first: how its value came to be kept — pasted
  * into the dialog, captured from a command's output (`vault capture`, with
- * the command as written, masked), or made a file by `vault convert`.
+ * the command as written, masked), or made a file by `vault convert` — and
+ * when its rule was switched, `free` or `ask`, by the owner in Settings or
+ * with "Don't ask again" in the use dialog. `by` says which.
  */
 export interface ItemEvent {
   at: number;
   by: string;
-  how: "pasted" | "captured" | "converted";
+  how: "pasted" | "captured" | "converted" | UseRule;
   command?: string;
+}
+
+/** Every `how` an event may have, for reading the file back. */
+export const EVENT_HOWS: readonly ItemEvent["how"][] = ["pasted", "captured", "converted", "free", "ask"];
+
+/** The latest event that put a value in the item, skipping rule switches: what "captured … from" is drawn off. */
+export function lastKept(history: readonly ItemEvent[] | undefined): ItemEvent | null {
+  return history?.find((e) => e.how === "pasted" || e.how === "captured" || e.how === "converted") ?? null;
+}
+
+/** The latest switch of the item's rule, or null when it has kept the one it started with. */
+export function lastSwitch(history: readonly ItemEvent[] | undefined): ItemEvent | null {
+  return history?.find((e) => e.how === "free" || e.how === "ask") ?? null;
 }
 
 /** How many of those an item keeps. */
@@ -412,7 +427,7 @@ export function itemLine(item: VaultItemView): string {
   const env = item.env.map((e) => `${e.variable} in ${e.file}`).join(", ");
   const used = item.lastUse ? `, last used ${new Date(item.lastUse.at).toISOString().slice(0, 16).replace("T", " ")} by ${item.lastUse.by}` : "";
   const file = item.file ? `${kindWords(item.file)}; ` : "";
-  const last = item.history?.[0];
+  const last = lastKept(item.history);
   const captured = last?.how === "captured" ? `, captured ${new Date(last.at).toISOString().slice(0, 16).replace("T", " ")} by ${last.by}` : "";
   return `${item.name} — ${item.label} (${file}${item.use === "ask" ? "asks before each use" : "free to use"}${env ? `; also written to ${env}` : ""}${captured}${used})`;
 }

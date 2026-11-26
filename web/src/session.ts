@@ -1412,9 +1412,9 @@ export function answerVault(ask: string, values: Record<string, WireValue> | nul
   return request((id) => ({ type: "vault-answer", id, ask, values, uses })) as Promise<FieldOutcome[]>;
 }
 
-/** The owner's answer to a command waiting to use a vault item. */
-export function allowVault(ask: string, answer: UseAnswer): Promise<unknown> {
-  return request((id) => ({ type: "vault-allow", id, ask, answer }));
+/** The owner's answer to a command waiting to use a vault item; `free` is the dialog's "Don't ask again", sent only with an allow. */
+export function allowVault(ask: string, answer: UseAnswer, free = false): Promise<unknown> {
+  return request((id) => ({ type: "vault-allow", id, ask, answer, ...(free && answer !== "deny" ? { free: true } : {}) }));
 }
 
 /** Settings → Vault's own sections: the items kept, their rules, recent uses. */
